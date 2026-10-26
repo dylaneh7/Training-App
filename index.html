@@ -1,0 +1,587 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <meta name="theme-color" content="#0b0d10" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Hybrid Coach" />
+  <link rel="manifest" href="./manifest.webmanifest" />
+  <link rel="apple-touch-icon" href="./icon-180.png" />
+  <title>Hybrid Coach</title>
+  <style>
+    :root{
+      --bg:#0b0d10; --panel:#14181e; --card:#1b2027; --border:#303741;
+      --text:#f5f7fa; --muted:#a9b2bf; --accent:#8fb8ff; --accent2:#9ed7b4;
+      --warn:#ffd28a; --bad:#ff9b9b; --ok:#9ed7b4;
+    }
+    *{box-sizing:border-box}
+    html,body{margin:0;background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",sans-serif}
+    body{min-height:100vh;padding:env(safe-area-inset-top) 0 env(safe-area-inset-bottom)}
+    button,input,select,textarea{font:inherit}
+    button{cursor:pointer}
+    .app{max-width:980px;margin:0 auto;padding:14px}
+    .top{display:flex;gap:12px;align-items:center;justify-content:space-between;margin-bottom:14px}
+    .brand{display:flex;gap:10px;align-items:center}
+    .brand img{width:44px;height:44px;border-radius:12px}
+    h1{font-size:22px;margin:0}.sub{font-size:12px;color:var(--muted)}
+    .pill{border:1px solid var(--border);border-radius:999px;padding:7px 10px;font-size:12px;color:var(--muted)}
+    .grid4{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+    .metric,.card{background:var(--card);border:1px solid var(--border);border-radius:16px}
+    .metric{padding:12px}.metric .k{font-size:12px;color:var(--muted)}.metric .v{font-size:22px;font-weight:700;margin-top:2px}
+    .notice{background:var(--panel);border:1px solid var(--border);border-radius:14px;padding:11px;margin:12px 0;font-size:13px}
+    .tabs{display:flex;gap:7px;overflow:auto;padding-bottom:4px;margin-bottom:12px;scrollbar-width:none}
+    .tabs::-webkit-scrollbar{display:none}
+    .tab{white-space:nowrap;min-height:44px;border:1px solid var(--border);color:var(--text);background:transparent;border-radius:11px;padding:0 14px}
+    .tab.active{background:#1d3352;border-color:#4d78b3}
+    .toolbar{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px}
+    label{font-size:12px;color:var(--muted)}
+    select,input,textarea{width:100%;border:1px solid var(--border);background:var(--panel);color:var(--text);border-radius:10px;padding:10px;min-height:42px}
+    textarea{resize:vertical}
+    .card{padding:14px;margin-bottom:12px}
+    .dayhead{display:flex;gap:10px;justify-content:space-between;align-items:flex-start}
+    .dayhead h2{margin:2px 0 0;font-size:19px}
+    .coverage{font-size:12px;color:var(--muted);margin-top:4px;line-height:1.45}
+    .split2{display:grid;grid-template-columns:.8fr 1.2fr;gap:12px;margin-top:12px}
+    .section-title{display:flex;justify-content:space-between;gap:10px;align-items:center;margin-bottom:8px}
+    .checkline{display:flex;gap:8px;align-items:center;font-weight:700;color:var(--text);font-size:16px}
+    input[type=checkbox]{width:21px;height:21px;min-height:auto;accent-color:#7aa7ee}
+    .tiny{font-size:11px;color:var(--muted)}
+    .fields2{display:grid;grid-template-columns:1fr 1fr;gap:7px}
+    .fields4{display:grid;grid-template-columns:repeat(4,1fr);gap:7px}
+    .exercise{border:1px solid var(--border);border-radius:13px;padding:10px;margin-top:8px;background:#171b21}
+    .exhead{display:flex;gap:8px;justify-content:space-between;align-items:flex-start}
+    .exmain{flex:1;min-width:0}
+    .howbtn{min-height:40px;border:1px solid var(--border);background:var(--panel);color:var(--text);border-radius:9px;padding:0 11px}
+    .how{margin-top:8px;background:var(--panel);border-radius:10px;padding:10px;font-size:13px;line-height:1.5}
+    .how strong{color:var(--accent2)}
+    .setrow{display:grid;grid-template-columns:34px 1fr .85fr .72fr;gap:6px;align-items:center;margin-top:5px}
+    .setrow.head{font-size:11px;color:var(--muted)}
+    .setrow input{padding:8px;min-height:39px}
+    .complete{opacity:.62}
+    .btn{border:1px solid var(--border);background:var(--panel);color:var(--text);border-radius:10px;min-height:44px;padding:0 13px}
+    .btn.primary{background:#1d3352;border-color:#4d78b3}
+    .btn.good{background:#173624;border-color:#3b7152}
+    .btn.warn{background:#3a2b14;border-color:#7b6030}
+    .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+    .statlist{display:grid;gap:6px}.statline{display:flex;justify-content:space-between;gap:10px;border-bottom:1px solid #242a31;padding-bottom:5px}
+    .dash2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+    .volumegrid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+    .guidebox{padding:10px;border:1px solid var(--border);border-radius:11px;background:var(--panel)}
+    .status-green{color:var(--ok)}.status-yellow{color:var(--warn)}.status-red{color:var(--bad)}
+    .hidden{display:none!important}
+    .install-steps li{margin-bottom:8px;line-height:1.4}
+    @media(max-width:720px){
+      .grid4{grid-template-columns:1fr 1fr}
+      .split2,.dash2,.volumegrid{grid-template-columns:1fr}
+      .fields4{grid-template-columns:1fr 1fr}
+      .toolbar{grid-template-columns:1fr}
+    }
+  </style>
+</head>
+<body>
+<div class="app">
+  <div class="top">
+    <div class="brand">
+      <img src="./icon-180.png" alt="">
+      <div><h1>Hybrid Coach</h1><div class="sub">Half marathon + progressive strength</div></div>
+    </div>
+    <div class="row" style="justify-content:flex-end">
+      <button id="saveNow" class="btn" type="button">Save Now</button>
+      <div id="saveState" class="pill">Saved locally</div>
+    </div>
+  </div>
+
+  <div class="grid4">
+    <div class="metric"><div class="k">Runs</div><div id="runTop" class="v">0 / 48</div></div>
+    <div class="metric"><div class="k">Lifts</div><div id="liftTop" class="v">0 / 48</div></div>
+    <div class="metric"><div class="k">Week miles</div><div id="mileTop" class="v">0.0</div></div>
+    <div class="metric"><div class="k">Readiness</div><div id="readyTop" class="v">—</div></div>
+  </div>
+
+  <div class="notice">
+    <strong>Everything you log here saves immediately on this device.</strong> Use <b>Coach Share</b> to send me your training log. I can combine it with wearable/Health data you have connected in ChatGPT.
+  </div>
+
+  <div class="tabs">
+    <button class="tab active" data-tab="workout">Workout</button>
+    <button class="tab" data-tab="dashboard">Dashboard</button>
+    <button class="tab" data-tab="volume">Volume</button>
+    <button class="tab" data-tab="progression">Progression</button>
+    <button class="tab" data-tab="shoes">Shoes</button>
+    <button class="tab" data-tab="plan">Run Plan</button>
+    <button class="tab" data-tab="coach">Coach Share</button>
+    <button class="tab" data-tab="install">Install</button>
+  </div>
+
+  <section data-panel="workout">
+    <div class="toolbar">
+      <label>Training week<select id="week"></select></label>
+      <label>Training day<select id="day">
+        <option value="Mon">Monday — Push</option>
+        <option value="Tue">Tuesday — Pull</option>
+        <option value="Wed">Wednesday — Upper Support</option>
+        <option value="Thu">Thursday — Legs</option>
+      </select></label>
+    </div>
+    <div id="workout"></div>
+  </section>
+
+  <section data-panel="dashboard" class="hidden">
+    <div class="grid4">
+      <div class="metric"><div class="k">Week mileage</div><div id="dashMiles" class="v">0</div></div>
+      <div class="metric"><div class="k">Logged work sets</div><div id="dashSets" class="v">0</div></div>
+      <div class="metric"><div class="k">Average run RPE</div><div id="dashRpe" class="v">—</div></div>
+      <div class="metric"><div class="k">Avg readiness</div><div id="dashReady" class="v">—</div></div>
+    </div>
+    <div class="dash2" style="margin-top:10px">
+      <div class="card"><h3>Current-week muscle sets</h3><div id="weekVolume" class="statlist"></div></div>
+      <div class="card"><h3>Pain flags</h3><div id="painFlags"></div></div>
+      <div class="card"><h3>Shoe mileage</h3><div id="shoeDash" class="statlist"></div></div>
+      <div class="card"><h3>Recovery</h3><div id="recoveryDash"></div></div>
+    </div>
+  </section>
+
+  <section data-panel="volume" class="hidden">
+    <div class="notice">Direct planned hard sets are separated by muscle region. Warm-up sets are not counted.</div>
+    <div id="targetVolume" class="volumegrid"></div>
+  </section>
+
+  <section data-panel="progression" class="hidden">
+    <div class="notice"><strong>Rule:</strong> compounds usually finish around 1–2 RIR. Accessories can reach 0–1 RIR on the final set. Reach the top of the rep range across your work sets with clean form before adding load.</div>
+    <div id="progressionList"></div>
+  </section>
+
+  <section data-panel="shoes" class="hidden">
+    <div class="card">
+      <h2>Running shoes</h2>
+      <div id="shoeList" class="statlist"></div>
+      <div class="row" style="margin-top:12px">
+        <input id="newShoe" placeholder="Add another shoe" style="flex:1;min-width:170px">
+        <button id="addShoe" class="btn">Add shoe</button>
+      </div>
+    </div>
+  </section>
+
+  <section data-panel="plan" class="hidden">
+    <div id="runPlan"></div>
+  </section>
+
+  <section data-panel="coach" class="hidden">
+    <div class="card">
+      <h2>Coach Share</h2>
+      <p class="tiny">This creates a compact summary of your logged training. On iPhone, Share opens the normal share sheet. Choose ChatGPT if it appears, or copy the text into our chat.</p>
+      <div class="row">
+        <button id="buildCoach" class="btn primary">Build coach log</button>
+        <button id="shareCoach" class="btn good">Share coach log</button>
+        <button id="copyCoach" class="btn">Copy</button>
+      </div>
+      <textarea id="coachText" rows="18" placeholder="Your coach log will appear here." style="margin-top:10px"></textarea>
+    </div>
+    <div class="card">
+      <h3>Backup / restore</h3>
+      <p class="tiny">Use this before changing phones or clearing Safari website data.</p>
+      <div class="row">
+        <button id="makeBackup" class="btn">Create backup</button>
+        <button id="restoreBackup" class="btn warn">Restore pasted backup</button>
+      </div>
+      <textarea id="backupText" rows="8" placeholder="Backup JSON" style="margin-top:10px"></textarea>
+      <div id="backupMsg" class="tiny" style="margin-top:6px"></div>
+    </div>
+  </section>
+
+  <section data-panel="install" class="hidden">
+    <div class="card">
+      <h2>Add Hybrid Coach to your iPhone Home Screen</h2>
+      <ol class="install-steps">
+        <li>Open the hosted Hybrid Coach link in <strong>Safari</strong>.</li>
+        <li>Tap Safari’s <strong>Share</strong> button.</li>
+        <li>Choose <strong>Add to Home Screen</strong>.</li>
+        <li>Turn on <strong>Open as Web App</strong>.</li>
+        <li>Tap <strong>Add</strong>.</li>
+      </ol>
+      <p class="tiny">Once installed, it opens from its own Home Screen icon and can work offline after the first successful load.</p>
+    </div>
+  </section>
+</div>
+
+<script>
+(()=>{
+const STORAGE_KEY='hybridCoachData_v1';
+
+const runWeeks=[
+['Oct 26','Build','40 min easy','2×10 min tempo','8.5 mi long','30 min recovery'],
+['Nov 2','Build','45 min easy + 4 strides','3×8 min tempo','9 mi long','30 min recovery'],
+['Nov 9','Build','45 min easy','6×3 min threshold','9.5 mi long','35 min recovery'],
+['Nov 16','Cutback','40 min easy','20 min steady','8 mi long','30 min recovery'],
+['Nov 23','Build','50 min easy','2×15 min tempo','10 mi long','35 min recovery'],
+['Nov 30','Build','50 min easy + strides','4×8 min threshold','10.5 mi long','35 min recovery'],
+['Dec 7','Build','50 min easy','3×10 min tempo','11 mi long','35 min recovery'],
+['Dec 14','Cutback','45 min easy','8×2 min brisk','9 mi long','30 min recovery'],
+['Dec 21','Peak build','50 min easy','2×15 + 10 min tempo','11.5 mi long','35 min recovery'],
+['Dec 28','Peak','55 min easy','3×10 min threshold','12 mi long','35 min recovery'],
+['Jan 4','Taper','45 min easy','2×8 min tempo','8 mi long','30 min recovery'],
+['Jan 11','Race week','35 min + strides','3×5 min race effort','25 min easy','20 min shakeout']
+];
+
+const E=(name,sets,reps,region,role,swaps,how)=>({name,sets,reps,region,role,swaps,how});
+
+const training={
+Mon:{title:'Push — Chest + All 3 Delt Heads + Bench Accessories',
+coverage:'Upper chest · mid chest · lower chest · anterior delt · lateral delt · posterior delt · triceps · serratus',
+ex:[
+E('Flat barbell bench press',4,'4–6','Mid chest','Bench strength',['DB bench press','Smith machine bench press','Machine chest press'],'Retract and depress the shoulder blades, plant the feet, and keep a comfortable natural arch. Lower the bar to the lower-to-mid chest with forearms nearly vertical. Keep elbows roughly 45–70° from the torso. Drive through the floor and press slightly back toward the rack. Do not bounce the bar or let the shoulders roll forward.'),
+E('Incline dumbbell press',3,'6–10','Upper chest','Upper-pec press',['Incline barbell press','Incline Smith press','Incline machine press'],'Use a low-to-moderate incline, about 20–40°. Keep the upper back tight against the bench. Lower toward the upper chest until you feel a chest stretch without the shoulders dumping forward, then press upward and slightly inward.'),
+E('Weighted dip — chest bias',3,'6–10','Lower chest','Lower-pec press',['Decline bench press','Decline machine press','High-to-low cable press'],'Lean slightly forward. Descend only as far as the shoulder stays comfortable, keeping the chest angle forward. Drive up smoothly. If dips irritate the shoulder, switch to a decline press.'),
+E('Seated dumbbell shoulder press',3,'6–10','Anterior delt','Shoulder strength',['Machine shoulder press','Neutral-grip DB shoulder press','Arnold press'],'Sit tall with ribs stacked over the pelvis. Begin near shoulder height with forearms vertical. Press overhead without turning the movement into a low-back arch. Finish with the load stacked over the shoulders.'),
+E('Chest-supported lateral raise',3,'10–15','Lateral delt','Superset A',['Cable lateral raise','Machine lateral raise','Incline-bench lateral raise'],'Lie chest-down on a low incline bench. Keep a soft elbow bend. Raise the upper arms out and slightly forward until about shoulder height. Lead with the elbows and keep the upper traps relaxed.'),
+E('Standing lateral raise',3,'12–20','Lateral delt','Superset A',['Single-arm cable lateral raise','Machine lateral raise','Lean-away cable lateral raise'],'Stand tall. Raise the arms in the scapular plane, slightly forward of directly sideways. Stop around shoulder height. Avoid swinging, shrugging, or turning the movement into an upright row.'),
+E('Single-arm cable rear-delt fly',3,'12–20','Posterior delt','Rear-delt isolation',['Reverse pec deck','Chest-supported rear-delt raise','Face pull'],'Set the cable around shoulder height. Reach slightly across the body, then sweep the upper arm outward from the shoulder. Keep a soft elbow bend and avoid turning it into a row.'),
+E('Close-grip bench press',3,'5–8','Triceps','Bench accessory',['JM press','Smith close-grip bench','Weighted close-grip push-up'],'Use a moderately narrow grip, not hands touching. Keep wrists over elbows and elbows tracking naturally. Lower with control and press hard while staying tight.'),
+E('Overhead cable triceps extension',3,'10–15','Triceps long head','Triceps',['DB overhead extension','EZ-bar skull crusher','Incline skull crusher'],'Keep upper arms pointed forward or slightly upward and relatively fixed. Let the elbows bend until the long head of the triceps stretches, then extend fully without moving the shoulders excessively.'),
+E('Rope pressdown',2,'10–15','Triceps lateral/medial','Triceps',['Straight-bar pressdown','Single-arm cable pressdown','V-bar pressdown'],'Pin the upper arms near the ribs. Extend only through the elbows. Separate the rope slightly at the bottom and squeeze, then return under control.'),
+E('Push-up plus',2,'12–20','Serratus anterior','Bench/scapular accessory',['Cable serratus punch','Serratus wall slide'],'At the top of a push-up, continue pushing the floor away so the shoulder blades wrap forward around the rib cage. Keep the neck relaxed and avoid shrugging.')
+]},
+Tue:{title:'Pull — Complete Back + Biceps + Grip',
+coverage:'Lat width · lower/lengthened lats · mid-back thickness · rhomboids · upper traps · lower traps · rear delts · rotator cuff · both biceps heads · brachialis · brachioradialis · forearms · grip',
+ex:[
+E('Weighted pull-up / neutral pulldown',4,'5–8','Lat width','Primary vertical pull',['Neutral-grip lat pulldown','Assisted pull-up','Chin-up'],'Begin from long arms. Initiate by bringing the shoulders down and driving the elbows toward the ribs. Keep the torso mostly tall and avoid excessive swinging or turning it into a row.'),
+E('Chest-supported T-bar row',4,'6–10','Mid back','Heavy thickness',['Chest-supported DB row','Plate-loaded row','Seal row'],'Keep the chest firmly supported. Reach the arms long at the bottom, then drive the elbows toward the lower-to-mid ribs. Pause without cranking the shoulders excessively behind the body.'),
+E('Single-arm cable lat row — elbow to hip',3,'8–12','Lower lats','Lat bias',['1-arm machine lat row','Half-kneeling cable lat row','1-arm DB row — lat bias'],'Reach forward to lengthen the lat, then pull the elbow down and back toward the hip. Keep the shoulder away from the ear and avoid twisting the torso.'),
+E('Wide high row',3,'8–12','Upper back','Upper-back thickness',['Wide-grip machine row','Chest-supported wide DB row','High cable row'],'Use a wider elbow path. Pull toward the upper ribs or lower chest while retracting the shoulder blades. Keep the chest stable and avoid shrugging.'),
+E('Straight-arm cable pulldown',3,'10–15','Lats','Lengthened lat isolation',['Cable pullover','Machine pullover','DB pullover'],'Keep a soft elbow bend and stable torso. Start overhead, then sweep the upper arms toward the thighs using shoulder extension. Avoid turning it into a triceps pressdown.'),
+E('Dumbbell shrug',3,'8–12','Upper traps','Trap strength',['Smith machine shrug','Machine shrug','Trap-bar shrug'],'Let the shoulders settle at the bottom, then elevate them straight upward. Pause briefly at the top. Do not roll the shoulders in circles.'),
+E('Cable Y-raise',2,'12–15','Lower traps','Scapular control',['Prone incline Y-raise','Trap-3 raise'],'Use light resistance. Raise the arms in a Y while keeping ribs down and shoulders controlled. Focus on smooth upward rotation rather than moving heavy weight.'),
+E('Reverse pec deck',3,'12–20','Rear delts','Posterior shoulder',['Cable rear-delt fly','Chest-supported rear-delt raise'],'Sweep the upper arms outward with a soft elbow bend. Keep the traps relaxed and avoid turning the exercise into a row.'),
+E('Face pull with external rotation',2,'12–20','Rotator cuff / rear delt','Shoulder health',['Cable external rotation','Band face pull'],'Pull the rope toward eye/forehead level, then finish with the hands separating and forearms rotating backward. Keep the weight light enough to control the shoulder blades.'),
+E('Incline dumbbell curl',3,'8–12','Biceps long head','Long-head bias',['Bayesian cable curl','Behind-body cable curl'],'Let the arms hang slightly behind the torso. Keep the upper arms stable while curling. Control the fully lengthened position at the bottom.'),
+E('Preacher curl',3,'8–12','Biceps short head','Short-head bias',['Machine preacher curl','Spider curl','EZ-bar preacher curl'],'Keep the upper arms supported. Lower until the elbow is nearly extended, then curl without lifting the upper arm from the pad.'),
+E('Hammer curl',3,'10–15','Brachialis / brachioradialis','Elbow-flexor accessory',['Rope hammer curl','Cross-body hammer curl'],'Keep a neutral thumb-up grip. Curl without swinging the torso or driving the elbows far forward. Lower fully and slowly.'),
+E('Reverse EZ-bar curl',2,'10–15','Forearms / brachioradialis','Forearm accessory',['Cable reverse curl','DB reverse curl'],'Use an overhand grip with neutral wrists. Keep elbows close and curl with lighter weight than a regular biceps curl.'),
+E('Farmer carry',2,'30–45 sec','Grip / forearms','Grip finisher',['Dead hang','Heavy static DB hold'],'Stand tall with heavy implements at the sides. Keep ribs stacked, shoulders controlled, and grip hard. Walk slowly without leaning side to side.')
+]},
+Wed:{title:'Upper Support — Bench + Back Frequency',
+coverage:'Chest · upper back · lats · lateral delt · rear delt · triceps · biceps · rotator cuff',
+ex:[
+E('Paused bench press',3,'5–8','Mid chest','Bench technique',['DB bench press','Machine chest press'],'Use your normal bench setup. Pause the bar motionless on the chest for about one second while staying tight, then drive up without losing your position.'),
+E('Low-to-high cable fly',2,'12–15','Upper chest','Upper-pec accessory',['Incline cable fly','Incline machine press'],'Start the handles low and sweep the hands upward and inward toward upper-chest level. Keep a soft elbow bend and avoid shrugging.'),
+E('Neutral-grip pulldown',3,'8–12','Lats','Second back exposure',['Assisted neutral pull-up','Single-arm pulldown'],'Pull elbows toward the sides of the ribs while keeping the chest tall. Control the full overhead stretch.'),
+E('Chest-supported machine row',3,'8–12','Mid back','Second row exposure',['Cable row','Chest-supported DB row'],'Keep the torso supported and drive elbows backward. Pause briefly, then allow a controlled reach forward.'),
+E('Cable lateral raise',2,'12–20','Lateral delt','Shoulder volume',['Machine lateral raise','DB lateral raise'],'Keep tension throughout. Raise the upper arm slightly forward of the side and stop around shoulder height.'),
+E('Cable rear-delt fly',2,'15–20','Posterior delt','Posterior volume',['Reverse pec deck','Chest-supported rear-delt raise'],'Move the upper arm outward from the shoulder with a soft elbow bend. Keep the traps relaxed and avoid rowing.'),
+E('Rope pressdown',2,'10–15','Triceps','Bench accessory',['Single-arm pressdown','Straight-bar pressdown'],'Keep the upper arms fixed and extend fully through the elbows. Control the return.'),
+E('Cable curl',2,'10–15','Biceps','Arm frequency',['Machine curl','DB curl'],'Keep elbows stable and curl smoothly without using hip momentum.'),
+E('Cable external rotation',2,'15–20','Rotator cuff','Shoulder accessory',['Band external rotation','Side-lying DB external rotation'],'Keep the elbow close to the side and bent around 90°. Rotate the forearm outward while the upper arm and torso remain still.')
+]},
+Thu:{title:'Legs — Heavy + Hypertrophy',
+coverage:'Quads · hamstrings · glutes · calves · soleus · core',
+ex:[
+E('Back squat / hack squat',4,'5–8','Quads','Main squat',['Hack squat','Front squat','Smith squat'],'Brace before descending, keep the whole foot planted, knees tracking with the toes, and torso balanced over mid-foot. Descend only as deep as you can maintain control, then drive up.'),
+E('Romanian deadlift',4,'6–10','Hamstrings','Hip hinge',['DB Romanian deadlift','Good morning','Trap-bar RDL'],'Keep knees softly bent and push the hips backward. Keep the load close to the legs and spine neutral. Stop when hamstring tension limits further hip motion, then drive the hips forward.'),
+E('Leg press',4,'8–12','Quads','Heavy machine',['Hack squat','Belt squat','Smith squat'],'Keep the pelvis against the pad and lower under control. Let the knees bend deeply while heels remain planted. Press through the whole foot without violently locking the knees.'),
+E('Bulgarian split squat',3,'8–10/leg','Quads / glutes','Unilateral',['Reverse lunge','Step-up','Smith split squat'],'Place most of the load on the front leg. Lower the rear knee toward the floor while the front knee tracks over the toes. Drive through the front foot.'),
+E('Leg extension',3,'12–15','Quads','Quad isolation',['Spanish squat','Reverse Nordic'],'Keep the thigh fixed against the pad. Extend smoothly, squeeze the quadriceps, then lower under control.'),
+E('Seated leg curl',4,'10–15','Hamstrings','Hamstring isolation',['Lying leg curl','Standing leg curl','Nordic curl'],'Keep the hips pinned to the machine. Curl through the knee and squeeze at peak flexion. Control the stretch back to nearly straight.'),
+E('Hip thrust',3,'8–12','Glutes','Hip extension',['Smith hip thrust','Glute bridge'],'Drive through the feet and extend the hips while keeping ribs down. Finish with a glute squeeze instead of hyperextending the low back.'),
+E('Standing calf raise',4,'10–15','Gastrocnemius','Calves',['Smith calf raise','Leg-press calf raise'],'Lower into a full controlled stretch, then rise as high as possible on the forefoot. Avoid bouncing.'),
+E('Seated soleus raise',3,'12–20','Soleus','Calves',['Bent-knee calf raise','Seated machine calf raise'],'Keep the knee bent throughout. Lower the heel into a stretch, then plantarflex fully and pause at the top.'),
+E('Cable crunch / ab wheel',3,'10–15','Core','Trunk',['Machine crunch','Hanging knee raise'],'For cable crunches, curl the ribs toward the pelvis instead of just hinging at the hips. For ab wheel, brace hard and avoid letting the low back sag.')
+]}
+};
+
+const defaultState=()=>({
+  version:1,
+  days:{},
+  shoes:['Brooks Glycerin Max','New Balance 1080 v14','Nike Zoom Fly','Adidas Adizero','Nike Vomero Premium']
+});
+let state=load();
+
+const week=document.getElementById('week'), day=document.getElementById('day');
+runWeeks.forEach((w,i)=>{const o=document.createElement('option');o.value=i;o.textContent=`Week ${i+1} · ${w[0]} · ${w[1]}`;week.appendChild(o)});
+
+function load(){
+  try{
+    const raw=localStorage.getItem(STORAGE_KEY);
+    if(raw){const o=JSON.parse(raw); if(o&&o.days&&o.shoes)return o}
+  }catch(e){}
+  return defaultState();
+}
+function save(){
+  try{
+    localStorage.setItem(STORAGE_KEY,JSON.stringify(state));
+    document.getElementById('saveState').textContent='Saved locally';
+  }catch(e){
+    document.getElementById('saveState').textContent='Save failed';
+  }
+}
+function key(w=week.value,d=day.value){return `${w}-${d}`}
+function data(){
+  const k=key();
+  if(!state.days[k])state.days[k]={
+    runDone:false,liftDone:false,
+    run:{miles:'',time:'',hr:'',rpe:'',shoe:state.shoes[0],notes:'',carbs:'',fluid:'',sodium:'',gi:''},
+    rec:{sleep:'',sore:'',fatigue:'',motivation:'',restHR:'',hrv:'',painArea:'',pain:'',painNotes:''},
+    sets:{},choice:{},openHow:null
+  };
+  return state.days[k];
+}
+function factor(){const w=+week.value; return (w===3||w===7)?.65:w===10?.55:w===11?.45:1}
+function scaled(n){return Math.max(2,Math.round(n*factor()))}
+function runName(){const w=runWeeks[+week.value];return day.value==='Mon'?w[2]:day.value==='Tue'?w[3]:day.value==='Wed'?w[4]:w[5]}
+function runGuide(){
+  if(day.value==='Mon')return'Easy aerobic. HR roughly 139–153 bpm; conversational.';
+  if(day.value==='Tue')return'Quality session: 12 min easy warm-up, complete the prescribed work controlled-hard with easy jog recovery, then about 10 min cool-down.';
+  if(day.value==='Wed')return'Long-run day. Keep it conversational, practice fueling early, and do not race the final miles.';
+  return'Short recovery run before legs. Keep HR roughly 133–147 bpm and ignore pace.';
+}
+function esc(v){return String(v??'').replace(/"/g,'&quot;')}
+function options(arr,v){return arr.map(x=>`<option ${x===v?'selected':''}>${x}</option>`).join('')}
+function readiness(x){
+  const sleep=+x.rec.sleep,sore=+x.rec.sore,fat=+x.rec.fatigue,mot=+x.rec.motivation;
+  if(!sleep||!sore||!fat||!mot)return {label:'—',score:null,class:'',msg:'Complete sleep, soreness, fatigue and motivation.'};
+  let s=100;
+  if(sleep<7)s-=(7-sleep)*12;
+  s-=(sore-1)*3; s-=(fat-1)*3.5; s-=(10-mot)*2.5;
+  if(+x.rec.pain>=4)s-=10+(+x.rec.pain-4)*4;
+  s=Math.max(0,Math.min(100,Math.round(s)));
+  if(s>=75)return{label:'Green',score:s,class:'status-green',msg:'Train as written if movement feels normal.'};
+  if(s>=55)return{label:'Yellow',score:s,class:'status-yellow',msg:'Consider removing one compound set and reducing quality running about 15–20%.'};
+  return{label:'Red',score:s,class:'status-red',msg:'Make the run easy, reduce lifting load/volume, and avoid movements that worsen pain.'};
+}
+
+function render(){
+  const x=data(), T=training[day.value], r=readiness(x);
+  const root=document.getElementById('workout');
+  root.innerHTML=`
+  <article class="card">
+    <div class="dayhead">
+      <div><div class="tiny">${day.value.toUpperCase()} · DOUBLE SESSION</div><h2>${T.title}</h2><div class="coverage">${T.coverage}</div></div>
+      <div style="text-align:right"><strong class="${r.class}">${r.label}${r.score!==null?' · '+r.score+'/100':''}</strong><div class="tiny">${r.msg}</div></div>
+    </div>
+
+    <div class="guidebox" style="margin-top:12px">
+      <strong>Daily recovery</strong>
+      <div class="fields4" style="margin-top:8px">
+        ${[['sleep','Sleep hours'],['sore','Leg soreness 1–10'],['fatigue','Fatigue 1–10'],['motivation','Motivation 1–10'],['restHR','Resting HR'],['hrv','HRV'],['painArea','Pain area'],['pain','Pain 0–10']].map(([k,l])=>`<label>${l}<input data-rec="${k}" type="${k==='painArea'?'text':'number'}" value="${esc(x.rec[k])}"></label>`).join('')}
+      </div>
+      <label style="display:block;margin-top:8px">Pain notes<input data-rec="painNotes" value="${esc(x.rec.painNotes)}"></label>
+    </div>
+
+    <div class="split2">
+      <section class="${x.runDone?'complete':''}">
+        <div class="section-title"><label class="checkline"><input id="runDone" type="checkbox" ${x.runDone?'checked':''}> Running</label></div>
+        <strong>${runName()}</strong>
+        <p class="tiny" style="font-size:12px;line-height:1.5">${runGuide()}</p>
+        <div class="fields2">
+          ${[['miles','Actual miles'],['time','Time'],['hr','Avg HR'],['rpe','RPE 1–10']].map(([k,l])=>`<label>${l}<input data-run="${k}" type="${k==='time'?'text':'number'}" value="${esc(x.run[k])}"></label>`).join('')}
+        </div>
+        <label style="display:block;margin-top:8px">Shoe<select data-run="shoe">${options(state.shoes,x.run.shoe)}</select></label>
+        <label style="display:block;margin-top:8px">Run notes<input data-run="notes" value="${esc(x.run.notes)}" placeholder="How it felt, terrain, weather…"></label>
+        ${day.value==='Wed'?`<div class="guidebox" style="margin-top:10px"><strong>Long-run fueling</strong><div class="fields2" style="margin-top:8px">${[['carbs','Carbs g/hr'],['fluid','Fluid oz/hr'],['sodium','Sodium mg/hr'],['gi','GI distress 0–10']].map(([k,l])=>`<label>${l}<input data-run="${k}" type="number" value="${esc(x.run[k])}"></label>`).join('')}</div></div>`:''}
+      </section>
+
+      <section class="${x.liftDone?'complete':''}">
+        <div class="section-title">
+          <label class="checkline"><input id="liftDone" type="checkbox" ${x.liftDone?'checked':''}> Lifting</label>
+          <span class="tiny">60–90 min · work sets only</span>
+        </div>
+        <div id="exercises"></div>
+      </section>
+    </div>
+  </article>`;
+
+  document.getElementById('runDone').onchange=e=>{x.runDone=e.target.checked;save();render();updateAll()};
+  document.getElementById('liftDone').onchange=e=>{x.liftDone=e.target.checked;save();render();updateAll()};
+  root.querySelectorAll('[data-rec]').forEach(i=>i.oninput=()=>{x.rec[i.dataset.rec]=i.value;save();updateAll()});
+  root.querySelectorAll('[data-run]').forEach(i=>i.oninput=()=>{x.run[i.dataset.run]=i.value;save();updateAll()});
+
+  const holder=document.getElementById('exercises');
+  T.ex.forEach((e,ei)=>{
+    const selected=x.choice[ei]||e.name;
+    const all=[e.name,...e.swaps];
+    const c=scaled(e.sets);
+    const box=document.createElement('div');
+    box.className='exercise';
+    box.innerHTML=`
+      <div class="exhead">
+        <div class="exmain">
+          <select class="choice">${options(all,selected)}</select>
+          <div class="tiny" style="margin-top:4px">${e.region} · ${e.role} · ${c}×${e.reps}</div>
+        </div>
+        <button class="howbtn">${x.openHow===ei?'Hide':'How?'}</button>
+      </div>
+      ${x.openHow===ei?`<div class="how"><strong>How to do it</strong><br>${e.how}<br><span class="tiny"><b>Rest:</b> ${/strength|heavy|bench/i.test(e.role)?'2.5–4 min':'60–120 sec'} · Keep the working reps controlled and stop if technique breaks down.</span></div>`:''}
+      <div class="setrow head"><span>Set</span><span>Weight</span><span>Reps</span><span>RIR</span></div>`;
+    for(let s=1;s<=c;s++){
+      const sk=`${ei}-${s}`;
+      if(!x.sets[sk])x.sets[sk]={w:'',r:'',rir:''};
+      const row=document.createElement('div');
+      row.className='setrow';
+      row.innerHTML=`<span>${s}</span>
+        <input type="number" inputmode="decimal" placeholder="lb" value="${esc(x.sets[sk].w)}">
+        <input type="number" inputmode="numeric" placeholder="reps" value="${esc(x.sets[sk].r)}">
+        <input type="number" inputmode="numeric" placeholder="RIR" value="${esc(x.sets[sk].rir)}">`;
+      const ins=row.querySelectorAll('input');
+      ins[0].oninput=()=>{x.sets[sk].w=ins[0].value;save();updateAll()};
+      ins[1].oninput=()=>{x.sets[sk].r=ins[1].value;save();updateAll()};
+      ins[2].oninput=()=>{x.sets[sk].rir=ins[2].value;save();updateAll()};
+      box.appendChild(row);
+    }
+    box.querySelector('.choice').onchange=z=>{x.choice[ei]=z.target.value;save();updateAll()};
+    box.querySelector('.howbtn').onclick=()=>{x.openHow=x.openHow===ei?null:ei;save();render()};
+    holder.appendChild(box);
+  });
+  updateAll();
+}
+
+function weekStats(){
+  const wi=+week.value,out={miles:0,sets:0,rpes:[],ready:[],regions:{}};
+  ['Mon','Tue','Wed','Thu'].forEach(d=>{
+    const x=state.days[`${wi}-${d}`]; if(!x)return;
+    out.miles+=+x.run.miles||0;
+    if(+x.run.rpe)out.rpes.push(+x.run.rpe);
+    const rd=readiness(x); if(rd.score!==null)out.ready.push(rd.score);
+    training[d].ex.forEach((e,ei)=>{
+      Object.entries(x.sets).forEach(([k,v])=>{
+        if(k.startsWith(ei+'-')&&+v.r){out.sets++;out.regions[e.region]=(out.regions[e.region]||0)+1}
+      });
+    });
+  });
+  return out;
+}
+function targetVolumes(){
+  const t={};
+  Object.values(training).forEach(d=>d.ex.forEach(e=>t[e.region]=(t[e.region]||0)+e.sets));
+  return t;
+}
+function shoeMiles(){
+  const m={}; state.shoes.forEach(s=>m[s]=0);
+  Object.values(state.days).forEach(x=>{if(x.run.shoe)m[x.run.shoe]=(m[x.run.shoe]||0)+(+x.run.miles||0)});
+  return m;
+}
+function updateTop(){
+  let runs=0,lifts=0;Object.values(state.days).forEach(x=>{if(x.runDone)runs++;if(x.liftDone)lifts++});
+  document.getElementById('runTop').textContent=`${runs} / 48`;
+  document.getElementById('liftTop').textContent=`${lifts} / 48`;
+  const ws=weekStats();
+  document.getElementById('mileTop').textContent=ws.miles.toFixed(1);
+  document.getElementById('readyTop').textContent=ws.ready.length?Math.round(ws.ready.reduce((a,b)=>a+b)/ws.ready.length):'—';
+}
+function dashboard(){
+  const s=weekStats();
+  document.getElementById('dashMiles').textContent=s.miles.toFixed(1)+' mi';
+  document.getElementById('dashSets').textContent=s.sets;
+  document.getElementById('dashRpe').textContent=s.rpes.length?(s.rpes.reduce((a,b)=>a+b)/s.rpes.length).toFixed(1):'—';
+  document.getElementById('dashReady').textContent=s.ready.length?Math.round(s.ready.reduce((a,b)=>a+b)/s.ready.length)+'/100':'—';
+  document.getElementById('weekVolume').innerHTML=Object.entries(s.regions).sort((a,b)=>b[1]-a[1]).map(([k,v])=>`<div class="statline"><span>${k}</span><strong>${v} sets</strong></div>`).join('')||'<span class="tiny">No sets logged yet.</span>';
+  const pains=Object.entries(state.days).filter(([k,x])=>+x.rec.pain>=3).map(([k,x])=>`${k}: ${x.rec.painArea||'unspecified'} — ${x.rec.pain}/10`);
+  document.getElementById('painFlags').innerHTML=pains.length?pains.join('<br>'):'<span class="tiny">No pain ≥3/10 logged.</span>';
+  document.getElementById('shoeDash').innerHTML=Object.entries(shoeMiles()).map(([k,v])=>`<div class="statline"><span>${k}</span><strong>${v.toFixed(1)} mi</strong></div>`).join('');
+  document.getElementById('recoveryDash').innerHTML=s.ready.length?`Average logged readiness: <strong>${Math.round(s.ready.reduce((a,b)=>a+b)/s.ready.length)}/100</strong>`:'<span class="tiny">Complete daily recovery check-ins to build a trend.</span>';
+}
+function volume(){
+  document.getElementById('targetVolume').innerHTML=Object.entries(targetVolumes()).map(([k,v])=>`<div class="card" style="margin:0"><div class="statline"><span>${k}</span><strong>${v} direct sets/wk</strong></div></div>`).join('');
+}
+function progression(){
+  const x=data(),T=training[day.value],out=document.getElementById('progressionList');
+  out.innerHTML='';
+  T.ex.forEach((e,ei)=>{
+    const vals=Object.entries(x.sets).filter(([k,z])=>k.startsWith(ei+'-')&&+z.r).map(([k,z])=>({w:+z.w||0,r:+z.r||0,rir:Number(z.rir)}));
+    let msg='Log the work sets to receive a recommendation.';
+    const range=e.reps.match(/(\d+)[–-](\d+)/);
+    if(vals.length&&range){
+      const lo=+range[1],hi=+range[2],min=Math.min(...vals.map(z=>z.r)),rv=vals.filter(z=>Number.isFinite(z.rir)),avg=rv.length?rv.reduce((a,b)=>a+b.rir,0)/rv.length:null;
+      if(min>=hi&&(avg===null||avg>=1.5))msg='Increase the load slightly next exposure.';
+      else if(min<lo)msg='Keep or slightly reduce weight until all work sets reach the prescribed rep range.';
+      else if(avg!==null&&avg<.75)msg='Hold this load; you are already very close to failure.';
+      else msg='Keep the load and add reps next time.';
+    }
+    out.innerHTML+=`<div class="card"><strong>${x.choice[ei]||e.name}</strong><div class="tiny" style="font-size:13px;margin-top:5px">${msg}</div></div>`;
+  });
+}
+function shoes(){
+  const m=shoeMiles();
+  document.getElementById('shoeList').innerHTML=state.shoes.map(s=>`<div class="statline"><span>${s}</span><strong>${(m[s]||0).toFixed(1)} mi</strong></div>`).join('');
+}
+function plan(){
+  document.getElementById('runPlan').innerHTML=runWeeks.map((w,i)=>`<button class="card weekBtn" data-i="${i}" style="width:100%;text-align:left;color:var(--text)"><div style="display:flex;justify-content:space-between;gap:8px"><strong>Week ${i+1} · ${w[0]}</strong><span class="tiny">${w[1]}</span></div><div class="tiny" style="font-size:12px;margin-top:5px">Mon ${w[2]} · Tue ${w[3]} · Wed ${w[4]} · Thu ${w[5]}</div></button>`).join('');
+  document.querySelectorAll('.weekBtn').forEach(b=>b.onclick=()=>{week.value=b.dataset.i;show('workout');render()});
+}
+function buildCoachText(){
+  const lines=[
+    'HYBRID COACH TRAINING LOG',
+    'Please use this log together with any relevant connected Health/wearable data to give me training advice and update progression.',
+    ''
+  ];
+  Object.entries(state.days).sort().forEach(([k,x])=>{
+    const [wi,d]=k.split('-'); const w=runWeeks[+wi];
+    lines.push(`WEEK ${+wi+1} (${w?.[0]||''}) — ${d}`);
+    lines.push(`Run ${x.runDone?'✓':'○'} | Lift ${x.liftDone?'✓':'○'} | ${x.run.miles||'-'} mi | ${x.run.time||'-'} | Avg HR ${x.run.hr||'-'} | RPE ${x.run.rpe||'-'} | Shoe ${x.run.shoe||'-'}`);
+    const rd=readiness(x);
+    lines.push(`Recovery: ${rd.score!==null?rd.score+'/100':'—'} | Sleep ${x.rec.sleep||'-'}h | Soreness ${x.rec.sore||'-'} | Fatigue ${x.rec.fatigue||'-'} | Motivation ${x.rec.motivation||'-'} | RHR ${x.rec.restHR||'-'} | HRV ${x.rec.hrv||'-'}`);
+    if(+x.rec.pain)lines.push(`Pain: ${x.rec.painArea||'unspecified'} ${x.rec.pain}/10 — ${x.rec.painNotes||''}`);
+    const T=training[d];
+    if(T)T.ex.forEach((e,ei)=>{
+      const arr=Object.entries(x.sets).filter(([sk,v])=>sk.startsWith(ei+'-')&&(v.w||v.r||v.rir)).map(([sk,v])=>`${v.w||'?'}×${v.r||'?'} @${v.rir||'?'}RIR`);
+      if(arr.length)lines.push(`  ${x.choice[ei]||e.name}: ${arr.join(' | ')}`);
+    });
+    if(d==='Wed'&&(x.run.carbs||x.run.fluid||x.run.sodium||x.run.gi))lines.push(`Long-run fuel: ${x.run.carbs||'-'}g carbs/hr | ${x.run.fluid||'-'}oz/hr | ${x.run.sodium||'-'}mg sodium/hr | GI ${x.run.gi||'-'}/10`);
+    if(x.run.notes)lines.push(`Run notes: ${x.run.notes}`);
+    lines.push('');
+  });
+  return lines.join('\n');
+}
+async function shareCoach(){
+  const text=document.getElementById('coachText').value||buildCoachText();
+  document.getElementById('coachText').value=text;
+  if(navigator.share){
+    try{await navigator.share({title:'Hybrid Coach Training Log',text});return}catch(e){if(e.name==='AbortError')return}
+  }
+  try{await navigator.clipboard.writeText(text);alert('Coach log copied. Paste it into ChatGPT.')}catch(e){alert('Copy the coach log and paste it into ChatGPT.')}
+}
+function updateAll(){updateTop();dashboard();volume();progression();shoes()}
+function show(name){
+  document.querySelectorAll('[data-panel]').forEach(p=>p.classList.toggle('hidden',p.dataset.panel!==name));
+  document.querySelectorAll('.tab').forEach(b=>b.classList.toggle('active',b.dataset.tab===name));
+  if(name==='progression')progression();
+  if(name==='dashboard')dashboard();
+  if(name==='volume')volume();
+  if(name==='shoes')shoes();
+}
+
+document.querySelectorAll('.tab').forEach(b=>b.onclick=()=>show(b.dataset.tab));
+week.onchange=()=>{render()};
+day.onchange=()=>{render()};
+document.getElementById('addShoe').onclick=()=>{
+  const i=document.getElementById('newShoe'),v=i.value.trim();
+  if(v&&!state.shoes.includes(v)){state.shoes.push(v);i.value='';save();render();shoes()}
+};
+document.getElementById('buildCoach').onclick=()=>{document.getElementById('coachText').value=buildCoachText()};
+document.getElementById('shareCoach').onclick=shareCoach;
+document.getElementById('copyCoach').onclick=async()=>{
+  const text=document.getElementById('coachText').value||buildCoachText();document.getElementById('coachText').value=text;
+  try{await navigator.clipboard.writeText(text);alert('Copied.')}catch(e){alert('Select the text and copy it.')}
+};
+document.getElementById('makeBackup').onclick=()=>{document.getElementById('backupText').value=JSON.stringify({schema:1,state})};
+document.getElementById('restoreBackup').onclick=()=>{
+  try{
+    const o=JSON.parse(document.getElementById('backupText').value);
+    if(!o||o.schema!==1||!o.state)throw new Error();
+    state=o.state;save();document.getElementById('backupMsg').textContent='Backup restored.';render();updateAll();
+  }catch(e){document.getElementById('backupMsg').textContent='That backup could not be restored.'}
+};
+
+document.getElementById('saveNow').onclick=()=>{save();document.getElementById('saveState').textContent='Saved now'};
+window.addEventListener('pagehide', save);
+document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='hidden')save()});
+
+plan();render();show('workout');
+
+if('serviceWorker' in navigator){
+  window.addEventListener('load',()=>navigator.serviceWorker.register('./sw.js').catch(()=>{}));
+}
+})();
+</script>
+</body>
+</html>
