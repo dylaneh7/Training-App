@@ -46,20 +46,17 @@
     }
   }
 
+  function loadScript(src,marker){
+    try{
+      if(document.querySelector(`script[${marker}]`))return;
+      const s=document.createElement('script');s.src=src;s.async=true;s.setAttribute(marker,'1');document.body.appendChild(s);
+    }catch(err){console.warn('Hybrid Coach add-on failed to load',err)}
+  }
+
   function loadCloud(){
     applyWeek44Fallback();
-    setTimeout(()=>{
-      try{
-        if(document.querySelector('script[data-hybrid-cloud-runtime]'))return;
-        const s=document.createElement('script');
-        s.src='./cc-cloud.js?v=2';
-        s.async=true;
-        s.dataset.hybridCloudRuntime='1';
-        document.body.appendChild(s);
-      }catch(err){
-        console.warn('Hybrid Coach cloud loader failed',err);
-      }
-    },900);
+    setTimeout(()=>loadScript('./exercise-editor.js?v=1','data-hybrid-exercise-editor'),180);
+    setTimeout(()=>loadScript('./cc-cloud.js?v=3','data-hybrid-cloud-runtime'),900);
   }
 
   document.addEventListener('change',e=>{
