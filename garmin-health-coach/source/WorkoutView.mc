@@ -11,15 +11,23 @@ class WorkoutView extends WatchUi.View {
     var _editingField = 0;
     var _editValue = 0;
     var _originalValue = 0;
+    var _days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
     function initialize() {
         View.initialize();
-        reload();
+        _day = WorkoutStore.dayKey();
+        reloadDay();
     }
 
     function reload() {
         _day = WorkoutStore.dayKey();
+        reloadDay();
+    }
+
+    function reloadDay() {
         _exercises = WorkoutStore.exercises(_day);
+        _exerciseIndex = 0;
+        _setIndex = 0;
         if (_exercises.size() > 0) {
             _exerciseIndex = WorkoutStore.firstIncompleteExercise(_day);
             _setIndex = WorkoutStore.firstIncompleteSet(_day, _exerciseIndex);
@@ -27,7 +35,6 @@ class WorkoutView extends WatchUi.View {
     }
 
     function onShow() {
-        reload();
         WatchUi.requestUpdate();
     }
 
@@ -46,18 +53,20 @@ class WorkoutView extends WatchUi.View {
     function drawHome(dc) {
         var center = dc.getWidth() / 2;
         dc.setColor(0x8FB8FF, Graphics.COLOR_TRANSPARENT);
-        dc.drawText(center, 58, Graphics.FONT_SMALL, "HYBRID COACH", Graphics.TEXT_JUSTIFY_CENTER);
+        dc.drawText(center, 54, Graphics.FONT_SMALL, "HYBRID COACH", Graphics.TEXT_JUSTIFY_CENTER);
 
         dc.setColor(0x8A8A8A, Graphics.COLOR_TRANSPARENT);
-        dc.drawText(center, 105, Graphics.FONT_XTINY, "TODAY", Graphics.TEXT_JUSTIFY_CENTER);
+        dc.drawText(center, 101, Graphics.FONT_XTINY, _day + "  •  WORKOUT", Graphics.TEXT_JUSTIFY_CENTER);
 
         dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
-        dc.drawText(center, 135, Graphics.FONT_LARGE, WorkoutStore.sessionName(_day), Graphics.TEXT_JUSTIFY_CENTER);
+        dc.drawText(center, 133, Graphics.FONT_LARGE, WorkoutStore.sessionName(_day), Graphics.TEXT_JUSTIFY_CENTER);
 
         if (_exercises.size() == 0) {
             dc.setColor(0x9A9A9A, Graphics.COLOR_TRANSPARENT);
             dc.drawText(center, 210, Graphics.FONT_SMALL, "No strength session", Graphics.TEXT_JUSTIFY_CENTER);
             dc.drawText(center, 248, Graphics.FONT_XTINY, "Run / recover as planned", Graphics.TEXT_JUSTIFY_CENTER);
+            dc.setColor(0x707070, Graphics.COLOR_TRANSPARENT);
+            dc.drawText(center, 376, Graphics.FONT_XTINY, "UP/DOWN  CHANGE DAY", Graphics.TEXT_JUSTIFY_CENTER);
             return;
         }
 
@@ -68,12 +77,14 @@ class WorkoutView extends WatchUi.View {
 
         var next = _exercises[_exerciseIndex]["name"];
         dc.setColor(0x8A8A8A, Graphics.COLOR_TRANSPARENT);
-        dc.drawText(center, 265, Graphics.FONT_XTINY, "NEXT", Graphics.TEXT_JUSTIFY_CENTER);
+        dc.drawText(center, 263, Graphics.FONT_XTINY, "NEXT", Graphics.TEXT_JUSTIFY_CENTER);
         dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
-        dc.drawText(center, 294, Graphics.FONT_SMALL, shortName(next, 27), Graphics.TEXT_JUSTIFY_CENTER);
+        dc.drawText(center, 292, Graphics.FONT_SMALL, shortName(next, 27), Graphics.TEXT_JUSTIFY_CENTER);
 
         dc.setColor(0x8FB8FF, Graphics.COLOR_TRANSPARENT);
-        dc.drawText(center, 370, Graphics.FONT_TINY, "START  •  OPEN WORKOUT", Graphics.TEXT_JUSTIFY_CENTER);
+        dc.drawText(center, 352, Graphics.FONT_TINY, "START  OPEN WORKOUT", Graphics.TEXT_JUSTIFY_CENTER);
+        dc.setColor(0x707070, Graphics.COLOR_TRANSPARENT);
+        dc.drawText(center, 386, Graphics.FONT_XTINY, "UP/DOWN  CHANGE DAY", Graphics.TEXT_JUSTIFY_CENTER);
     }
 
     function drawExercise(dc) {
@@ -142,12 +153,26 @@ class WorkoutView extends WatchUi.View {
         dc.drawText(center, 398, Graphics.FONT_XTINY, "BACK CANCEL", Graphics.TEXT_JUSTIFY_CENTER);
     }
 
+    function cycleDay(direction) {
+        var index = 0;
+        for (var i = 0; i < _days.size(); i += 1) {
+            if (_days[i] == _day) { index = i; break; }
+        }
+        index += direction;
+        if (index < 0) { index = _days.size() - 1; }
+        if (index >= _days.size()) { index = 0; }
+        _day = _days[index];
+        reloadDay();
+    }
+
     function nextPage() {
         if (_screen == 2) {
             changeEdit(-1);
         } else if (_screen == 1) {
             _selected += 1;
             if (_selected > 3) { _selected = 0; }
+        } else {
+            cycleDay(1);
         }
         WatchUi.requestUpdate();
     }
@@ -158,6 +183,8 @@ class WorkoutView extends WatchUi.View {
         } else if (_screen == 1) {
             _selected -= 1;
             if (_selected < 0) { _selected = 3; }
+        } else {
+            cycleDay(-1);
         }
         WatchUi.requestUpdate();
     }
@@ -187,7 +214,6 @@ class WorkoutView extends WatchUi.View {
             _screen = 1;
         } else if (_screen == 1) {
             _screen = 0;
-            reload();
         } else {
             return false;
         }
@@ -252,7 +278,7 @@ class WorkoutView extends WatchUi.View {
             return;
         }
         _screen = 0;
-        reload();
+        reloadDay();
     }
 
     function shortName(value, max) {
