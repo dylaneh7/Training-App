@@ -19,11 +19,6 @@ class WorkoutView extends WatchUi.View {
         reloadDay();
     }
 
-    function reload() {
-        _day = WorkoutStore.dayKey();
-        reloadDay();
-    }
-
     function reloadDay() {
         _exercises = WorkoutStore.exercises(_day);
         _exerciseIndex = 0;
@@ -56,7 +51,7 @@ class WorkoutView extends WatchUi.View {
         dc.drawText(center, 54, Graphics.FONT_SMALL, "HYBRID COACH", Graphics.TEXT_JUSTIFY_CENTER);
 
         dc.setColor(0x8A8A8A, Graphics.COLOR_TRANSPARENT);
-        dc.drawText(center, 101, Graphics.FONT_XTINY, _day + "  •  WORKOUT", Graphics.TEXT_JUSTIFY_CENTER);
+        dc.drawText(center, 101, Graphics.FONT_XTINY, _day + "  WORKOUT", Graphics.TEXT_JUSTIFY_CENTER);
 
         dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
         dc.drawText(center, 133, Graphics.FONT_LARGE, WorkoutStore.sessionName(_day), Graphics.TEXT_JUSTIFY_CENTER);
@@ -79,7 +74,7 @@ class WorkoutView extends WatchUi.View {
         dc.setColor(0x8A8A8A, Graphics.COLOR_TRANSPARENT);
         dc.drawText(center, 263, Graphics.FONT_XTINY, "NEXT", Graphics.TEXT_JUSTIFY_CENTER);
         dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
-        dc.drawText(center, 292, Graphics.FONT_SMALL, shortName(next, 27), Graphics.TEXT_JUSTIFY_CENTER);
+        dc.drawText(center, 292, Graphics.FONT_TINY, shortName(next, 24), Graphics.TEXT_JUSTIFY_CENTER);
 
         dc.setColor(0x8FB8FF, Graphics.COLOR_TRANSPARENT);
         dc.drawText(center, 352, Graphics.FONT_TINY, "START  OPEN WORKOUT", Graphics.TEXT_JUSTIFY_CENTER);
@@ -98,11 +93,11 @@ class WorkoutView extends WatchUi.View {
             (_exerciseIndex + 1).toString() + " / " + _exercises.size().toString(), Graphics.TEXT_JUSTIFY_CENTER);
 
         dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
-        dc.drawText(center, 76, Graphics.FONT_SMALL, shortName(ex["name"], 28), Graphics.TEXT_JUSTIFY_CENTER);
+        dc.drawText(center, 76, Graphics.FONT_TINY, shortName(ex["name"], 25), Graphics.TEXT_JUSTIFY_CENTER);
 
         dc.setColor(done ? 0x9ED7B4 : 0xB0B0B0, Graphics.COLOR_TRANSPARENT);
         dc.drawText(center, 118, Graphics.FONT_TINY,
-            "SET " + (_setIndex + 1).toString() + " OF " + setCount.toString() + (done ? "  ✓" : ""),
+            "SET " + (_setIndex + 1).toString() + " OF " + setCount.toString(),
             Graphics.TEXT_JUSTIFY_CENTER);
 
         var weight = WorkoutStore.getValue(_day, _exerciseIndex, _setIndex, "weight", 0);
@@ -115,7 +110,7 @@ class WorkoutView extends WatchUi.View {
         drawField(dc, 340, 3, done ? "UNDO SET" : "COMPLETE SET", "START");
 
         dc.setColor(0x707070, Graphics.COLOR_TRANSPARENT);
-        dc.drawText(center, 398, Graphics.FONT_XTINY, "UP/DOWN select   BACK home", Graphics.TEXT_JUSTIFY_CENTER);
+        dc.drawText(center, 398, Graphics.FONT_XTINY, "UP/DOWN SELECT   BACK HOME", Graphics.TEXT_JUSTIFY_CENTER);
     }
 
     function drawField(dc, y, index, label, value) {
@@ -139,14 +134,11 @@ class WorkoutView extends WatchUi.View {
 
         dc.setColor(0x8FB8FF, Graphics.COLOR_TRANSPARENT);
         dc.drawText(center, 72, Graphics.FONT_SMALL, "EDIT " + label, Graphics.TEXT_JUSTIFY_CENTER);
-
         dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
         dc.drawText(center, 170, Graphics.FONT_LARGE, value, Graphics.TEXT_JUSTIFY_CENTER);
-
         dc.setColor(0x9A9A9A, Graphics.COLOR_TRANSPARENT);
         dc.drawText(center, 260, Graphics.FONT_SMALL, "UP  +", Graphics.TEXT_JUSTIFY_CENTER);
         dc.drawText(center, 305, Graphics.FONT_SMALL, "DOWN  -", Graphics.TEXT_JUSTIFY_CENTER);
-
         dc.setColor(0x9ED7B4, Graphics.COLOR_TRANSPARENT);
         dc.drawText(center, 365, Graphics.FONT_TINY, "START SAVE", Graphics.TEXT_JUSTIFY_CENTER);
         dc.setColor(0x777777, Graphics.COLOR_TRANSPARENT);
@@ -156,7 +148,7 @@ class WorkoutView extends WatchUi.View {
     function cycleDay(direction) {
         var index = 0;
         for (var i = 0; i < _days.size(); i += 1) {
-            if (_days[i] == _day) { index = i; break; }
+            if (_days[i].equals(_day)) { index = i; break; }
         }
         index += direction;
         if (index < 0) { index = _days.size() - 1; }
@@ -195,12 +187,10 @@ class WorkoutView extends WatchUi.View {
             WatchUi.requestUpdate();
             return;
         }
-
         if (_screen == 2) {
             saveEdit();
             return;
         }
-
         if (_selected < 3) {
             beginEdit(_selected);
         } else {
@@ -250,6 +240,7 @@ class WorkoutView extends WatchUi.View {
             if (_editValue < 0) { _editValue = 0; }
             if (_editValue > 5) { _editValue = 5; }
         }
+        WatchUi.requestUpdate();
     }
 
     function saveEdit() {
@@ -295,6 +286,28 @@ class WorkoutDelegate extends WatchUi.BehaviorDelegate {
         _view = view;
     }
 
+    // Direct physical-button handling for Forerunner devices.
+    function onKey(keyEvent) {
+        var key = keyEvent.getKey();
+        if (key == WatchUi.KEY_UP) {
+            _view.previousPage();
+            return true;
+        }
+        if (key == WatchUi.KEY_DOWN) {
+            _view.nextPage();
+            return true;
+        }
+        if (key == WatchUi.KEY_START || key == WatchUi.KEY_ENTER) {
+            _view.select();
+            return true;
+        }
+        if (key == WatchUi.KEY_ESC) {
+            return _view.back();
+        }
+        return false;
+    }
+
+    // Keep behavior callbacks too, so touch/swipe mappings still work.
     function onNextPage() {
         _view.nextPage();
         return true;
