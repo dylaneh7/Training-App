@@ -7,8 +7,8 @@ class HealthCoachApp extends Application.AppBase {
     }
 
     function getInitialView() {
-        var view = new HealthCoachView();
-        return [view, new HealthCoachDelegate(view)];
+        var view = new WorkoutView();
+        return [view, new WorkoutDelegate(view)];
     }
 
     function getGlanceView() {
