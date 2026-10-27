@@ -1,4 +1,4 @@
-const CACHE='hybrid-coach-v6-week44-cloud-runs';
+const CACHE='hybrid-coach-v7-stable-load';
 const ASSETS=['./','./index.html','./manifest.webmanifest','./icon-180.png','./icon-512.png','./cc-sync-v2.js'];
 
 self.addEventListener('install',e=>{
@@ -20,34 +20,41 @@ async function withCommandCenterSync(resp){
   if(!type.includes('text/html'))return resp;
   let text=await resp.text();
   text=text.replace(/<script[^>]+src=["'][^"']*cc-sync(?:-v2)?\.js[^"']*["'][^>]*><\/script>\s*/gi,'');
-  text=text.replace('</body>','<script src="./cc-sync-v2.js?v=6"></script>\n</body>');
-  return new Response(text,{status:resp.status,statusText:resp.statusText,headers:resp.headers});
+  text=text.replace('</body>','<script src="./cc-sync-v2.js?v=7"></script>\n</body>');
+  const headers=new Headers(resp.headers);
+  headers.delete('content-length');
+  headers.delete('content-encoding');
+  headers.delete('etag');
+  return new Response(text,{status:resp.status,statusText:resp.statusText,headers});
 }
 
 self.addEventListener('fetch',e=>{
+  if(e.request.method!=='GET')return;
+  const url=new URL(e.request.url);
+  if(url.origin!==self.location.origin)return;
+
   if(e.request.mode==='navigate'){
     e.respondWith((async()=>{
       try{
-        const network=await fetch(e.request);
+        const network=await fetch(e.request,{cache:'no-store'});
         const injected=await withCommandCenterSync(network);
         const copy=injected.clone();
-        caches.open(CACHE).then(c=>c.put('./index.html',copy));
+        caches.open(CACHE).then(c=>c.put('./index.html',copy)).catch(()=>{});
         return injected;
       }catch{
-        return caches.match('./index.html');
+        return (await caches.match('./index.html')) || Response.error();
       }
     })());
     return;
   }
 
-  e.respondWith(
-    caches.match(e.request).then(cached=>{
-      const fetchPromise=fetch(e.request).then(resp=>{
-        const copy=resp.clone();
-        caches.open(CACHE).then(c=>c.put(e.request,copy));
-        return resp;
-      }).catch(()=>cached);
-      return cached||fetchPromise;
-    })
-  );
+  e.respondWith((async()=>{
+    try{
+      const network=await fetch(e.request);
+      if(network&&network.ok){const copy=network.clone();caches.open(CACHE).then(c=>c.put(e.request,copy)).catch(()=>{})}
+      return network;
+    }catch{
+      return (await caches.match(e.request)) || Response.error();
+    }
+  })());
 });
