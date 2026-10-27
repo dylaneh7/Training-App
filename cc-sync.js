@@ -42,7 +42,7 @@
     dialog.innerHTML=`
       <form method="dialog" id="ccSyncForm">
         <h2>Connect Command Center</h2>
-        <p>Sign in with the same account you use in School Command Center. Once connected, checking Running or Lifting complete here marks the matching Command Center workout complete.</p>
+        <p>Sign in with the same account you use in School Command Center. Once connected, checking <b>Lifting</b> complete here marks that day's strength workout complete in Command Center.</p>
         <label>Email<input id="ccEmail" type="email" autocomplete="email" required></label>
         <label style="display:block;margin-top:8px">Password<input id="ccPassword" type="password" autocomplete="current-password" required></label>
         <div id="ccSyncMsg" class="cc-sync-msg"></div>
@@ -78,7 +78,7 @@
     try{
       await loadSdk();
       sb=window.supabase.createClient(SUPABASE_URL,SUPABASE_KEY,{
-        auth:{persistSession:true,storageKey:AUTH_STORAGE_KEY,autoRefreshToken:true,detectSessionInUrl:true}
+        auth:{persistSession:true,storageKey:AUTH_STORAGE_KEY,autoRefreshToken:true,detectSessionInUrl:false}
       });
       const {data}=await sb.auth.getSession();
       user=data.session?.user||null;
@@ -117,15 +117,9 @@
       setStatus('Command Center · Connected','connected');
       msg.textContent='Connected.';
       await syncCompletedHistory();
-      if(pendingCompletion){
-        const p=pendingCompletion;
-        pendingCompletion=null;
-        await sendCompletion(p);
-      }
+      if(pendingCompletion){const p=pendingCompletion;pendingCompletion=null;await sendCompletion(p)}
       setTimeout(()=>document.getElementById('ccSyncDialog')?.close(),350);
-    }catch(err){
-      msg.textContent=err?.message||'Could not connect.';
-    }
+    }catch(err){msg.textContent=err?.message||'Could not connect.'}
   }
 
   function workoutDate(weekIndex,dayName){
@@ -135,24 +129,13 @@
     return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
   }
 
-  async function sendCompletion({weekIndex,dayName,kind,title}){
+  async function sendCompletion({weekIndex,dayName,title}){
     if(!sb) return false;
-    if(!user){
-      pendingCompletion={weekIndex,dayName,kind,title};
-      openConnect();
-      return false;
-    }
+    if(!user){pendingCompletion={weekIndex,dayName,title};openConnect();return false}
     const date=workoutDate(weekIndex,dayName);
-    const row={
-      user_id:user.id,
-      source:'Hybrid Coach',
-      external_id:`hybrid-${date}-${kind}`,
-      workout_date:date,
-      workout_kind:kind,
-      title:title||null
-    };
+    const row={user_id:user.id,source:'Hybrid Coach',external_id:`hybrid-${date}-lift`,workout_date:date,workout_kind:'lift',title:title||null};
     const {error}=await sb.from('workout_completion_events').insert(row);
-    if(error && error.code!=='23505'){
+    if(error&&error.code!=='23505'){
       console.warn('Command Center sync failed',error);
       setStatus('Command Center · Sync issue','error');
       return false;
@@ -161,40 +144,25 @@
     return true;
   }
 
-  function completionFromCheckbox(target){
-    if(!target.checked) return null;
-    const weekIndex=document.getElementById('week')?.value||'0';
-    const dayName=document.getElementById('day')?.value||'Mon';
-    if(target.id==='runDone'){
-      const section=target.closest('section');
-      const title=[...section.querySelectorAll('strong')].map(x=>x.textContent.trim()).find(Boolean)||'Run';
-      return {weekIndex,dayName,kind:'run',title};
-    }
-    if(target.id==='liftDone'){
-      const title=document.querySelector('#workout .dayhead h2')?.textContent.trim()||'Strength training';
-      return {weekIndex,dayName,kind:'lift',title};
-    }
-    return null;
-  }
-
   async function syncCompletedHistory(){
     if(!user) return;
     let raw;
     try{raw=JSON.parse(localStorage.getItem('hybridCoachData_v1')||'null')}catch{return}
     if(!raw?.days) return;
     for(const [key,value] of Object.entries(raw.days)){
+      if(!value?.liftDone) continue;
       const [weekIndex,dayName]=key.split('-');
-      if(value?.runDone) await sendCompletion({weekIndex,dayName,kind:'run',title:'Completed run'});
-      if(value?.liftDone) await sendCompletion({weekIndex,dayName,kind:'lift',title:'Completed strength training'});
+      await sendCompletion({weekIndex,dayName,title:'Completed strength training'});
     }
   }
 
   document.addEventListener('change',event=>{
     const t=event.target;
-    if(!(t instanceof HTMLInputElement)) return;
-    if(t.id!=='runDone'&&t.id!=='liftDone') return;
-    const completion=completionFromCheckbox(t);
-    if(completion) setTimeout(()=>sendCompletion(completion),0);
+    if(!(t instanceof HTMLInputElement)||t.id!=='liftDone'||!t.checked) return;
+    const weekIndex=document.getElementById('week')?.value||'0';
+    const dayName=document.getElementById('day')?.value||'Mon';
+    const title=document.querySelector('#workout .dayhead h2')?.textContent.trim()||'Strength training';
+    setTimeout(()=>sendCompletion({weekIndex,dayName,title}),0);
   },true);
 
   addUI();
