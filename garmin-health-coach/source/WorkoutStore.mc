@@ -15,16 +15,20 @@ module WorkoutStore {
         return "Sun";
     }
 
+    function isDay(day, expected) {
+        return day != null && day.equals(expected);
+    }
+
     function sessionName(day) {
-        if (day == "Mon") { return "PUSH"; }
-        if (day == "Tue") { return "PULL"; }
-        if (day == "Wed") { return "UPPER SUPPORT"; }
-        if (day == "Thu") { return "LEGS"; }
+        if (isDay(day, "Mon")) { return "PUSH"; }
+        if (isDay(day, "Tue")) { return "PULL"; }
+        if (isDay(day, "Wed")) { return "UPPER SUPPORT"; }
+        if (isDay(day, "Thu")) { return "LEGS"; }
         return "RECOVERY / RUN";
     }
 
     function exercises(day) {
-        if (day == "Mon") {
+        if (isDay(day, "Mon")) {
             return [
                 exercise("Flat Barbell Bench", 4, 8, 2),
                 exercise("Incline DB Press", 3, 10, 2),
@@ -38,7 +42,7 @@ module WorkoutStore {
                 exercise("Rope Pressdown", 3, 12, 1)
             ];
         }
-        if (day == "Tue") {
+        if (isDay(day, "Tue")) {
             return [
                 exercise("Weighted Pull-Up / Pulldown", 4, 8, 2),
                 exercise("Chest-Supported T-Bar Row", 4, 10, 2),
@@ -56,7 +60,7 @@ module WorkoutStore {
                 exercise("Farmer Carry", 3, 1, 2)
             ];
         }
-        if (day == "Wed") {
+        if (isDay(day, "Wed")) {
             return [
                 exercise("Paused Bench Press", 3, 8, 2),
                 exercise("Low-to-High Cable Fly", 3, 12, 1),
@@ -69,7 +73,7 @@ module WorkoutStore {
                 exercise("Cable External Rotation", 2, 15, 3)
             ];
         }
-        if (day == "Thu") {
+        if (isDay(day, "Thu")) {
             return [
                 exercise("Back Squat / Hack Squat", 4, 8, 2),
                 exercise("Romanian Deadlift", 4, 8, 2),
