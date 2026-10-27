@@ -6,7 +6,7 @@ using Toybox.WatchUi;
 class WorkoutView extends WatchUi.View {
     var _day;
     var _exercises;
-    var _screen = 0; // 0 home, 1 exercise, 2 edit
+    var _screen = 0; // 0 home, 1 exercise, 2 edit, 3 rest
     var _exerciseIndex = 0;
     var _setIndex = 0;
     var _selected = 0; // weight, reps, rir, complete
@@ -48,12 +48,15 @@ class WorkoutView extends WatchUi.View {
     function onUpdate(dc) {
         dc.setColor(Graphics.COLOR_BLACK, Graphics.COLOR_BLACK);
         dc.clear();
+
         if (_screen == 0) {
             drawHome(dc);
         } else if (_screen == 1) {
             drawExercise(dc);
-        } else {
+        } else if (_screen == 2) {
             drawEditor(dc);
+        } else {
+            drawRest(dc);
         }
     }
 
@@ -89,11 +92,6 @@ class WorkoutView extends WatchUi.View {
         dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
         dc.drawText(center, 246, Graphics.FONT_TINY, shortName(next, 23), Graphics.TEXT_JUSTIFY_CENTER);
 
-        if (_restActive) {
-            dc.setColor(0xFFD28A, Graphics.COLOR_TRANSPARENT);
-            dc.drawText(center, 292, Graphics.FONT_TINY, "REST  " + restText(), Graphics.TEXT_JUSTIFY_CENTER);
-        }
-
         dc.setColor(0x8FB8FF, Graphics.COLOR_TRANSPARENT);
         dc.drawText(center, 329, Graphics.FONT_TINY, "START  OPEN", Graphics.TEXT_JUSTIFY_CENTER);
         dc.setColor(0x666666, Graphics.COLOR_TRANSPARENT);
@@ -106,37 +104,29 @@ class WorkoutView extends WatchUi.View {
         var setCount = ex["sets"];
         var done = WorkoutStore.isDone(_day, _exerciseIndex, _setIndex);
 
-        dc.setColor(0x777777, Graphics.COLOR_TRANSPARENT);
-        dc.drawText(center, 35, Graphics.FONT_XTINY,
+        dc.setColor(0x8FB8FF, Graphics.COLOR_TRANSPARENT);
+        dc.drawText(center, 34, Graphics.FONT_XTINY,
             (_exerciseIndex + 1).toString() + " / " + _exercises.size().toString(), Graphics.TEXT_JUSTIFY_CENTER);
 
         dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
-        dc.drawText(center, 63, Graphics.FONT_TINY, shortName(ex["name"], 24), Graphics.TEXT_JUSTIFY_CENTER);
+        dc.drawText(center, 62, Graphics.FONT_TINY, shortName(ex["name"], 22), Graphics.TEXT_JUSTIFY_CENTER);
 
         dc.setColor(done ? 0x9ED7B4 : 0xA0A0A0, Graphics.COLOR_TRANSPARENT);
         dc.drawText(center, 96, Graphics.FONT_XTINY,
             "SET " + (_setIndex + 1).toString() + " OF " + setCount.toString(),
             Graphics.TEXT_JUSTIFY_CENTER);
 
-        if (_restActive) {
-            dc.setColor(0xFFD28A, Graphics.COLOR_TRANSPARENT);
-            dc.drawText(center, 122, Graphics.FONT_XTINY, "REST  " + restText(), Graphics.TEXT_JUSTIFY_CENTER);
-        } else {
-            dc.setColor(0x555555, Graphics.COLOR_TRANSPARENT);
-            dc.drawText(center, 122, Graphics.FONT_XTINY, "READY FOR NEXT SET", Graphics.TEXT_JUSTIFY_CENTER);
-        }
-
         var weight = WorkoutStore.getValue(_day, _exerciseIndex, _setIndex, "weight", 0);
         var reps = WorkoutStore.getValue(_day, _exerciseIndex, _setIndex, "reps", ex["reps"]);
         var rir = WorkoutStore.getValue(_day, _exerciseIndex, _setIndex, "rir", ex["rir"]);
 
-        drawField(dc, 158, 0, "WEIGHT", weight == 0 ? "-- lb" : weight.toString() + " lb");
-        drawField(dc, 207, 1, "REPS", reps.toString());
-        drawField(dc, 256, 2, "RIR", rir >= 5 ? "5+" : rir.toString());
-        drawField(dc, 309, 3, done ? "UNDO SET" : "COMPLETE SET", "START");
+        drawField(dc, 145, 0, "WEIGHT", weight == 0 ? "-- lb" : weight.toString() + " lb");
+        drawField(dc, 198, 1, "REPS", reps.toString());
+        drawField(dc, 251, 2, "RIR", rir >= 5 ? "5+" : rir.toString());
+        drawAction(dc, 307, 3, done ? "UNDO SET" : "COMPLETE SET");
 
         dc.setColor(0x666666, Graphics.COLOR_TRANSPARENT);
-        dc.drawText(center, 371, Graphics.FONT_XTINY, "UP/DOWN SELECT   BACK HOME", Graphics.TEXT_JUSTIFY_CENTER);
+        dc.drawText(center, 370, Graphics.FONT_XTINY, "UP/DOWN SELECT   BACK HOME", Graphics.TEXT_JUSTIFY_CENTER);
     }
 
     function drawField(dc, y, index, label, value) {
@@ -151,6 +141,18 @@ class WorkoutView extends WatchUi.View {
 
         dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
         dc.drawText(346, y - 2, Graphics.FONT_TINY, value, Graphics.TEXT_JUSTIFY_RIGHT);
+    }
+
+    function drawAction(dc, y, index, label) {
+        var selected = _selected == index;
+        if (selected) {
+            dc.setColor(0x18314A, Graphics.COLOR_TRANSPARENT);
+            dc.fillRectangle(88, y - 6, 278, 40);
+        }
+        dc.setColor(selected ? 0x8FB8FF : 0xA0A0A0, Graphics.COLOR_TRANSPARENT);
+        dc.drawText(dc.getWidth() / 2, y, Graphics.FONT_TINY,
+            selected ? "> " + label : label,
+            Graphics.TEXT_JUSTIFY_CENTER);
     }
 
     function drawEditor(dc) {
@@ -168,11 +170,6 @@ class WorkoutView extends WatchUi.View {
         dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
         dc.drawText(center, 150, Graphics.FONT_LARGE, value, Graphics.TEXT_JUSTIFY_CENTER);
 
-        if (_restActive) {
-            dc.setColor(0xFFD28A, Graphics.COLOR_TRANSPARENT);
-            dc.drawText(center, 218, Graphics.FONT_XTINY, "REST  " + restText(), Graphics.TEXT_JUSTIFY_CENTER);
-        }
-
         dc.setColor(0xA0A0A0, Graphics.COLOR_TRANSPARENT);
         dc.drawText(center, 258, Graphics.FONT_TINY, "UP   +", Graphics.TEXT_JUSTIFY_CENTER);
         dc.drawText(center, 298, Graphics.FONT_TINY, "DOWN   -", Graphics.TEXT_JUSTIFY_CENTER);
@@ -181,6 +178,34 @@ class WorkoutView extends WatchUi.View {
         dc.drawText(center, 349, Graphics.FONT_TINY, "START  SAVE", Graphics.TEXT_JUSTIFY_CENTER);
         dc.setColor(0x666666, Graphics.COLOR_TRANSPARENT);
         dc.drawText(center, 381, Graphics.FONT_XTINY, "BACK  CANCEL", Graphics.TEXT_JUSTIFY_CENTER);
+    }
+
+    function drawRest(dc) {
+        var center = dc.getWidth() / 2;
+        var ex = _exercises[_exerciseIndex];
+
+        dc.setColor(0xFFD28A, Graphics.COLOR_TRANSPARENT);
+        dc.drawText(center, 58, Graphics.FONT_SMALL, "REST", Graphics.TEXT_JUSTIFY_CENTER);
+
+        dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
+        dc.drawText(center, 122, Graphics.FONT_NUMBER_MILD, restText(), Graphics.TEXT_JUSTIFY_CENTER);
+
+        dc.setColor(0x777777, Graphics.COLOR_TRANSPARENT);
+        dc.drawText(center, 205, Graphics.FONT_XTINY, "NEXT", Graphics.TEXT_JUSTIFY_CENTER);
+
+        dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
+        dc.drawText(center, 235, Graphics.FONT_TINY, shortName(ex["name"], 22), Graphics.TEXT_JUSTIFY_CENTER);
+
+        dc.setColor(0xA0A0A0, Graphics.COLOR_TRANSPARENT);
+        dc.drawText(center, 274, Graphics.FONT_XTINY,
+            "SET " + (_setIndex + 1).toString() + " OF " + ex["sets"].toString(),
+            Graphics.TEXT_JUSTIFY_CENTER);
+
+        dc.setColor(0x8FB8FF, Graphics.COLOR_TRANSPARENT);
+        dc.drawText(center, 339, Graphics.FONT_TINY, "START  SKIP REST", Graphics.TEXT_JUSTIFY_CENTER);
+
+        dc.setColor(0x666666, Graphics.COLOR_TRANSPARENT);
+        dc.drawText(center, 376, Graphics.FONT_XTINY, "AUTO-OPENS NEXT SET", Graphics.TEXT_JUSTIFY_CENTER);
     }
 
     function cycleDay(direction) {
@@ -201,7 +226,7 @@ class WorkoutView extends WatchUi.View {
         } else if (_screen == 1) {
             _selected += 1;
             if (_selected > 3) { _selected = 0; }
-        } else {
+        } else if (_screen == 0) {
             cycleDay(1);
         }
         WatchUi.requestUpdate();
@@ -213,7 +238,7 @@ class WorkoutView extends WatchUi.View {
         } else if (_screen == 1) {
             _selected -= 1;
             if (_selected < 0) { _selected = 3; }
-        } else {
+        } else if (_screen == 0) {
             cycleDay(-1);
         }
         WatchUi.requestUpdate();
@@ -231,6 +256,11 @@ class WorkoutView extends WatchUi.View {
             return;
         }
 
+        if (_screen == 3) {
+            skipRest();
+            return;
+        }
+
         if (_selected < 3) {
             beginEdit(_selected);
         } else {
@@ -242,6 +272,9 @@ class WorkoutView extends WatchUi.View {
         if (_screen == 2) {
             _editValue = _originalValue;
             _screen = 1;
+        } else if (_screen == 3) {
+            skipRest();
+            return true;
         } else if (_screen == 1) {
             _screen = 0;
         } else {
@@ -297,6 +330,7 @@ class WorkoutView extends WatchUi.View {
         if (!done) {
             advance();
             if (_screen == 1) {
+                _screen = 3;
                 startRestTimer(90);
             } else {
                 stopRestTimer();
@@ -338,6 +372,12 @@ class WorkoutView extends WatchUi.View {
         _restRemaining = 0;
     }
 
+    function skipRest() {
+        stopRestTimer();
+        _screen = 1;
+        WatchUi.requestUpdate();
+    }
+
     function restTick() {
         if (!_restActive) { return; }
 
@@ -349,6 +389,7 @@ class WorkoutView extends WatchUi.View {
             if (Attention has :vibrate) {
                 Attention.vibrate([new Attention.VibeProfile(100, 700)]);
             }
+            _screen = 1;
         }
         WatchUi.requestUpdate();
     }
