@@ -1,0 +1,20 @@
+<?xml version="1.0"?>
+<iq:manifest xmlns:iq="http://www.garmin.com/xml/connectiq" version="3">
+    <iq:application
+        id="0aeb87d305144b538dcd13ad5f43294b"
+        type="watch-app"
+        name="@Strings.AppName"
+        entry="HealthCoachApp"
+        minApiLevel="6.0.0">
+        <iq:products>
+            <iq:product id="fr970"/>
+        </iq:products>
+        <iq:permissions>
+            <iq:uses-permission id="SensorHistory"/>
+        </iq:permissions>
+        <iq:languages>
+            <iq:language>eng</iq:language>
+        </iq:languages>
+        <iq:barrels/>
+    </iq:application>
+</iq:manifest>
