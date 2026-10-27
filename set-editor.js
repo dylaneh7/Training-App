@@ -147,14 +147,13 @@
   function apply(){
     addStyles();
     document.querySelectorAll('#exercises > .exercise').forEach(applyBox);
-    persist();
   }
   function schedule(delay=70){clearTimeout(timer);timer=setTimeout(apply,delay)}
 
   function start(){
     addStyles();schedule(120);
     const holder=document.getElementById('exercises');
-    if(holder)new MutationObserver(()=>schedule(90)).observe(holder,{childList:true,subtree:true});
+    if(holder)new MutationObserver(()=>schedule(90)).observe(holder,{childList:true});
     document.addEventListener('change',e=>{if(e.target?.id==='week'||e.target?.id==='day')schedule(140)},true);
     document.addEventListener('click',e=>{if(e.target?.closest?.('.weekBtn,.tab,#hcEditExercises'))schedule(150)},true);
   }
