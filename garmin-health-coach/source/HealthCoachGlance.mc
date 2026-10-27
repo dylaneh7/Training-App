@@ -8,34 +8,37 @@ class HealthCoachGlanceView extends WatchUi.GlanceView {
     }
 
     function onUpdate(dc) {
-        var data = HealthCoachData.snapshot();
+        var day = WorkoutStore.dayKey();
+        var xs = WorkoutStore.exercises(day);
+        var done = WorkoutStore.completedSets(day);
+        var total = WorkoutStore.totalSets(day);
         var h = dc.getHeight();
-        var color = colorForStatus(data[:status]);
 
         dc.setColor(Graphics.COLOR_BLACK, Graphics.COLOR_BLACK);
         dc.clear();
 
-        dc.setColor(color, Graphics.COLOR_TRANSPARENT);
+        dc.setColor(0x8FB8FF, Graphics.COLOR_TRANSPARENT);
         dc.fillCircle(18, h / 2, 5);
 
         dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
-        dc.drawText(34, h / 2 - 12, Graphics.FONT_SMALL,
-            "Coach " + whole(data[:readiness]) + "  " + data[:status],
+        dc.drawText(34, h / 2 - 13, Graphics.FONT_SMALL,
+            WorkoutStore.sessionName(day) + "  " + done.toString() + "/" + total.toString(),
             Graphics.TEXT_JUSTIFY_LEFT);
 
-        var sub = "BB " + whole(data[:bodyBattery]) + "  •  Stress " + whole(data[:stress]);
+        var sub = "No strength session today";
+        if (xs.size() > 0 && done < total) {
+            var i = WorkoutStore.firstIncompleteExercise(day);
+            sub = shortName(xs[i]["name"], 25);
+        } else if (xs.size() > 0) {
+            sub = "Workout complete";
+        }
+
         dc.setColor(0x999999, Graphics.COLOR_TRANSPARENT);
         dc.drawText(34, h / 2 + 11, Graphics.FONT_XTINY, sub, Graphics.TEXT_JUSTIFY_LEFT);
     }
 
-    function whole(v) {
-        return v == null ? "--" : v.format("%.0f");
-    }
-
-    function colorForStatus(status) {
-        if (status == "READY") { return 0x2EE6A6; }
-        if (status == "STEADY") { return 0x6CB6FF; }
-        if (status == "EASY") { return 0xFFB347; }
-        return 0xFF6868;
+    function shortName(value, max) {
+        if (value.length() <= max) { return value; }
+        return value.substring(0, max - 3) + "...";
     }
 }
