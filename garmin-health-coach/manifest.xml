@@ -4,6 +4,7 @@
         id="0aeb87d305144b538dcd13ad5f43294b"
         type="watch-app"
         name="@Strings.AppName"
+        launcherIcon="@Drawables.LauncherIcon"
         entry="HealthCoachApp"
         minApiLevel="6.0.0">
         <iq:products>
