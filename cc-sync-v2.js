@@ -56,6 +56,7 @@
   function loadCloud(){
     applyWeek44Fallback();
     setTimeout(()=>loadScript('./exercise-editor.js?v=2','data-hybrid-exercise-editor'),180);
+    setTimeout(()=>loadScript('./set-editor.js?v=1','data-hybrid-set-editor'),320);
     setTimeout(()=>loadScript('./cc-cloud.js?v=3','data-hybrid-cloud-runtime'),900);
   }
 
