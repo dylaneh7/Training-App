@@ -10,7 +10,6 @@ class HealthCoachGlanceView extends WatchUi.GlanceView {
     function onUpdate(dc) {
         var data = HealthCoachData.snapshot();
         var h = dc.getHeight();
-        var w = dc.getWidth();
         var color = colorForStatus(data[:status]);
 
         dc.setColor(Graphics.COLOR_BLACK, Graphics.COLOR_BLACK);
@@ -21,16 +20,16 @@ class HealthCoachGlanceView extends WatchUi.GlanceView {
 
         dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
         dc.drawText(34, h / 2 - 12, Graphics.FONT_SMALL,
-            "Coach " + data[:readiness].toString() + "  " + data[:status],
+            "Coach " + whole(data[:readiness]) + "  " + data[:status],
             Graphics.TEXT_JUSTIFY_LEFT);
 
-        var sub = "BB " + value(data[:bodyBattery]) + "  •  Stress " + value(data[:stress]);
+        var sub = "BB " + whole(data[:bodyBattery]) + "  •  Stress " + whole(data[:stress]);
         dc.setColor(0x999999, Graphics.COLOR_TRANSPARENT);
         dc.drawText(34, h / 2 + 11, Graphics.FONT_XTINY, sub, Graphics.TEXT_JUSTIFY_LEFT);
     }
 
-    function value(v) {
-        return v == null ? "--" : v.toString();
+    function whole(v) {
+        return v == null ? "--" : v.format("%.0f");
     }
 
     function colorForStatus(status) {
