@@ -1,5 +1,5 @@
-const CACHE='hybrid-coach-v5-canonical-runs';
-const ASSETS=['./','./index.html','./manifest.webmanifest','./icon-180.png','./icon-512.png','./cc-sync.js'];
+const CACHE='hybrid-coach-v6-week44-cloud-runs';
+const ASSETS=['./','./index.html','./manifest.webmanifest','./icon-180.png','./icon-512.png','./cc-sync-v2.js'];
 
 self.addEventListener('install',e=>{
   self.skipWaiting();
@@ -15,12 +15,13 @@ self.addEventListener('activate',e=>{
 });
 
 async function withCommandCenterSync(resp){
-  if(!resp) return resp;
+  if(!resp)return resp;
   const type=resp.headers.get('content-type')||'';
-  if(!type.includes('text/html')) return resp;
-  const text=await resp.text();
-  const html=text.includes('cc-sync.js')?text:text.replace('</body>','<script src="./cc-sync.js"></script>\n</body>');
-  return new Response(html,{status:resp.status,statusText:resp.statusText,headers:resp.headers});
+  if(!type.includes('text/html'))return resp;
+  let text=await resp.text();
+  text=text.replace(/<script[^>]+src=["'][^"']*cc-sync(?:-v2)?\.js[^"']*["'][^>]*><\/script>\s*/gi,'');
+  text=text.replace('</body>','<script src="./cc-sync-v2.js?v=6"></script>\n</body>');
+  return new Response(text,{status:resp.status,statusText:resp.statusText,headers:resp.headers});
 }
 
 self.addEventListener('fetch',e=>{
@@ -46,7 +47,7 @@ self.addEventListener('fetch',e=>{
         caches.open(CACHE).then(c=>c.put(e.request,copy));
         return resp;
       }).catch(()=>cached);
-      return cached || fetchPromise;
+      return cached||fetchPromise;
     })
   );
 });
