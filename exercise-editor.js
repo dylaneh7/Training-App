@@ -3,28 +3,62 @@
   window.__hybridCoachExerciseEditor=true;
 
   const STORAGE_KEY='hybridCoachExerciseLayout_v1';
+  const TRAINING_KEY='hybridCoachData_v1';
   const defaults={};
   let editMode=false;
   let applyTimer=null;
 
+  function validLayout(data){return !!(data&&data.version===1&&data.days&&typeof data.days==='object')}
+
   function loadLayout(){
     try{
-      const raw=localStorage.getItem(STORAGE_KEY);
-      const data=raw?JSON.parse(raw):null;
-      if(data&&data.version===1&&data.days)return data;
+      const raw=localStorage.getItem(STORAGE_KEY),data=raw?JSON.parse(raw):null;
+      if(validLayout(data))return data;
+    }catch{}
+    try{
+      const raw=localStorage.getItem(TRAINING_KEY),data=raw?JSON.parse(raw):null;
+      if(validLayout(data?.exerciseLayout)){
+        localStorage.setItem(STORAGE_KEY,JSON.stringify(data.exerciseLayout));
+        return data.exerciseLayout;
+      }
     }catch{}
     return {version:1,days:{}};
   }
 
   let layout=loadLayout();
+  const nativeSetItem=Storage.prototype.setItem;
+
+  function embedLayoutInTrainingState(){
+    try{
+      const raw=localStorage.getItem(TRAINING_KEY);if(!raw)return;
+      const data=JSON.parse(raw);if(!data||typeof data!=='object')return;
+      data.exerciseLayout=layout;
+      nativeSetItem.call(localStorage,TRAINING_KEY,JSON.stringify(data));
+    }catch(err){console.warn('Could not embed exercise layout in training backup',err)}
+  }
+
+  if(!window.__hybridCoachLayoutStorageBridge){
+    window.__hybridCoachLayoutStorageBridge=true;
+    Storage.prototype.setItem=function(key,value){
+      if(this===localStorage&&key===TRAINING_KEY){
+        try{
+          const data=JSON.parse(String(value));
+          if(data&&typeof data==='object'){
+            data.exerciseLayout=layout;
+            value=JSON.stringify(data);
+          }
+        }catch{}
+      }
+      return nativeSetItem.call(this,key,value);
+    };
+  }
 
   function saveLayout(){
     try{
-      localStorage.setItem(STORAGE_KEY,JSON.stringify(layout));
-      window.dispatchEvent(new CustomEvent('hybrid-coach-layout-changed'));
-    }catch(err){
-      console.warn('Could not save exercise layout',err);
-    }
+      nativeSetItem.call(localStorage,STORAGE_KEY,JSON.stringify(layout));
+      embedLayoutInTrainingState();
+      document.dispatchEvent(new Event('input',{bubbles:true}));
+    }catch(err){console.warn('Could not save exercise layout',err)}
   }
 
   function dayKey(){return document.getElementById('day')?.value||'Mon'}
@@ -35,7 +69,7 @@
   }
 
   function ensureDay(day,ids){
-    if(!defaults[day]||defaults[day].length!==ids.length||defaults[day].some((x,i)=>x!==ids[i]))defaults[day]=[...ids];
+    if(!defaults[day])defaults[day]=[...ids];
     let cfg=layout.days[day];
     if(!cfg)cfg=layout.days[day]={order:[...ids],removed:[]};
     const known=new Set(ids);
@@ -54,6 +88,7 @@
       .hc-ex-controls{display:none;gap:6px;align-items:center;flex-wrap:wrap;margin:8px 0 2px;padding-top:8px;border-top:1px solid var(--border)}
       .hc-ex-editing .hc-ex-controls{display:flex}
       .hc-ex-control{border:1px solid var(--border);background:var(--panel);color:var(--text);border-radius:8px;min-height:34px;padding:0 10px;font-size:12px}
+      .hc-ex-control:disabled{opacity:.35}
       .hc-ex-control.remove{margin-left:auto;color:var(--bad);border-color:#6f3a3a;background:#2b1717}
       .hc-ex-toolbar{display:none;margin:0 0 10px;padding:10px;border:1px solid var(--border);background:var(--panel);border-radius:11px;font-size:12px}
       .hc-ex-editing .hc-ex-toolbar{display:block}
@@ -67,7 +102,7 @@
   }
 
   function moveExercise(id,dir){
-    const day=dayKey(),cfg=layout.days[day];if(!cfg)return;
+    const cfg=layout.days[dayKey()];if(!cfg)return;
     const visible=cfg.order.filter(x=>!cfg.removed.includes(x));
     const i=visible.indexOf(id),j=i+dir;if(i<0||j<0||j>=visible.length)return;
     const other=visible[j],a=cfg.order.indexOf(id),b=cfg.order.indexOf(other);
@@ -76,12 +111,12 @@
   }
 
   function removeExercise(id){
-    const day=dayKey(),cfg=layout.days[day];if(!cfg||cfg.removed.includes(id))return;
+    const cfg=layout.days[dayKey()];if(!cfg||cfg.removed.includes(id))return;
     cfg.removed.push(id);saveLayout();scheduleApply(0);
   }
 
   function restoreExercise(id){
-    const day=dayKey(),cfg=layout.days[day];if(!cfg)return;
+    const cfg=layout.days[dayKey()];if(!cfg)return;
     cfg.removed=cfg.removed.filter(x=>x!==id);saveLayout();scheduleApply(0);
   }
 
@@ -89,6 +124,9 @@
     const day=dayKey(),base=defaults[day];if(!base)return;
     layout.days[day]={order:[...base],removed:[]};saveLayout();scheduleApply(0);
   }
+
+  function escapeHtml(v){return String(v).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]))}
+  function escapeAttr(v){return String(v).replace(/&/g,'&amp;').replace(/"/g,'&quot;')}
 
   function toolbar(section,cfg){
     let t=section.querySelector('.hc-ex-toolbar');
@@ -99,9 +137,6 @@
     t.querySelectorAll('[data-restore]').forEach(b=>b.addEventListener('click',()=>restoreExercise(b.dataset.restore)));
   }
 
-  function escapeHtml(v){return String(v).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]))}
-  function escapeAttr(v){return String(v).replace(/&/g,'&amp;').replace(/"/g,'&quot;')}
-
   function apply(){
     addStyles();
     const holder=document.getElementById('exercises'),liftDone=document.getElementById('liftDone');
@@ -111,9 +146,8 @@
 
     const boxes=[...holder.children].filter(x=>x.classList?.contains('exercise'));
     if(!boxes.length)return;
-    const ids=boxes.map(exerciseId).filter(Boolean),day=dayKey(),cfg=ensureDay(day,ids);
+    const ids=boxes.map(exerciseId).filter(Boolean),cfg=ensureDay(dayKey(),ids);
     const byId=new Map(boxes.map(b=>[exerciseId(b),b]));
-
     cfg.order.forEach(id=>{const box=byId.get(id);if(box)holder.appendChild(box)});
 
     const visible=cfg.order.filter(id=>!cfg.removed.includes(id));
@@ -144,12 +178,11 @@
   function scheduleApply(delay=35){clearTimeout(applyTimer);applyTimer=setTimeout(apply,delay)}
 
   function start(){
-    addStyles();scheduleApply(50);
+    addStyles();embedLayoutInTrainingState();scheduleApply(50);
     const root=document.getElementById('workout');
     if(root)new MutationObserver(()=>scheduleApply(25)).observe(root,{childList:true});
     document.addEventListener('change',e=>{if(e.target?.id==='day'||e.target?.id==='week')scheduleApply(40)},true);
     document.addEventListener('click',e=>{if(e.target?.closest?.('.weekBtn,.tab'))scheduleApply(80)},true);
-    window.addEventListener('hybrid-coach-layout-restored',()=>{layout=loadLayout();scheduleApply(0)});
   }
 
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',start,{once:true});
