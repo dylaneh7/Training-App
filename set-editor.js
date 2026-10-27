@@ -87,7 +87,7 @@
     inputs.forEach(input=>input.addEventListener('input',()=>{
       if(!e.extra[n])e.extra[n]={w:'',r:'',rir:''};
       e.extra[n][input.dataset.field]=input.value;
-      persist();schedule(35);
+      persist();updateDone(box,id);
     }));
     const anchor=box.querySelector('.hc-ex-controls');
     anchor?box.insertBefore(row,anchor):box.appendChild(row);
@@ -139,8 +139,8 @@
 
     if(!box.dataset.hcSetWatch){
       box.dataset.hcSetWatch='1';
-      box.addEventListener('input',()=>schedule(45),true);
-      box.addEventListener('change',()=>schedule(45),true);
+      box.addEventListener('input',()=>updateDone(box,id),true);
+      box.addEventListener('change',()=>updateDone(box,id),true);
     }
   }
 
