@@ -10,9 +10,6 @@
         <iq:products>
             <iq:product id="fr970"/>
         </iq:products>
-        <iq:permissions>
-            <iq:uses-permission id="SensorHistory"/>
-        </iq:permissions>
         <iq:languages>
             <iq:language>eng</iq:language>
         </iq:languages>
