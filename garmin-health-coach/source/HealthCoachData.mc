@@ -4,11 +4,15 @@ using Toybox.System;
 
 module HealthCoachData {
     function latestBodyBattery() {
+        if (!(SensorHistory has :getBodyBatteryHistory)) {
+            return null;
+        }
+
         try {
             var iterator = SensorHistory.getBodyBatteryHistory({ :period => 1 });
             if (iterator != null) {
                 var sample = iterator.next();
-                if (sample != null) {
+                if (sample != null && sample has :data) {
                     return sample.data;
                 }
             }
@@ -20,17 +24,21 @@ module HealthCoachData {
     function latestStress() {
         try {
             var info = ActivityMonitor.getInfo();
-            if (info.stressScore != null) {
+            if (info != null && info has :stressScore && info.stressScore != null) {
                 return info.stressScore;
             }
         } catch (e) {
+        }
+
+        if (!(SensorHistory has :getStressHistory)) {
+            return null;
         }
 
         try {
             var iterator = SensorHistory.getStressHistory({ :period => 1 });
             if (iterator != null) {
                 var sample = iterator.next();
-                if (sample != null) {
+                if (sample != null && sample has :data) {
                     return sample.data;
                 }
             }
@@ -40,19 +48,30 @@ module HealthCoachData {
     }
 
     function snapshot() {
-        var info = ActivityMonitor.getInfo();
-        var stats = System.getSystemStats();
+        var info = null;
+        var stats = null;
+
+        try { info = ActivityMonitor.getInfo(); } catch (e) {}
+        try { stats = System.getSystemStats(); } catch (e) {}
+
         var bodyBattery = latestBodyBattery();
         var stress = latestStress();
         var recovery = null;
         var respiration = null;
         var steps = null;
         var stepGoal = null;
+        var watchBattery = null;
 
-        try { recovery = info.timeToRecovery; } catch (e) {}
-        try { respiration = info.respirationRate; } catch (e) {}
-        try { steps = info.steps; } catch (e) {}
-        try { stepGoal = info.stepGoal; } catch (e) {}
+        if (info != null) {
+            if (info has :timeToRecovery) { recovery = info.timeToRecovery; }
+            if (info has :respirationRate) { respiration = info.respirationRate; }
+            if (info has :steps) { steps = info.steps; }
+            if (info has :stepGoal) { stepGoal = info.stepGoal; }
+        }
+
+        if (stats != null && stats has :battery) {
+            watchBattery = stats.battery;
+        }
 
         var readiness = readinessScore(bodyBattery, stress, recovery);
 
@@ -63,7 +82,7 @@ module HealthCoachData {
             :respiration => respiration,
             :steps => steps,
             :stepGoal => stepGoal,
-            :watchBattery => stats.battery,
+            :watchBattery => watchBattery,
             :readiness => readiness,
             :status => statusFor(readiness),
             :advice => adviceFor(readiness, recovery)
