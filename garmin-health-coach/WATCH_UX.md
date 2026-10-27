@@ -4,20 +4,23 @@ Target device: Garmin Forerunner 970 (454×454 AMOLED, touch + five buttons).
 
 ## Design principle
 
-The watch app is not a replacement for the full Hybrid Coach editor. It is a fast wrist companion for checking readiness, seeing today's plan, logging sets, and making small set-level changes during training.
+The watch app is not a replacement for the full Hybrid Coach editor, and it should not duplicate Garmin's own Training Readiness experience. It is a fast wrist companion for today's programmed workout: checking the next exercise, logging sets, making small set-level changes, timing rest, and syncing those changes back to Hybrid Coach.
 
 ## Main navigation
 
 ### Glance
-- Readiness number and READY / STEADY / EASY / RECOVER label.
-- Today's planned workout status.
+- Today's planned workout name or `Rest Day`.
+- Progress, e.g. `6/18 sets`.
+- Next exercise / next set.
 - Tap/START opens the full app.
 
 ### Home
-1. Readiness summary.
-2. Today's Workout card.
-3. Recovery metrics.
+1. Today's Workout.
+2. Current / next exercise.
+3. Workout progress.
 4. Sync status.
+
+Garmin wellness metrics such as Body Battery or stress are optional secondary context only and should never dominate the screen.
 
 Use UP/DOWN or swipe to move between sections. START/tap selects. BACK returns.
 
@@ -96,6 +99,13 @@ Long-press MENU on an exercise/set may provide:
 
 Avoid free-form text entry on the watch.
 
+## Rest timer
+
+- Completing a set starts the programmed/default rest timer automatically.
+- Show remaining rest prominently while still allowing navigation.
+- Vibrate when rest ends.
+- Allow quick +30 sec / skip timer actions.
+
 ## Sync behavior
 
 - Cache the current workout and unsynced edits locally with `Application.Storage`.
@@ -104,17 +114,14 @@ Avoid free-form text entry on the watch.
 - If offline, show `Saved on watch` and retry later.
 - Never discard an unsynced completed set just because the app closes.
 
-## Safety and scope
+## Scope
 
-- Readiness is a training/wellness estimate, not a medical score.
-- No medication, diagnosis, or medical-record editing from the watch.
-- Do not allow full program construction, exercise-library management, or complex scheduling on-watch; those remain in the phone/web app.
+Do not allow full program construction, exercise-library management, complex scheduling, or long-form notes on-watch; those remain in the phone/web app.
 
 ## Later improvements
 
-- Rest timer after a completed set.
-- Haptic alert when rest ends.
 - Quick `+5 lb` / `-5 lb` actions.
 - PR indicator.
 - Previous-session comparison.
 - Mark full workout complete from the watch.
+- Optional small wellness context strip if it proves useful without clutter.
