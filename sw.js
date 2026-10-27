@@ -1,4 +1,4 @@
-const CACHE='hybrid-coach-v4-run-sync';
+const CACHE='hybrid-coach-v5-canonical-runs';
 const ASSETS=['./','./index.html','./manifest.webmanifest','./icon-180.png','./icon-512.png','./cc-sync.js'];
 
 self.addEventListener('install',e=>{
