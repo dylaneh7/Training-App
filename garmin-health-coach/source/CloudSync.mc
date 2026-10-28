@@ -26,7 +26,8 @@ module CloudSync {
         var options = {
             :method => Communications.HTTP_REQUEST_METHOD_GET,
             :headers => { "x-garmin-token" => GarminSecrets.TOKEN },
-            :responseType => Communications.HTTP_RESPONSE_CONTENT_TYPE_JSON
+            :responseType => Communications.HTTP_RESPONSE_CONTENT_TYPE_JSON,
+            :context => "pull"
         };
 
         Communications.makeWebRequest(
@@ -39,7 +40,8 @@ module CloudSync {
 
     function onPullResponse(
         code as Number,
-        data as Null or ByteArray or Dictionary or String or PersistedContent.Iterator
+        data as Null or ByteArray or Dictionary or String or PersistedContent.Iterator,
+        context as Object
     ) as Void {
         var callback = _pullCallback;
         _pullCallback = null;
@@ -74,7 +76,8 @@ module CloudSync {
                 "x-garmin-token" => GarminSecrets.TOKEN,
                 "Content-Type" => Communications.REQUEST_CONTENT_TYPE_JSON
             },
-            :responseType => Communications.HTTP_RESPONSE_CONTENT_TYPE_JSON
+            :responseType => Communications.HTTP_RESPONSE_CONTENT_TYPE_JSON,
+            :context => "push"
         };
 
         Communications.makeWebRequest(
@@ -87,7 +90,8 @@ module CloudSync {
 
     function onPushResponse(
         code as Number,
-        data as Null or ByteArray or Dictionary or String or PersistedContent.Iterator
+        data as Null or ByteArray or Dictionary or String or PersistedContent.Iterator,
+        context as Object
     ) as Void {
         var callback = _pushCallback;
         _pushCallback = null;
