@@ -32,14 +32,17 @@ module CloudSync {
             URL,
             params,
             options,
-            new Lang.Method(CloudSync, :onPullResponse)
+            method(:onPullResponse)
         );
     }
 
-    function onPullResponse(code, data) {
+    function onPullResponse(code as Number, data as Communications.ContentType or Null) as Void {
         var callback = _pullCallback;
         _pullCallback = null;
-        var ok = code == 200 && data != null && data["ok"] == true;
+        var ok = false;
+        if (code == 200 && data != null && data instanceof Dictionary) {
+            ok = data["ok"] == true;
+        }
         if (callback != null) {
             callback.invoke(ok, data);
         }
@@ -74,14 +77,17 @@ module CloudSync {
             URL,
             params,
             options,
-            new Lang.Method(CloudSync, :onPushResponse)
+            method(:onPushResponse)
         );
     }
 
-    function onPushResponse(code, data) {
+    function onPushResponse(code as Number, data as Communications.ContentType or Null) as Void {
         var callback = _pushCallback;
         _pushCallback = null;
-        var ok = code == 200 && data != null && data["ok"] == true;
+        var ok = false;
+        if (code == 200 && data != null && data instanceof Dictionary) {
+            ok = data["ok"] == true;
+        }
         if (callback != null) {
             callback.invoke(ok, data);
         }
