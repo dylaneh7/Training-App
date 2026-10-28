@@ -56,11 +56,12 @@
   function loadCloud(){
     applyWeek44Fallback();
     setTimeout(()=>loadScript('./push-pull-plan-v5.js?v=5','data-hybrid-push-pull-v5'),70);
-    setTimeout(()=>loadScript('./workout-notes.js?v=1','data-hybrid-workout-notes'),120);
-    setTimeout(()=>loadScript('./exercise-editor.js?v=2','data-hybrid-exercise-editor'),180);
-    setTimeout(()=>loadScript('./set-editor.js?v=1','data-hybrid-set-editor'),320);
-    setTimeout(()=>loadScript('./progression-coach.js?v=1','data-hybrid-progression-coach'),520);
-    setTimeout(()=>loadScript('./cc-cloud.js?v=3','data-hybrid-cloud-runtime'),900);
+    setTimeout(()=>loadScript('./rest-policy.js?v=1','data-hybrid-rest-policy'),100);
+    setTimeout(()=>loadScript('./workout-notes.js?v=1','data-hybrid-workout-notes'),140);
+    setTimeout(()=>loadScript('./exercise-editor.js?v=2','data-hybrid-exercise-editor'),200);
+    setTimeout(()=>loadScript('./set-editor.js?v=1','data-hybrid-set-editor'),340);
+    setTimeout(()=>loadScript('./progression-coach.js?v=1','data-hybrid-progression-coach'),540);
+    setTimeout(()=>loadScript('./cc-cloud.js?v=3','data-hybrid-cloud-runtime'),920);
   }
 
   document.addEventListener('change',e=>{
