@@ -1,5 +1,6 @@
 using Toybox.Communications;
 using Toybox.Lang;
+using Toybox.PersistedContent;
 
 module CloudSync {
     const URL = "https://ecmosmmqloyahsdcxvpz.supabase.co/functions/v1/garmin-sync";
@@ -36,7 +37,10 @@ module CloudSync {
         );
     }
 
-    function onPullResponse(code as Number, data as Communications.ContentType or Null) as Void {
+    function onPullResponse(
+        code as Number,
+        data as Null or ByteArray or Dictionary or String or PersistedContent.Iterator
+    ) as Void {
         var callback = _pullCallback;
         _pullCallback = null;
         var ok = false;
@@ -81,7 +85,10 @@ module CloudSync {
         );
     }
 
-    function onPushResponse(code as Number, data as Communications.ContentType or Null) as Void {
+    function onPushResponse(
+        code as Number,
+        data as Null or ByteArray or Dictionary or String or PersistedContent.Iterator
+    ) as Void {
         var callback = _pushCallback;
         _pushCallback = null;
         var ok = false;
