@@ -59,7 +59,7 @@ module WorkoutStore {
         if (w == 3 || w == 7) { factor = 0.65; }
         else if (w == 10) { factor = 0.55; }
         else if (w == 11) { factor = 0.45; }
-        var scaled = (count * factor).round();
+        var scaled = (count * factor + 0.5).toNumber();
         if (scaled < 2) { scaled = 2; }
         return scaled;
     }
