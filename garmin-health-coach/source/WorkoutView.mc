@@ -18,6 +18,7 @@ class WorkoutView extends WatchUi.View {
     var _restTimer;
     var _restRemaining = 0;
     var _restActive = false;
+    var _syncState = "LOCAL";
 
     function initialize() {
         View.initialize();
@@ -38,11 +39,65 @@ class WorkoutView extends WatchUi.View {
     }
 
     function onShow() {
+        syncDay();
         WatchUi.requestUpdate();
     }
 
     function onHide() {
         stopRestTimer();
+    }
+
+    function syncDay() {
+        if (!CloudSync.configured()) {
+            _syncState = "LOCAL";
+            WatchUi.requestUpdate();
+            return;
+        }
+        _syncState = "SYNC...";
+        WatchUi.requestUpdate();
+        CloudSync.pull(WorkoutStore.weekIndex(), _day, method(:onCloudPull));
+    }
+
+    function onCloudPull(ok, data) {
+        if (ok && WorkoutStore.applyCloudSession(data)) {
+            _syncState = "SYNCED";
+            reloadDay();
+        } else {
+            _syncState = "OFFLINE";
+        }
+        WatchUi.requestUpdate();
+    }
+
+    function onCloudPush(ok, data) {
+        _syncState = ok ? "SYNCED" : "OFFLINE";
+        WatchUi.requestUpdate();
+    }
+
+    function syncSet(exIndex, setIndex) {
+        if (!CloudSync.configured()) {
+            _syncState = "LOCAL";
+            return;
+        }
+        if (exIndex < 0 || exIndex >= _exercises.size()) { return; }
+        var ex = _exercises[exIndex];
+        var stateIndex = ex["stateIndex"];
+        if (stateIndex == null || stateIndex < 0) { return; }
+
+        var weight = WorkoutStore.getValue(_day, exIndex, setIndex, "weight", 0);
+        var reps = WorkoutStore.getValue(_day, exIndex, setIndex, "reps", ex["reps"]);
+        var rir = WorkoutStore.getValue(_day, exIndex, setIndex, "rir", ex["rir"]);
+
+        _syncState = "SYNC...";
+        CloudSync.pushSet(
+            WorkoutStore.weekIndex(),
+            _day,
+            stateIndex,
+            setIndex,
+            weight,
+            reps,
+            rir,
+            method(:onCloudPush)
+        );
     }
 
     function onUpdate(dc) {
@@ -66,8 +121,8 @@ class WorkoutView extends WatchUi.View {
         dc.setColor(0x8FB8FF, Graphics.COLOR_TRANSPARENT);
         dc.drawText(center, 47, Graphics.FONT_TINY, "HYBRID COACH", Graphics.TEXT_JUSTIFY_CENTER);
 
-        dc.setColor(0x777777, Graphics.COLOR_TRANSPARENT);
-        dc.drawText(center, 84, Graphics.FONT_XTINY, _day + "  WORKOUT", Graphics.TEXT_JUSTIFY_CENTER);
+        dc.setColor(_syncState.equals("SYNCED") ? 0x9ED7B4 : 0x777777, Graphics.COLOR_TRANSPARENT);
+        dc.drawText(center, 84, Graphics.FONT_XTINY, _day + "  " + _syncState, Graphics.TEXT_JUSTIFY_CENTER);
 
         dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
         dc.drawText(center, 113, Graphics.FONT_MEDIUM, WorkoutStore.sessionName(_day), Graphics.TEXT_JUSTIFY_CENTER);
@@ -104,9 +159,10 @@ class WorkoutView extends WatchUi.View {
         var setCount = ex["sets"];
         var done = WorkoutStore.isDone(_day, _exerciseIndex, _setIndex);
 
-        dc.setColor(0x8FB8FF, Graphics.COLOR_TRANSPARENT);
+        dc.setColor(_syncState.equals("SYNCED") ? 0x9ED7B4 : 0x8FB8FF, Graphics.COLOR_TRANSPARENT);
         dc.drawText(center, 34, Graphics.FONT_XTINY,
-            (_exerciseIndex + 1).toString() + " / " + _exercises.size().toString(), Graphics.TEXT_JUSTIFY_CENTER);
+            (_exerciseIndex + 1).toString() + " / " + _exercises.size().toString() + "   " + _syncState,
+            Graphics.TEXT_JUSTIFY_CENTER);
 
         dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
         dc.drawText(center, 62, Graphics.FONT_TINY, shortName(ex["name"], 22), Graphics.TEXT_JUSTIFY_CENTER);
@@ -217,7 +273,9 @@ class WorkoutView extends WatchUi.View {
         if (index < 0) { index = _days.size() - 1; }
         if (index >= _days.size()) { index = 0; }
         _day = _days[index];
+        WorkoutStore.clearCloud();
         reloadDay();
+        syncDay();
     }
 
     function nextPage() {
@@ -319,13 +377,17 @@ class WorkoutView extends WatchUi.View {
     function saveEdit() {
         var field = _editingField == 0 ? "weight" : (_editingField == 1 ? "reps" : "rir");
         WorkoutStore.setValue(_day, _exerciseIndex, _setIndex, field, _editValue);
+        syncSet(_exerciseIndex, _setIndex);
         _screen = 1;
         WatchUi.requestUpdate();
     }
 
     function toggleComplete() {
-        var done = WorkoutStore.isDone(_day, _exerciseIndex, _setIndex);
-        WorkoutStore.setDone(_day, _exerciseIndex, _setIndex, !done);
+        var currentExercise = _exerciseIndex;
+        var currentSet = _setIndex;
+        var done = WorkoutStore.isDone(_day, currentExercise, currentSet);
+        WorkoutStore.setDone(_day, currentExercise, currentSet, !done);
+        syncSet(currentExercise, currentSet);
 
         if (!done) {
             advance();
