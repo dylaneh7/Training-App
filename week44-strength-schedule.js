@@ -18,7 +18,6 @@
 
   function isWeek44(){return String(week.value)===WEEK44}
   function slotFor(v){return SPECIAL[v]?.slot||v}
-  function calendarFor(v){return SPECIAL[v]?.calendar||v}
   function makeOption(value,text){const o=document.createElement('option');o.value=value;o.textContent=text;return o}
 
   function defaultOptions(prefer){
@@ -149,8 +148,8 @@
     const box=document.getElementById('coachText');
     if(!box||!box.value)return;
     box.value=box.value
-      .replace(/WEEK 1 \(Oct 26\) — Wed/g,'WEEK 1 (Oct 26) — Thu (Upper Support moved from Wed)')
-      .replace(/WEEK 1 \(Oct 26\) — Thu/g,'WEEK 1 (Oct 26) — Fri (Legs moved from Thu)');
+      .replace(/WEEK 1 \(Oct 26\) — Thu/g,'WEEK 1 (Oct 26) — Fri (Legs moved from Thu)')
+      .replace(/WEEK 1 \(Oct 26\) — Wed/g,'WEEK 1 (Oct 26) — Thu (Upper Support moved from Wed)');
   }
   document.getElementById('buildCoach')?.addEventListener('click',()=>setTimeout(relabelCoachText,0));
   document.getElementById('copyCoach')?.addEventListener('click',()=>setTimeout(relabelCoachText,0),true);
