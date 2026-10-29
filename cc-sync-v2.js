@@ -55,13 +55,14 @@
 
   function loadCloud(){
     applyWeek44Fallback();
-    setTimeout(()=>loadScript('./push-pull-plan-v5.js?v=5','data-hybrid-push-pull-v5'),70);
-    setTimeout(()=>loadScript('./rest-policy.js?v=1','data-hybrid-rest-policy'),100);
-    setTimeout(()=>loadScript('./workout-notes.js?v=1','data-hybrid-workout-notes'),140);
-    setTimeout(()=>loadScript('./exercise-editor.js?v=2','data-hybrid-exercise-editor'),200);
-    setTimeout(()=>loadScript('./set-editor.js?v=1','data-hybrid-set-editor'),340);
-    setTimeout(()=>loadScript('./progression-coach.js?v=1','data-hybrid-progression-coach'),540);
-    setTimeout(()=>loadScript('./cc-cloud.js?v=3','data-hybrid-cloud-runtime'),920);
+    setTimeout(()=>loadScript('./week44-strength-schedule.js?v=1','data-hybrid-week44-strength-schedule'),40);
+    setTimeout(()=>loadScript('./push-pull-plan-v5.js?v=5','data-hybrid-push-pull-v5'),90);
+    setTimeout(()=>loadScript('./rest-policy.js?v=1','data-hybrid-rest-policy'),120);
+    setTimeout(()=>loadScript('./workout-notes.js?v=1','data-hybrid-workout-notes'),160);
+    setTimeout(()=>loadScript('./exercise-editor.js?v=2','data-hybrid-exercise-editor'),220);
+    setTimeout(()=>loadScript('./set-editor.js?v=1','data-hybrid-set-editor'),360);
+    setTimeout(()=>loadScript('./progression-coach.js?v=1','data-hybrid-progression-coach'),560);
+    setTimeout(()=>loadScript('./cc-cloud.js?v=3','data-hybrid-cloud-runtime'),940);
   }
 
   document.addEventListener('change',e=>{
