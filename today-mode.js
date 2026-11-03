@@ -14,7 +14,7 @@
   let coreDayChange=null;
   let lastCalendarDate='';
   let runSyncTimer=null;
-  let decorating=false;
+  let sdkRetries=0;
 
   const localNoon=iso=>new Date(`${iso}T12:00:00`);
   const addDays=(date,n)=>{const d=new Date(date);d.setDate(d.getDate()+n);return d};
@@ -36,9 +36,7 @@
   function readState(){try{return JSON.parse(localStorage.getItem(STORAGE_KEY)||'{}')||{}}catch{return {}}}
   function writeState(state){try{localStorage.setItem(STORAGE_KEY,JSON.stringify(state))}catch{}}
   function ensureDayState(wi,d){
-    const state=readState();
-    if(!state.days)state.days={};
-    const k=`${wi}-${d}`;
+    const state=readState();if(!state.days)state.days={};const k=`${wi}-${d}`;
     if(!state.days[k])state.days[k]={runDone:false,liftDone:false,run:{miles:'',time:'',hr:'',rpe:'',shoe:state.shoes?.[0]||'',notes:'',carbs:'',fluid:'',sodium:'',gi:''},rec:{},sets:{},choice:{},openHow:null};
     return {state,key:k,day:state.days[k]};
   }
@@ -51,26 +49,25 @@
       .hc-today-bar strong{font-size:14px}.hc-today-bar .tiny{margin-top:2px}
       .hc-today-badge{display:inline-block;border:1px solid #3b7152;background:#173624;color:var(--ok);border-radius:999px;padding:3px 7px;font-size:10px;font-weight:800;margin-right:6px}
       .hc-overview-date-nav{display:grid;grid-template-columns:1fr auto 1fr;gap:8px;align-items:center;margin:0 0 12px}
-      .hc-overview-date-nav .btn:last-child{text-align:right}.hc-nav-center{text-align:center;min-width:115px}
+      .hc-nav-center{text-align:center;min-width:115px}
       .hc-run-auto{border:1px solid var(--border);background:var(--panel);border-radius:12px;padding:11px;margin:9px 0}
-      .hc-run-auto-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:7px;margin-top:8px}
+      .hc-run-auto-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:7px;margin-top:8px}
       .hc-run-auto-metric{border:1px solid var(--border);background:var(--card);border-radius:10px;padding:8px}
       .hc-run-auto-metric span{display:block;color:var(--muted);font-size:10px}.hc-run-auto-metric strong{display:block;font-size:15px;margin-top:2px}
-      .hc-run-manual.hc-run-collapsed{display:none!important}.hc-run-auto-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:8px}
-      .hc-auto-source{font-size:10px;color:var(--muted)}
+      .hc-run-manual.hc-run-collapsed{display:none!important}.hc-run-auto-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:8px}.hc-auto-source{font-size:10px;color:var(--muted)}
       @media(max-width:720px){.hc-overview-date-nav{grid-template-columns:1fr 1fr}.hc-nav-center{grid-column:1/-1;grid-row:1}.hc-run-auto-grid{grid-template-columns:1fr 1fr}.hc-today-bar{align-items:flex-start}}
     `;
     document.head.appendChild(s);
   }
 
   function ensureTodayBar(){
-    const panel=document.querySelector('[data-panel="workout"]'),root=document.getElementById('workout');
-    if(!panel||!root)return;
+    const root=document.getElementById('workout');if(!root)return;
     let bar=document.getElementById('hcTodayBar');
     if(!bar){bar=document.createElement('div');bar.id='hcTodayBar';bar.className='hc-today-bar';root.parentNode.insertBefore(bar,root)}
-    const d=selectedDate(),onToday=isTodaySelected();
+    const d=selectedDate(),onToday=isTodaySelected(),sig=`${isoDate(d)}|${onToday}`;
+    if(bar.dataset.sig===sig)return;bar.dataset.sig=sig;
     bar.innerHTML=`<div><div><span class="${onToday?'hc-today-badge':'tiny'}">${onToday?'TODAY':'VIEWING'}</span><strong>${formatDate(d)}</strong></div><div class="tiny">${onToday?'Your run and lift for today are shown below.':'You are browsing another workout date.'}</div></div>${onToday?'':`<button class="btn" id="hcBackToday" type="button">Back to Today</button>`}`;
-    bar.querySelector('#hcBackToday')?.addEventListener('click',()=>goToday(true));
+    bar.querySelector('#hcBackToday')?.addEventListener('click',goToday);
   }
 
   function genericShoeOptions(selected){
@@ -91,7 +88,11 @@
   function wrapDayHandler(){
     const day=document.getElementById('day');if(!day||day.dataset.hcTodayWrapped==='1')return;
     coreDayChange=day.onchange;
-    day.onchange=function(e){if(['Fri','Sat','Sun'].includes(day.value)){renderGenericDay(day.value)}else if(typeof coreDayChange==='function')coreDayChange.call(day,e);setTimeout(()=>{ensureTodayBar();scheduleRunSync(120)},80)};
+    day.onchange=function(e){
+      if(['Fri','Sat','Sun'].includes(day.value))renderGenericDay(day.value);
+      else if(typeof coreDayChange==='function')coreDayChange.call(day,e);
+      setTimeout(()=>{ensureTodayBar();scheduleRunSync(160)},100);
+    };
     day.dataset.hcTodayWrapped='1';
   }
 
@@ -105,7 +106,7 @@
     return key;
   }
 
-  function goToday(force=false){
+  function goToday(){
     const week=document.getElementById('week'),day=document.getElementById('day');if(!week||!day)return;
     const wi=Math.max(0,Math.min(week.options.length-1,currentWeekIndex()));
     week.value=String(wi);week.dispatchEvent(new Event('change',{bubbles:true}));
@@ -115,8 +116,8 @@
       if([...day.options].some(o=>o.value===wanted))day.value=wanted;
       else if([...day.options].some(o=>o.value===key))day.value=key;
       day.dispatchEvent(new Event('change',{bubbles:true}));
-      lastCalendarDate=isoDate(today());ensureTodayBar();scheduleRunSync(600);
-    },100);
+      lastCalendarDate=isoDate(today());ensureTodayBar();scheduleRunSync(650);
+    },120);
   }
 
   function workoutSlots(){
@@ -131,7 +132,13 @@
   function openSlot(slot){
     const week=document.getElementById('week'),day=document.getElementById('day');if(!week||!day||!slot)return;
     week.value=String(slot.wi);week.dispatchEvent(new Event('change',{bubbles:true}));
-    setTimeout(()=>{wrapDayHandler();if(['Fri','Sat','Sun'].includes(slot.value))ensureWeekendOption(slot.value);const wanted=[...day.options].some(o=>o.value===slot.value)?slot.value:slot.key;if([...day.options].some(o=>o.value===wanted))day.value=wanted;day.dispatchEvent(new Event('change',{bubbles:true}));document.querySelector('.tab[data-tab="workout"]')?.click();ensureTodayBar()},100);
+    setTimeout(()=>{
+      wrapDayHandler();if(['Fri','Sat','Sun'].includes(slot.value))ensureWeekendOption(slot.value);
+      const wanted=[...day.options].some(o=>o.value===slot.value)?slot.value:slot.key;
+      if([...day.options].some(o=>o.value===wanted))day.value=wanted;
+      day.dispatchEvent(new Event('change',{bubbles:true}));
+      document.querySelector('.tab[data-tab="workout"]')?.click();ensureTodayBar();
+    },120);
   }
 
   function ensureOverviewNav(){
@@ -139,11 +146,16 @@
     let nav=panel.querySelector('.hc-overview-date-nav');if(!nav){nav=document.createElement('div');nav.className='hc-overview-date-nav';hero.insertAdjacentElement('afterend',nav)}
     const slots=workoutSlots(),current=selectedDate().getTime();let prev=null,next=null;
     slots.forEach(s=>{const t=s.date.getTime();if(t<current&&(!prev||t>prev.date.getTime()))prev=s;if(t>current&&(!next||t<next.date.getTime()))next=s});
+    const sig=`${isoDate(selectedDate())}|${prev?isoDate(prev.date):''}|${next?isoDate(next.date):''}`;
+    if(nav.dataset.sig===sig)return;nav.dataset.sig=sig;
     nav.innerHTML=`<button class="btn" id="hcPrevWorkout" type="button" ${prev?'':'disabled'}>‹ Previous workout</button><div class="hc-nav-center"><strong>${isTodaySelected()?'Today':'Browse'}</strong><div class="tiny">${formatDate(selectedDate())}</div><button class="hc-reset" id="hcOverviewToday" type="button">Go to today</button></div><button class="btn" id="hcNextWorkout" type="button" ${next?'':'disabled'}>Next workout ›</button>`;
-    nav.querySelector('#hcPrevWorkout')?.addEventListener('click',()=>openSlot(prev));nav.querySelector('#hcNextWorkout')?.addEventListener('click',()=>openSlot(next));nav.querySelector('#hcOverviewToday')?.addEventListener('click',()=>goToday(true));
+    nav.querySelector('#hcPrevWorkout')?.addEventListener('click',()=>openSlot(prev));
+    nav.querySelector('#hcNextWorkout')?.addEventListener('click',()=>openSlot(next));
+    nav.querySelector('#hcOverviewToday')?.addEventListener('click',goToday);
   }
 
   function secondsToClock(sec){sec=Math.max(0,Math.round(Number(sec)||0));const h=Math.floor(sec/3600),m=Math.floor((sec%3600)/60),s=sec%60;return h?`${h}:${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`:`${m}:${String(s).padStart(2,'0')}`}
+  function paceToMi(secKm){const sec=Math.round((Number(secKm)||0)*1.609344);return sec?`${Math.floor(sec/60)}:${String(sec%60).padStart(2,'0')}/mi`:'—'}
   function setField(name,value){const el=document.querySelector(`#workout [data-run="${name}"]`);if(!el||value===null||value===undefined||value==='')return;if(String(el.value)===String(value))return;el.value=value;el.dispatchEvent(new Event('input',{bubbles:true}))}
   function lastShoe(){
     const state=readState(),entries=Object.entries(state.days||{}).sort((a,b)=>b[0].localeCompare(a[0]));
@@ -159,59 +171,54 @@
     nodes.forEach(n=>n.classList.add('hc-run-manual','hc-run-collapsed'));return nodes;
   }
 
-  function readRunValues(){
-    const get=n=>document.querySelector(`#workout [data-run="${n}"]`)?.value||'';
-    return {miles:get('miles'),time:get('time'),hr:get('hr'),rpe:get('rpe'),shoe:get('shoe')};
-  }
+  function readRunValues(){const get=n=>document.querySelector(`#workout [data-run="${n}"]`)?.value||'';return {miles:get('miles'),time:get('time'),hr:get('hr'),rpe:get('rpe'),shoe:get('shoe')}}
 
   function decorateRun(eventData,status='waiting'){
-    if(decorating)return;decorating=true;
-    try{
-      const runDone=document.querySelector('#workout #runDone'),section=runDone?.closest('section');if(!section)return;
-      const manual=markManualFields(section);let box=section.querySelector('.hc-run-auto');if(!box){box=document.createElement('div');box.className='hc-run-auto';const guide=section.querySelector('p.tiny');(guide||section.querySelector('.section-title'))?.insertAdjacentElement('afterend',box)}
-      const v=readRunValues(),has=!!eventData;
-      box.innerHTML=has?`<div><strong>Run auto-logged</strong><div class="hc-auto-source">${eventData.activity_attribution==='Garmin'?'Garmin · ':''}synced through Tredict</div></div><div class="hc-run-auto-grid"><div class="hc-run-auto-metric"><span>Distance</span><strong>${v.miles||'—'} mi</strong></div><div class="hc-run-auto-metric"><span>Time</span><strong>${v.time||'—'}</strong></div><div class="hc-run-auto-metric"><span>Avg HR</span><strong>${v.hr||'—'}${v.hr?' bpm':''}</strong></div><div class="hc-run-auto-metric"><span>RPE</span><strong>${v.rpe||'—'}</strong></div></div><div class="hc-run-auto-actions"><span class="tiny">Shoe: <strong>${v.shoe||'Not set'}</strong></span><button class="btn" type="button" data-hc-edit-run>Edit details</button></div>`:`<div><strong>${status==='connect'?'Connect Command Center for automatic run logging':'Automatic run logging'}</strong><div class="tiny" style="margin-top:4px">${status==='connect'?'Once connected, completed Garmin/Tredict runs can fill this card automatically.':'No manual entry needed. After your completed run reaches Tredict, distance, time, average HR and RPE will fill in here automatically.'}</div></div><div class="hc-run-auto-actions"><span class="tiny">Remembered shoe: <strong>${v.shoe||lastShoe()||'—'}</strong></span><button class="btn" type="button" data-hc-edit-run>Edit details</button></div>`;
-      box.querySelector('[data-hc-edit-run]')?.addEventListener('click',()=>{manual.forEach(n=>n.classList.toggle('hc-run-collapsed'));const b=box.querySelector('[data-hc-edit-run]');if(b)b.textContent=manual.some(n=>n.classList.contains('hc-run-collapsed'))?'Edit details':'Hide details'});
-    }finally{decorating=false}
+    const runDone=document.querySelector('#workout #runDone'),section=runDone?.closest('section');if(!section)return;
+    const manual=markManualFields(section);let box=section.querySelector('.hc-run-auto');
+    if(!box){box=document.createElement('div');box.className='hc-run-auto';const guide=section.querySelector('p.tiny');(guide||section.querySelector('.section-title'))?.insertAdjacentElement('afterend',box)}
+    const v=readRunValues(),has=!!eventData,sig=`${has}|${status}|${v.miles}|${v.time}|${v.hr}|${v.rpe}|${v.shoe}|${eventData?.activity_synced_at||''}`;
+    if(box.dataset.sig===sig)return;box.dataset.sig=sig;
+    box.innerHTML=has?`<div><strong>Run auto-logged</strong><div class="hc-auto-source">${eventData.activity_attribution==='Garmin'?'Garmin · ':''}synced through Tredict</div></div><div class="hc-run-auto-grid"><div class="hc-run-auto-metric"><span>Distance</span><strong>${v.miles||'—'} mi</strong></div><div class="hc-run-auto-metric"><span>Time</span><strong>${v.time||'—'}</strong></div><div class="hc-run-auto-metric"><span>Avg HR</span><strong>${v.hr||'—'}${v.hr?' bpm':''}</strong></div><div class="hc-run-auto-metric"><span>RPE</span><strong>${v.rpe||'—'}</strong></div><div class="hc-run-auto-metric"><span>Avg pace</span><strong>${paceToMi(eventData.activity_pace_sec_km)}</strong></div><div class="hc-run-auto-metric"><span>Calories</span><strong>${eventData.activity_calories?Math.round(eventData.activity_calories)+' kcal':'—'}</strong></div></div><div class="hc-run-auto-actions"><span class="tiny">Shoe: <strong>${v.shoe||'Not set'}</strong></span><button class="btn" type="button" data-hc-edit-run>Edit details</button></div>`:`<div><strong>${status==='connect'?'Connect Command Center for automatic run logging':'Automatic run logging'}</strong><div class="tiny" style="margin-top:4px">${status==='connect'?'Once connected, completed Garmin/Tredict runs can fill this card automatically.':'No manual entry needed. After your completed run reaches Tredict, distance, time, average HR and RPE will fill in here automatically.'}</div></div><div class="hc-run-auto-actions"><span class="tiny">Remembered shoe: <strong>${v.shoe||lastShoe()||'—'}</strong></span><button class="btn" type="button" data-hc-edit-run>Edit details</button></div>`;
+    box.querySelector('[data-hc-edit-run]')?.addEventListener('click',()=>{manual.forEach(n=>n.classList.toggle('hc-run-collapsed'));const b=box.querySelector('[data-hc-edit-run]');if(b)b.textContent=manual.some(n=>n.classList.contains('hc-run-collapsed'))?'Edit details':'Hide details'});
   }
 
   async function getAutoClient(){
-    if(autoClient)return autoClient;if(!window.supabase?.createClient)return null;
-    autoClient=window.supabase.createClient(SUPABASE_URL,SUPABASE_KEY,{auth:{persistSession:true,storageKey:AUTH_STORAGE_KEY,autoRefreshToken:true,detectSessionInUrl:false}});return autoClient;
+    if(autoClient)return autoClient;
+    if(!window.supabase?.createClient)return null;
+    autoClient=window.supabase.createClient(SUPABASE_URL,SUPABASE_KEY,{auth:{persistSession:true,storageKey:AUTH_STORAGE_KEY,autoRefreshToken:true,detectSessionInUrl:false}});
+    return autoClient;
   }
 
   async function syncRunMetrics(){
     clearTimeout(runSyncTimer);const runDone=document.querySelector('#workout #runDone');if(!runDone){ensureTodayBar();return}
-    const shoe=document.querySelector('#workout [data-run="shoe"]');if(shoe&&!shoe.value){const s=lastShoe();if(s&&[...shoe.options].some(o=>o.value===s)){shoe.value=s;shoe.dispatchEvent(new Event('input',{bubbles:true}))}}
-    const client=await getAutoClient();if(!client){decorateRun(null,'waiting');return}
+    const shoe=document.querySelector('#workout [data-run="shoe"]');
+    if(shoe&&!shoe.value){const s=lastShoe();if(s&&[...shoe.options].some(o=>o.value===s)){shoe.value=s;shoe.dispatchEvent(new Event('input',{bubbles:true}))}}
+    const client=await getAutoClient();
+    if(!client){decorateRun(null,'waiting');if(sdkRetries<6){sdkRetries++;scheduleRunSync(1200)}return}
+    sdkRetries=0;
     try{
       const {data:{session}}=await client.auth.getSession();if(!session){decorateRun(null,'connect');return}
       const date=isoDate(selectedDate());
       const {data,error}=await client.from('workout_completion_events').select('activity_started_at,activity_duration_sec,activity_duration_total_sec,activity_distance_m,activity_avg_hr,activity_max_hr,activity_calories,activity_pace_sec_km,activity_rpe,activity_enjoyment,activity_attribution,activity_synced_at').eq('workout_date',date).eq('workout_kind','run').eq('source','Tredict').order('activity_duration_sec',{ascending:false,nullsFirst:false}).limit(3);
-      if(error)throw error;const eventData=(data||[]).find(x=>x.activity_duration_sec||x.activity_distance_m)||null;
-      if(!eventData){decorateRun(null,'waiting');return}
+      if(error)throw error;
+      const eventData=(data||[]).find(x=>x.activity_duration_sec||x.activity_distance_m)||null;if(!eventData){decorateRun(null,'waiting');return}
       if(eventData.activity_distance_m)setField('miles',(Number(eventData.activity_distance_m)/1609.344).toFixed(2));
       const sec=eventData.activity_duration_total_sec||eventData.activity_duration_sec;if(sec)setField('time',secondsToClock(sec));
       if(eventData.activity_avg_hr)setField('hr',Math.round(eventData.activity_avg_hr));if(eventData.activity_rpe)setField('rpe',Number(eventData.activity_rpe));
-      if(shoe&&!shoe.value){const s=lastShoe();if(s)setField('shoe',s)}
-      if(!runDone.checked){runDone.checked=true;runDone.dispatchEvent(new Event('change',{bubbles:true}));setTimeout(()=>decorateRun(eventData,'synced'),120)}else decorateRun(eventData,'synced');
+      if(!runDone.checked){runDone.checked=true;runDone.dispatchEvent(new Event('change',{bubbles:true}));setTimeout(()=>decorateRun(eventData,'synced'),180)}else decorateRun(eventData,'synced');
     }catch(err){console.warn('Hybrid Coach automatic run log unavailable',err);decorateRun(null,'waiting')}
   }
   function scheduleRunSync(delay=300){clearTimeout(runSyncTimer);runSyncTimer=setTimeout(syncRunMetrics,delay)}
 
-  function attachObservers(){
-    const obs=new MutationObserver(()=>{ensureTodayBar();ensureOverviewNav();if(document.querySelector('#workout #runDone'))scheduleRunSync(250)});obs.observe(document.body,{childList:true,subtree:true});
-    document.addEventListener('change',e=>{if(e.target?.id==='week'||e.target?.id==='day'){setTimeout(()=>{ensureTodayBar();ensureOverviewNav();scheduleRunSync(300)},80)}},true);
-    document.addEventListener('click',e=>{if(e.target?.closest?.('.tab[data-tab="overview"]'))setTimeout(ensureOverviewNav,80)},true);
-    document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'){const nowIso=isoDate(today());if(lastCalendarDate&&lastCalendarDate!==nowIso)goToday(true);else scheduleRunSync(300)}});
+  function attachEvents(){
+    document.addEventListener('change',e=>{const id=e.target?.id;if(id==='week'||id==='day'){setTimeout(()=>{ensureTodayBar();ensureOverviewNav();scheduleRunSync(320)},120)}else if(id==='runDone'){setTimeout(()=>scheduleRunSync(250),120)}},true);
+    document.addEventListener('click',e=>{if(e.target?.closest?.('.tab[data-tab="overview"]'))setTimeout(ensureOverviewNav,120);if(e.target?.closest?.('.tab[data-tab="workout"]'))setTimeout(()=>{ensureTodayBar();scheduleRunSync(250)},120)},true);
+    document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'){const nowIso=isoDate(today());if(lastCalendarDate&&lastCalendarDate!==nowIso)goToday();else scheduleRunSync(300)}});
     window.addEventListener('focus',()=>scheduleRunSync(300));
-    setInterval(()=>{const nowIso=isoDate(today());if(lastCalendarDate&&lastCalendarDate!==nowIso)goToday(true);else scheduleRunSync(200)},300000);
+    setInterval(()=>{const nowIso=isoDate(today());if(lastCalendarDate&&lastCalendarDate!==nowIso)goToday();else scheduleRunSync(250)},300000);
   }
 
-  function start(){
-    injectStyles();wrapDayHandler();attachObservers();
-    setTimeout(()=>goToday(true),350);
-    setTimeout(()=>{ensureOverviewNav();scheduleRunSync(400)},1800);
-  }
+  function start(){injectStyles();wrapDayHandler();attachEvents();setTimeout(goToday,450);setTimeout(()=>{ensureOverviewNav();scheduleRunSync(450)},1900)}
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',start,{once:true});else start();
 })();
