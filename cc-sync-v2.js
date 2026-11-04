@@ -63,7 +63,7 @@
     setTimeout(()=>loadScript('./workout-notes.js?v=1','data-hybrid-workout-notes'),180);
     setTimeout(()=>loadScript('./exercise-editor.js?v=2','data-hybrid-exercise-editor'),240);
     setTimeout(()=>loadScript('./set-editor.js?v=2','data-hybrid-set-editor'),380);
-    setTimeout(()=>loadScript('./progression-coach.js?v=2','data-hybrid-progression-coach'),580);
+    setTimeout(()=>loadScript('./progression-coach.js?v=3','data-hybrid-progression-coach'),580);
     setTimeout(()=>loadScript('./cc-cloud.js?v=3','data-hybrid-cloud-runtime'),960);
     setTimeout(()=>loadScript('./today-mode.js?v=2','data-hybrid-today-mode'),1120);
     setTimeout(()=>loadScript('./recovery-auto.js?v=1','data-hybrid-recovery-auto'),1300);
