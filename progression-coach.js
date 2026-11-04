@@ -157,7 +157,7 @@
       found.push({selected,sets,sessionKey:sk,ordinal:ord,source,match:exact?'exact':'variation',variation:variant});
     }
     keys.forEach(sk=>{
-      const m=sk.match(/^(\\d+)-(Mon|Tue|Wed|Thu|Fri|Sat|Sun|UpperThu|LegsFri)$/);
+      const m=sk.match(/^(\d+)-(Mon|Tue|Wed|Thu|Fri|Sat|Sun|UpperThu|LegsFri)$/);
       if(!m)return;
       const w=Number(m[1]),d=DAY_VALUE_MAP[m[2]]||m[2],ord=w*7+(DAY_INDEX[m[2]]??DAY_INDEX[d]??0);
       if(ord>=currentOrdinal())return;
