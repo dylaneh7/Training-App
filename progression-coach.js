@@ -1,6 +1,6 @@
 (()=>{
-  if(window.__hybridCoachProgressionV2)return;
-  window.__hybridCoachProgressionV2=true;
+  if(window.__hybridCoachProgressionV3)return;
+  window.__hybridCoachProgressionV3=true;
 
   const TRAINING_KEY='hybridCoachData_v1';
   const TARGET=0.10;
@@ -12,7 +12,7 @@
     Wed:['Paused bench press','Low-to-high cable fly','Neutral-grip pulldown','Chest-supported machine row','Cable lateral raise','Cable rear-delt fly','Rope pressdown','Cable curl','Cable external rotation'],
     Thu:['Back squat / hack squat','Romanian deadlift','Leg press','Bulgarian split squat','Leg extension','Seated leg curl','Hip thrust','Standing calf raise','Seated soleus raise','Cable crunch / ab wheel']
   };
-  const AUTO_APPLIED=new Set();
+  const MANUAL_CLEARED=new Set();
   let timer=null;
 
   function state(){try{const raw=localStorage.getItem(TRAINING_KEY);return raw?JSON.parse(raw):null}catch{return null}}
@@ -41,7 +41,9 @@
     ['Rope pressdown','Triceps Pulldown — Rope','Rope Pressdown','Triceps Pressdown — Rope'],
     ['Push-up plus','Push-Up Plus / Serratus Punch','Push Up Plus'],
     ['Lat Pulldown — Wide-Grip Front Pull','Wide-Grip Lat Pulldown','Wide Grip Lat Pulldown','Wide-Grip Front Pulldown'],
-    ['Seated Row','Seated Cable Row'],
+    ['Seated Row','Seated Cable Row','Seated Plate-Loaded Row'],
+    ['Smith or Dumbbell Shrug','Dumbbell shrug','Dumbbell Shrug','DB Shrug'],
+    ['Cable Face Pull + External Rotation','Face Pull with External Rotation'],
     ['Independent-Arm Plate-Loaded Row — Right / Left','Independent Arm Plate Loaded Row','Iso-Lateral Row Machine'],
     ['Straight-arm cable pulldown','Straight-Arm Cable Pulldown / Pullover','Straight Arm Cable Pulldown','Rope Straight-Arm Pulldown'],
     ['Cable Y-raise','Cable Y-Raise / Trap-3 Raise','Cable Y Raise','Trap-3 Raise'],
@@ -68,6 +70,19 @@
     ['Seated soleus raise','Seated Calf Raise','Seated Soleus Raise'],
     ['Cable crunch / ab wheel','Cable Crunch','Ab Wheel']
   ];
+  // A variation can be related without having comparable loads. Never silently
+  // copy dumbbell/cable/machine weights between distinct implements.
+  const VARIANTS=[
+    {names:['Lat Pulldown — Wide-Grip Front Pull','Neutral-grip lat pulldown','Neutral-Grip Pulldown','Wide Neutral-Grip Pulldown'],transfer:true,factor:.90,label:'pulldown grip variation'},
+    {names:['Chest-Supported High Row — Elbows ~45°','Wide high row','Wide-Grip High Row'],transfer:false,label:'high-row variation'},
+    {names:['Independent-Arm Plate-Loaded Row — Right / Left','1-arm DB row — lat bias','Single-arm cable lat row — elbow to hip'],transfer:false,label:'different unilateral-row equipment'},
+    {names:['Seated Row','Seal row','Chest-supported T-bar row'],transfer:false,label:'different horizontal-row equipment'},
+    {names:['Bayesian Cable Curl','Incline dumbbell curl'],transfer:false,label:'different curl equipment'},
+  ];
+  function variantFor(a,b){
+    if(!a||!b||sameMovement(a,b))return null;
+    return VARIANTS.find(v=>v.names.some(n=>normalizeName(n)===normalizeName(a))&&v.names.some(n=>normalizeName(n)===normalizeName(b)))||null;
+  }
   const ALIAS=new Map();
   ALIAS_GROUPS.forEach((g,i)=>g.forEach(n=>ALIAS.set(normalizeName(n),`g${i}`)));
   function movementKey(v){const n=normalizeName(v);return ALIAS.get(n)||`name:${n}`}
@@ -129,32 +144,46 @@
   function historicalSelection(x,d,idx){return String(x?.choice?.[idx]||DAY_ORDER[d]?.[idx]||'').trim()}
   function currentOrdinal(){return week()*7+(DAY_INDEX[day()]??0)}
 
-  function latestBuiltHistory(s,info){
-    const candidates=[];
-    Object.keys(s?.days||{}).forEach(sk=>{
-      const m=sk.match(/^(\d+)-(Mon|Tue|Wed|Thu)$/);if(!m)return;
-      const w=Number(m[1]),d=m[2],ord=w*7+(DAY_INDEX[d]??0);if(ord>=currentOrdinal())return;
-      const x=s.days[sk],order=DAY_ORDER[d]||[];
-      order.forEach((id,idx)=>{
-        const selected=historicalSelection(x,d,idx);if(!sameMovement(selected,info.selected))return;
-        const sets=nativeSetsAt(s,w,d,idx,id);if(sets.length)candidates.push({week:w,day:d,ordinal:ord,sets,selected,sessionKey:sk});
+  // Search logged built-in AND custom movements across all earlier sessions.
+  // The layout may rename a movement or turn it into a custom row; position alone
+  // is not evidence that two exercises use comparable weights.
+  function latestHistory(s,info){
+    const found=[];
+    const keys=new Set([...Object.keys(s?.days||{}),...Object.keys(s?.exerciseExtras?.days||{})]);
+    function consider(selected,sets,sk,ord,source){
+      if(!sets?.length||!selected)return;
+      const exact=sameMovement(selected,info.selected),variant=exact?null:variantFor(selected,info.selected);
+      if(!exact&&!variant)return;
+      found.push({selected,sets,sessionKey:sk,ordinal:ord,source,match:exact?'exact':'variation',variation:variant});
+    }
+    keys.forEach(sk=>{
+      const m=sk.match(/^(\\d+)-(Mon|Tue|Wed|Thu|Fri|Sat|Sun|UpperThu|LegsFri)$/);
+      if(!m)return;
+      const w=Number(m[1]),d=DAY_VALUE_MAP[m[2]]||m[2],ord=w*7+(DAY_INDEX[m[2]]??DAY_INDEX[d]??0);
+      if(ord>=currentOrdinal())return;
+      const x=s?.days?.[sk];
+      if(x){
+        (DAY_ORDER[d]||[]).forEach((id,idx)=>{
+          const selected=historicalSelection(x,d,idx);
+          if(!sameMovement(selected,info.selected)&&!variantFor(selected,info.selected))return;
+          const sets=nativeSetsAt(s,w,m[2],idx,id);
+          consider(selected,sets,sk,ord,'Health Coach');
+        });
+      }
+      const extras=s?.exerciseExtras?.days?.[sk]||{};
+      const defs=s?.exerciseLayout?.days?.[d]?.custom||[];
+      Object.keys(extras).forEach(id=>{
+        const def=defs.find(v=>v.id===id);
+        // Stable custom IDs are accepted only while the movement name is intact.
+        const selected=def?.name||(info.custom&&id===info.id?info.selected:'');
+        if(!selected)return;
+        if(!sameMovement(selected,info.selected)&&!variantFor(selected,info.selected))return;
+        consider(selected,customSetsAt(s,w,m[2],id),sk,ord,'Health Coach custom');
       });
     });
-    candidates.sort((a,b)=>b.ordinal-a.ordinal);
-    return candidates[0]||null;
+    found.sort((a,b)=>Number(b.match==='exact')-Number(a.match==='exact')||b.ordinal-a.ordinal);
+    return found[0]||null;
   }
-  function latestCustomHistory(s,info){
-    const candidates=[];
-    Object.keys(s?.exerciseExtras?.days||{}).forEach(sk=>{
-      const m=sk.match(/^(\d+)-(Mon|Tue|Wed|Thu)$/);if(!m)return;
-      const w=Number(m[1]),d=m[2],ord=w*7+(DAY_INDEX[d]??0);if(ord>=currentOrdinal())return;
-      const log=s.exerciseExtras.days[sk]?.[info.id];if(!log)return;
-      const sets=customSetsAt(s,w,d,info.id);if(sets.length)candidates.push({week:w,day:d,ordinal:ord,sets,selected:info.selected,sessionKey:sk});
-    });
-    candidates.sort((a,b)=>b.ordinal-a.ordinal);
-    return candidates[0]||null;
-  }
-  function latestHistory(s,info){return info.custom?latestCustomHistory(s,info):latestBuiltHistory(s,info)}
 
   function growthFromRir(rir){
     if(rir===null||!Number.isFinite(rir))return TARGET;
@@ -183,15 +212,36 @@
     return hasLoad?'You reached the top of the range on at least one set, so load goes up and reps reset slightly.':'You still have room in the rep range, so the fastest progression is more reps at the same load.';
   }
   function currentRows(box){return [...box.querySelectorAll(':scope > .setrow:not(.head):not(.hc-set-hidden)')].filter(r=>r.style.display!=='none')}
+  function manualKey(box,index,field){return `${week()}|${rawDay()}|${exerciseInfo(box).id}|${index}|${field}`}
   function applyTargets(box,sugs){
     let changed=false;const rows=currentRows(box);
     rows.forEach((row,i)=>{
       const s=sugs[Math.min(i,sugs.length-1)];if(!s)return;
       const inputs=[...row.querySelectorAll('input')];if(inputs.length<2)return;
-      if(String(inputs[0].value).trim()===''){inputs[0].value=s.w;inputs[0].dispatchEvent(new Event('input',{bubbles:true}));inputs[0].dispatchEvent(new Event('change',{bubbles:true}));changed=true}
-      if(String(inputs[1].value).trim()===''){inputs[1].value=s.r;inputs[1].dispatchEvent(new Event('input',{bubbles:true}));inputs[1].dispatchEvent(new Event('change',{bubbles:true}));changed=true}
+      for(const [field,target,input] of [['w',s.w,inputs[0]],['r',s.r,inputs[1]]]){
+        if(target===null||target===undefined||!Number.isFinite(Number(target)))continue;
+        if(MANUAL_CLEARED.has(manualKey(box,i,field)))continue;
+        if(String(input.value).trim()!=='')continue;
+        input.value=target;
+        input.dispatchEvent(new Event('input',{bubbles:true}));
+        input.dispatchEvent(new Event('change',{bubbles:true}));
+        changed=true;
+      }
     });
     return changed;
+  }
+  function variationTargets(hist,range){
+    const factor=hist.variation?.factor||1;
+    return hist.sets.map(x=>{
+      // No "aggressive" increase for a new grip; use a deliberately lighter starting load.
+      const weight=x.w>0?Math.max(1,x.w<30?Math.floor(x.w*factor):Math.floor(x.w*factor/5)*5):0;
+      return {w:weight,r:Math.max(range.lo,Math.min(range.hi,x.r)),rir:x.rir,mode:'variation'};
+    });
+  }
+  function repOnly(box,range){
+    const reps=range.lo>1&&range.hi<99?range.lo:null;
+    if(reps===null)return;
+    applyTargets(box,[{w:null,r:reps}]);
   }
 
   function addStyles(){
@@ -210,18 +260,21 @@
     box.querySelector(':scope > .hc-progression-card')?.remove();
     const info=exerciseInfo(box);if(!info.id)return;
     const hist=latestHistory(s,info),card=document.createElement('div');card.className='hc-progression-card';
+    const range=parseRange(box);
     if(!hist){
-      card.innerHTML=`<div class="hc-progression-head"><span class="hc-progression-badge">Aggressive progression · up to +10%</span></div><div class="hc-progression-reason">No earlier matching logged exposure for ${esc(info.selected)} yet. The coach now searches movement aliases and prior training days, so unrelated exercises are not used as a weight baseline.</div>`;
+      card.innerHTML=`<div class="hc-progression-head"><span class="hc-progression-badge">Progression · baseline needed</span></div><div class="hc-progression-reason">No earlier comparable weight-and-rep sets for ${esc(info.selected)} are saved in Health Coach. Prior exercises with different equipment will not be assigned an invented weight. Rep targets can be prefilled, but set your first working weight to establish a baseline.</div>`;
+      setTimeout(()=>repOnly(box,range),70);
+    }else if(hist.match==='variation'&&!hist.variation?.transfer){
+      const prior=hist.sets.map(x=>fmtSet(x,true)).join(' · ');
+      card.innerHTML=`<div class="hc-progression-head"><span class="hc-progression-badge">Related history · equipment changed</span></div><div class="hc-progression-last">Previously logged ${esc(hist.selected)} (${esc(hist.sessionKey)}): ${esc(prior)}</div><div class="hc-progression-reason">This is a ${esc(hist.variation.label)}. The previous exercise counts as experience, but the weight is not directly transferable; choose a comfortable first working load. Rep targets are suggested.</div>`;
+      setTimeout(()=>repOnly(box,range),70);
     }else{
-      const range=parseRange(box),sugs=hist.sets.map(x=>suggestionFor(x,range));
+      const changedGrip=hist.match==='variation';
+      const sugs=changedGrip?variationTargets(hist,range):hist.sets.map(x=>suggestionFor(x,range));
       const prior=hist.sets.map(x=>fmtSet(x,true)).join(' · '),target=sugs.map(x=>fmtSet(x,false)).join(' · ');
-      card.innerHTML=`<div class="hc-progression-head"><span class="hc-progression-badge">Aggressive target · auto-filled</span><button type="button" class="hc-apply-target">Reapply to empty sets</button></div><div class="hc-progression-last">Last logged (${esc(hist.sessionKey)}): ${esc(prior)}</div><div class="hc-progression-target">Suggested: ${esc(target)}</div><div class="hc-progression-reason">${esc(reason(hist,sugs))} Blank weight/reps are filled automatically; anything you already entered is left alone.</div>`;
+      card.innerHTML=`<div class="hc-progression-head"><span class="hc-progression-badge">${changedGrip?'Grip variation · starter estimate':'Aggressive target · auto-filled'}</span><button type="button" class="hc-apply-target">Reapply to empty sets</button></div><div class="hc-progression-last">Last logged ${esc(hist.selected)} (${esc(hist.sessionKey)}): ${esc(prior)}</div><div class="hc-progression-target">Suggested: ${esc(target)}</div><div class="hc-progression-reason">${changedGrip?'Grip changed. A conservative starting weight is suggested; check the load before lifting.':esc(reason(hist,sugs))} Blank weight/reps will be filled automatically; previously entered sets will not be overwritten.</div>`;
       card.querySelector('.hc-apply-target')?.addEventListener('click',()=>applyTargets(box,sugs));
-      const autoKey=`${week()}-${rawDay()}|${info.key}|${hist.sessionKey}|${target}`;
-      if(!AUTO_APPLIED.has(autoKey)){
-        AUTO_APPLIED.add(autoKey);
-        setTimeout(()=>applyTargets(box,sugs),20);
-      }
+      setTimeout(()=>applyTargets(box,sugs),70);
     }
     box.querySelector(':scope > .exhead')?.after(card);
   }
@@ -231,6 +284,15 @@
   function start(){
     addStyles();schedule(350);
     const holder=document.getElementById('exercises');if(holder)new MutationObserver(()=>schedule(140)).observe(holder,{childList:true});
+    document.addEventListener('input',e=>{
+      if(!e.isTrusted||!e.target?.matches?.('#exercises .setrow:not(.head) input'))return;
+      const row=e.target.closest('.setrow'),box=e.target.closest('.exercise');if(!row||!box)return;
+      const rows=currentRows(box),i=rows.indexOf(row),inputs=[...row.querySelectorAll('input')],field=inputs[0]===e.target?'w':inputs[1]===e.target?'r':null;
+      if(i<0||!field)return;
+      const key=manualKey(box,i,field);
+      if(String(e.target.value).trim()==='')MANUAL_CLEARED.add(key);else MANUAL_CLEARED.delete(key);
+    },true);
+    document.addEventListener('hc:set-editor-change',()=>schedule(130));
     document.addEventListener('change',e=>{if(e.target?.id==='week'||e.target?.id==='day'||e.target?.classList?.contains('choice'))schedule(180)},true);
     document.addEventListener('click',e=>{if(e.target?.closest?.('.weekBtn,.tab,#hcEditExercises,.hc-set-btn'))schedule(220)},true);
   }
