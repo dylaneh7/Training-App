@@ -112,20 +112,21 @@
     const e=s?.setEditor?.sessions?.[sk]?.[id];
     return Math.max(1,Number(e?.count)||99);
   }
+  function validRir(v){const t=String(v??'').trim();if(!t)return null;const n=Number(t);return Number.isFinite(n)&&n>=0&&n<=10?n:null}
   function nativeSetsAt(s,w,d,idx,id){
     const sk=`${w}-${d}`,x=s?.days?.[sk];if(!x)return [];
     const count=configuredCount(s,sk,id),vals=[];
     Object.entries(x.sets||{}).forEach(([k,v])=>{
       const m=k.match(/^(\d+)-(\d+)$/);if(!m||Number(m[1])!==idx||Number(m[2])>count)return;
       if(!v||String(v.r??'').trim()==='')return;
-      vals.push({n:Number(m[2]),w:Number(v.w)||0,r:Number(v.r)||0,rir:String(v.rir??'').trim()===''?null:Number(v.rir)});
+      vals.push({n:Number(m[2]),w:Number(v.w)||0,r:Number(v.r)||0,rir:validRir(v.rir)});
     });
     vals.sort((a,b)=>a.n-b.n);
     const e=s?.setEditor?.sessions?.[sk]?.[id];
     if(e?.extra){
       Object.entries(e.extra).forEach(([n,v])=>{
         if(Number(n)>count||!v||String(v.r??'').trim()==='')return;
-        vals.push({n:Number(n),w:Number(v.w)||0,r:Number(v.r)||0,rir:String(v.rir??'').trim()===''?null:Number(v.rir)});
+        vals.push({n:Number(n),w:Number(v.w)||0,r:Number(v.r)||0,rir:validRir(v.rir)});
       });
       vals.sort((a,b)=>a.n-b.n);
     }
@@ -136,7 +137,7 @@
     const count=configuredCount(s,sk,id),vals=[];
     Object.entries(log.sets).forEach(([n,v])=>{
       if(Number(n)>count||!v||String(v.r??'').trim()==='')return;
-      vals.push({n:Number(n),w:Number(v.w)||0,r:Number(v.r)||0,rir:String(v.rir??'').trim()===''?null:Number(v.rir)});
+      vals.push({n:Number(n),w:Number(v.w)||0,r:Number(v.r)||0,rir:validRir(v.rir)});
     });
     vals.sort((a,b)=>a.n-b.n);
     return vals.filter(x=>x.r>0);
