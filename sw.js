@@ -1,4 +1,4 @@
-const CACHE='hybrid-coach-v26-auto-recovery';
+const CACHE='hybrid-coach-v27-progression-v3';
 const ASSETS=['./','./index.html','./manifest.webmanifest','./icon-180.png','./icon-512.png','./cc-sync-v2.js','./cc-cloud.js','./exercise-editor.js','./set-editor.js','./progression-coach.js','./workout-notes.js','./push-pull-plan-v5.js','./rest-policy.js','./week44-strength-schedule.js','./remove-readiness.js','./overview-insights.js','./today-mode.js','./recovery-auto.js'];
 
 self.addEventListener('install',e=>{
@@ -21,7 +21,7 @@ async function withCloudLoader(resp){
   let text=await resp.text();
   text=text.replace(/<script[^>]+src=["'][^"']*cc-sync(?:-v2)?\.js[^"']*["'][^>]*><\/script>\s*/gi,'');
   text=text.replace(/<script[^>]*data-hybrid-cloud-loader[^>]*>[\s\S]*?<\/script>\s*/gi,'');
-  const loader=`<script data-hybrid-cloud-loader>setTimeout(function(){try{var s=document.createElement('script');s.src='./cc-sync-v2.js?v=26';s.async=true;document.body.appendChild(s)}catch(e){console.warn('Cloud sync loader failed',e)}},250);<\/script>`;
+  const loader=`<script data-hybrid-cloud-loader>setTimeout(function(){try{var s=document.createElement('script');s.src='./cc-sync-v2.js?v=27';s.async=true;document.body.appendChild(s)}catch(e){console.warn('Cloud sync loader failed',e)}},250);<\/script>`;
   text=text.replace('</body>',loader+'\n</body>');
   const headers=new Headers(resp.headers);
   headers.delete('content-length');headers.delete('content-encoding');headers.delete('etag');
