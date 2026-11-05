@@ -250,6 +250,7 @@
   function scheduleRunSync(delay=300){clearTimeout(runSyncTimer);runSyncTimer=setTimeout(syncRunMetrics,delay)}
 
   function attachEvents(){
+    document.addEventListener('hc:overview-rendered',()=>setTimeout(ensureOverviewNav,55));
     document.addEventListener('change',e=>{const id=e.target?.id;if(id==='week'||id==='day'){setTimeout(()=>{ensureTodayBar();ensureOverviewNav();scheduleRunSync(320)},120)}else if(id==='runDone'){setTimeout(()=>scheduleRunSync(250),120)}},true);
     document.addEventListener('click',e=>{if(e.target?.closest?.('.tab[data-tab="overview"]'))setTimeout(ensureOverviewNav,120);if(e.target?.closest?.('.tab[data-tab="workout"]'))setTimeout(()=>{ensureTodayBar();scheduleRunSync(250)},120)},true);
     document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'){const nowIso=isoDate(today());if(lastCalendarDate&&lastCalendarDate!==nowIso)goToday();else scheduleRunSync(300)}});
