@@ -102,58 +102,32 @@
       </article>`;
   }
 
-  function bindThursdayRun(){
-    // Strength inputs belong to the original Upper slot; the run inputs must
-    // use Thursday's own log instead of accidentally rewriting Wednesday's run.
-    const old=root.querySelector('#runDone')?.closest('section');
-    if(!old)return;
-    const section=old.cloneNode(true);
-    old.replaceWith(section);
-    const runDone=section.querySelector('#runDone');
-    const storageKey='hybridCoachData_v1';
-    const sk=String(week.value)+'-Thu';
-    function read(){try{return JSON.parse(localStorage.getItem(storageKey)||'{}')}catch{return {}}}
-    function dayData(state){
-      state.days=state.days||{};
-      if(!state.days[sk])state.days[sk]={runDone:false,liftDone:false,run:{},rec:{},sets:{},choice:{}};
-      if(!state.days[sk].run)state.days[sk].run={};
-      return state.days[sk];
-    }
-    const st=read(),entry=dayData(st);
-    if(runDone)runDone.checked=!!entry.runDone;
-    section.classList.toggle('complete',!!entry.runDone);
-    section.querySelectorAll('[data-run]').forEach(el=>{
-      el.value=entry.run?.[el.dataset.run]??'';
-      el.addEventListener('input',()=>{
-        const next=read(),d=dayData(next);
-        d.run[el.dataset.run]=el.value;
-        localStorage.setItem(storageKey,JSON.stringify(next));
-      });
-    });
-    runDone?.addEventListener('change',()=>{
-      const next=read(),d=dayData(next);
-      d.runDone=!!runDone.checked;
-      localStorage.setItem(storageKey,JSON.stringify(next));
-      section.classList.toggle('complete',d.runDone);
-    });
-    const title=section.querySelector(':scope > strong');
-    const note=section.querySelector('p.tiny');
-    if(title)title.textContent='Recovery Run — 30 Min';
-    if(note)note.textContent='Easy recovery run scheduled for Thursday, November 5, in Command Center / Tredict.';
-    if(runDone)runDone.disabled=false;
-  }
-
   function renderMoved(value){
     const spec=SPECIAL[value];
     if(!spec?.slot||typeof coreDayChange!=='function')return;
     const custom=value;
-    day.value=spec.slot;
-    coreDayChange.call(day);
-    day.value=custom;
+    if(isWeek45()){
+      // The original renderer now understands the shifted dates. Render with
+      // the selected key so set logging, custom sets and progression all share
+      // the same session instead of writing to Wednesday's hidden log.
+      coreDayChange.call(day);
+    }else{
+      day.value=spec.slot;
+      coreDayChange.call(day);
+      day.value=custom;
+    }
 
     if(value==='UpperThu'){
       patchHeader('Thu','Upper Support — Bench + Back Frequency','Chest · upper back · lats · lateral delt · rear delt · triceps · biceps · rotator cuff','UPPER SESSION');
-      if(isWeek45())bindThursdayRun();
+      if(isWeek45()){
+        const section=root.querySelector('#runDone')?.closest('section');
+        if(section){
+          const title=section.querySelector(':scope > strong');
+          const guide=section.querySelector('p.tiny');
+          if(title)title.textContent='Recovery Run — 30 Min';
+          if(guide)guide.textContent='Thursday easy recovery run. This is separate from Upper Support lifting.';
+        }
+      }
       else disableRunSection('Upper Support only for this shifted Week 44 session. The lifting workout was moved here from Wednesday.');
     }else if(value==='LegsFri'){
       patchHeader('Fri','Legs — Heavy + Hypertrophy','Quads · hamstrings · glutes · calves · soleus · core','LEGS SESSION');
