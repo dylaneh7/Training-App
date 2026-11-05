@@ -10,13 +10,15 @@
   const coreDayChange=day.onchange;
   const coreWeekChange=week.onchange;
   const WEEK44='0';
+  const WEEK45='1';
   const SPECIAL={
     RestWed:{slot:null,label:'Wednesday — Rest / Recovery',calendar:'Wed'},
     UpperThu:{slot:'Wed',label:'Thursday — Upper Support',calendar:'Thu'},
     LegsFri:{slot:'Thu',label:'Friday — Legs',calendar:'Fri'}
   };
 
-  function isWeek44(){return String(week.value)===WEEK44}
+  function isWeek44(){return [WEEK44,WEEK45].includes(String(week.value))}
+  function isWeek45(){return String(week.value)===WEEK45}
   function slotFor(v){return SPECIAL[v]?.slot||v}
   function makeOption(value,text){const o=document.createElement('option');o.value=value;o.textContent=text;return o}
 
@@ -32,6 +34,9 @@
     if(y===2026&&m===10&&n===28)return'RestWed';
     if(y===2026&&m===10&&n===29)return'UpperThu';
     if(y===2026&&m===10&&n===30)return'LegsFri';
+    if(y===2026&&m===11&&n===4)return'RestWed';
+    if(y===2026&&m===11&&n===5)return'UpperThu';
+    if(y===2026&&m===11&&n===6)return'LegsFri';
     return null;
   }
 
@@ -67,6 +72,19 @@
   }
 
   function renderRest(){
+    if(isWeek45()&&typeof coreDayChange==='function'){
+      // Keep Wednesday's planned run, but replace the strength card with recovery.
+      day.value='Wed';
+      coreDayChange.call(day);
+      day.value='RestWed';
+      const lift=root.querySelector('#liftDone')?.closest('section');
+      if(lift){
+        lift.classList.remove('complete');
+        lift.innerHTML='<div class="guidebox"><strong>Strength rest / recovery</strong><p class="tiny">No upper-body lifting Wednesday, November 4. Upper Support has been moved to Thursday, November 5; Legs to Friday, November 6.</p></div>';
+      }
+      patchHeader('Wed','Rest from Strength','Upper Support Thursday · Legs Friday · Running plan unchanged','LIFT REST DAY');
+      return;
+    }
     root.innerHTML=`
       <article class="card">
         <div class="dayhead">
@@ -84,6 +102,47 @@
       </article>`;
   }
 
+  function bindThursdayRun(){
+    // Strength inputs belong to the original Upper slot; the run inputs must
+    // use Thursday's own log instead of accidentally rewriting Wednesday's run.
+    const old=root.querySelector('#runDone')?.closest('section');
+    if(!old)return;
+    const section=old.cloneNode(true);
+    old.replaceWith(section);
+    const runDone=section.querySelector('#runDone');
+    const storageKey='hybridCoachData_v1';
+    const sk=String(week.value)+'-Thu';
+    function read(){try{return JSON.parse(localStorage.getItem(storageKey)||'{}')}catch{return {}}}
+    function dayData(state){
+      state.days=state.days||{};
+      if(!state.days[sk])state.days[sk]={runDone:false,liftDone:false,run:{},rec:{},sets:{},choice:{}};
+      if(!state.days[sk].run)state.days[sk].run={};
+      return state.days[sk];
+    }
+    const st=read(),entry=dayData(st);
+    if(runDone)runDone.checked=!!entry.runDone;
+    section.classList.toggle('complete',!!entry.runDone);
+    section.querySelectorAll('[data-run]').forEach(el=>{
+      el.value=entry.run?.[el.dataset.run]??'';
+      el.addEventListener('input',()=>{
+        const next=read(),d=dayData(next);
+        d.run[el.dataset.run]=el.value;
+        localStorage.setItem(storageKey,JSON.stringify(next));
+      });
+    });
+    runDone?.addEventListener('change',()=>{
+      const next=read(),d=dayData(next);
+      d.runDone=!!runDone.checked;
+      localStorage.setItem(storageKey,JSON.stringify(next));
+      section.classList.toggle('complete',d.runDone);
+    });
+    const title=section.querySelector(':scope > strong');
+    const note=section.querySelector('p.tiny');
+    if(title)title.textContent='Recovery Run — 30 Min';
+    if(note)note.textContent='Easy recovery run scheduled for Thursday, November 5, in Command Center / Tredict.';
+    if(runDone)runDone.disabled=false;
+  }
+
   function renderMoved(value){
     const spec=SPECIAL[value];
     if(!spec?.slot||typeof coreDayChange!=='function')return;
@@ -94,10 +153,11 @@
 
     if(value==='UpperThu'){
       patchHeader('Thu','Upper Support — Bench + Back Frequency','Chest · upper back · lats · lateral delt · rear delt · triceps · biceps · rotator cuff','UPPER SESSION');
-      disableRunSection('Upper Support only for this shifted Week 44 session. The lifting workout was moved here from Wednesday.');
+      if(isWeek45())bindThursdayRun();
+      else disableRunSection('Upper Support only for this shifted Week 44 session. The lifting workout was moved here from Wednesday.');
     }else if(value==='LegsFri'){
       patchHeader('Fri','Legs — Heavy + Hypertrophy','Quads · hamstrings · glutes · calves · soleus · core','LEGS SESSION');
-      disableRunSection('Leg day only for this shifted Week 44 session. The lifting workout was moved here from Thursday.');
+      disableRunSection(isWeek45()?'Friday, November 6, is a leg-strength day. No run is scheduled in Command Center for Friday.':'Leg day only for this shifted Week 44 session. The lifting workout was moved here from Thursday.');
     }
   }
 
@@ -139,7 +199,7 @@
     const custom=day.value;
     if(SPECIAL[custom]?.slot)day.value=SPECIAL[custom].slot;
     setTimeout(()=>{
-      if(String(week.value)===WEEK44){week44Options(todayWeek44Value()||custom);renderCurrent()}
+      if(isWeek44()){week44Options(todayWeek44Value()||custom);renderCurrent()}
       else if(!['Mon','Tue','Wed','Thu'].includes(day.value))defaultOptions('Mon');
     },20);
   },true);
