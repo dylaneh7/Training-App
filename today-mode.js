@@ -103,6 +103,7 @@
 
   function desiredValueForToday(wi,key){
     if(wi===0){const iso=isoDate(today());if(iso==='2026-10-28')return'RestWed';if(iso==='2026-10-29')return'UpperThu';if(iso==='2026-10-30')return'LegsFri'}
+    if(wi===1){return {Wed:'RestWed',Thu:'UpperThu',Fri:'LegsFri'}[key]||key}
     return key;
   }
 
@@ -123,7 +124,8 @@
   function workoutSlots(){
     const week=document.getElementById('week');if(!week)return[];const slots=[];
     for(let wi=0;wi<week.options.length;wi++){
-      const days=wi===0?[{d:'Mon',v:'Mon'},{d:'Tue',v:'Tue'},{d:'Thu',v:'UpperThu'},{d:'Fri',v:'LegsFri'}]:WORKOUT_DAYS.map(d=>({d,v:d}));
+      const shifted=[{d:'Mon',v:'Mon'},{d:'Tue',v:'Tue'},{d:'Thu',v:'UpperThu'},{d:'Fri',v:'LegsFri'}];
+      const days=(wi===0||wi===1)?shifted:WORKOUT_DAYS.map(d=>({d,v:d}));
       days.forEach(x=>slots.push({wi,key:x.d,value:x.v,date:dateFor(wi,x.d)}));
     }
     return slots;
