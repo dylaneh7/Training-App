@@ -5,7 +5,7 @@
   const AUTH_STORAGE_KEY='hybrid-coach-command-center-auth';
   const TRAINING_STORAGE_KEY='hybridCoachData_v1';
   const RESTORE_GUARD_KEY='hybridCoachCloudRestoreGuard_v1';
-  const dayOffsets={Mon:0,Tue:1,Wed:2,Thu:3,Fri:4,Sat:5,Sun:6};
+  const dayOffsets={Mon:0,Tue:1,Wed:2,Thu:3,Fri:4,Sat:5,Sun:6,RestWed:2,UpperThu:3,LegsFri:4};
 
   if(window.__hybridCoachCloudStarted)return;
   window.__hybridCoachCloudStarted=true;
