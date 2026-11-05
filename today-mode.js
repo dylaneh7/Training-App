@@ -66,7 +66,7 @@
     if(!bar){bar=document.createElement('div');bar.id='hcTodayBar';bar.className='hc-today-bar';root.parentNode.insertBefore(bar,root)}
     const d=selectedDate(),onToday=isTodaySelected(),sig=`${isoDate(d)}|${onToday}`;
     if(bar.dataset.sig===sig)return;bar.dataset.sig=sig;
-    bar.innerHTML=`<div><div><span class="${onToday?'hc-today-badge':'tiny'}">${onToday?'TODAY':'VIEWING'}</span><strong>${formatDate(d)}</strong></div><div class="tiny">${onToday?'Your run and lift for today are shown below.':'You are browsing another workout date.'}</div></div>${onToday?'':`<button class="btn" id="hcBackToday" type="button">Back to Today</button>`}`;
+    bar.innerHTML=`<div><div><span class="${onToday?'hc-today-badge':'tiny'}">${onToday?'TODAY':'VIEWING'}</span><strong>${formatDate(d)}</strong></div><div class="tiny">${onToday?'Your run and lift for today are shown below.':'You are browsing another workout date.'}</div></div><button class="btn" id="hcBackToday" type="button">${onToday?'Refresh Today':'Back to Today'}</button>`;
     bar.querySelector('#hcBackToday')?.addEventListener('click',goToday);
   }
 
@@ -108,17 +108,53 @@
   }
 
   function goToday(){
-    const week=document.getElementById('week'),day=document.getElementById('day');if(!week||!day)return;
+    const week=document.getElementById('week'),day=document.getElementById('day');
+    if(!week||!day)return;
     const wi=Math.max(0,Math.min(week.options.length-1,currentWeekIndex()));
-    week.value=String(wi);week.dispatchEvent(new Event('change',{bubbles:true}));
-    setTimeout(()=>{
-      wrapDayHandler();const key=currentDayKey(),wanted=desiredValueForToday(wi,key);
-      if(['Fri','Sat','Sun'].includes(wanted))ensureWeekendOption(wanted);
-      if([...day.options].some(o=>o.value===wanted))day.value=wanted;
-      else if([...day.options].some(o=>o.value===key))day.value=key;
+    const key=currentDayKey(),wanted=desiredValueForToday(wi,key);
+
+    // Refresh the week options first (the schedule module owns shifted dates).
+    week.value=String(wi);
+    week.dispatchEvent(new Event('change',{bubbles:true}));
+
+    function selectActualToday(){
+      wrapDayHandler();
+      if(![...day.options].some(o=>o.value===wanted)){
+        // Older installed bundles may not yet include the shifted option.
+        // Keeping this option available also makes the Today action recoverable.
+        const option=document.createElement('option');
+        option.value=wanted;
+        option.textContent={
+          RestWed:'Wednesday — Strength Rest',
+          UpperThu:'Thursday — Upper Support',
+          LegsFri:'Friday — Legs'
+        }[wanted]||`${key} — Today`;
+        day.appendChild(option);
+      }
+      day.value=wanted;
       day.dispatchEvent(new Event('change',{bubbles:true}));
-      lastCalendarDate=isoDate(today());ensureTodayBar();scheduleRunSync(650);
-    },120);
+      lastCalendarDate=isoDate(today());
+      ensureTodayBar();
+      ensureOverviewNav();
+      scheduleRunSync(550);
+    }
+
+    setTimeout(()=>{
+      selectActualToday();
+      const workoutTab=document.querySelector('.tab[data-tab="workout"]');
+      if(workoutTab)workoutTab.click();
+      // Some older tab handlers briefly swap the day selector. Run one
+      // idempotent correction after they finish, rather than trusting a race.
+      setTimeout(()=>{
+        if(week.value!==String(wi)||day.value!==wanted){
+          week.value=String(wi);
+          week.dispatchEvent(new Event('change',{bubbles:true}));
+          selectActualToday();
+        }
+        ensureTodayBar();
+        ensureOverviewNav();
+      },260);
+    },100);
   }
 
   function workoutSlots(){
