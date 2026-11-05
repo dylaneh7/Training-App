@@ -57,7 +57,7 @@
     applyWeek44Fallback();
     setTimeout(()=>loadScript('./week44-strength-schedule.js?v=3','data-hybrid-week44-strength-schedule'),40);
     setTimeout(()=>loadScript('./remove-readiness.js?v=1','data-hybrid-remove-readiness'),70);
-    setTimeout(()=>loadScript('./overview-insights.js?v=1','data-hybrid-overview-insights'),85);
+    setTimeout(()=>loadScript('./overview-insights.js?v=2','data-hybrid-overview-insights'),85);
     setTimeout(()=>loadScript('./push-pull-plan-v5.js?v=5','data-hybrid-push-pull-v5'),110);
     setTimeout(()=>loadScript('./rest-policy.js?v=1','data-hybrid-rest-policy'),140);
     setTimeout(()=>loadScript('./workout-notes.js?v=1','data-hybrid-workout-notes'),180);
