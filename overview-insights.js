@@ -262,6 +262,7 @@
         document.querySelector('.tab[data-tab="workout"]')?.click();
       },40);
     });
+    document.dispatchEvent(new Event('hc:overview-rendered'));
   }
 
   const nativeSetItem=Storage.prototype.setItem;
