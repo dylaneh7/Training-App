@@ -55,7 +55,7 @@
 
   function loadCloud(){
     applyWeek44Fallback();
-    setTimeout(()=>loadScript('./week44-strength-schedule.js?v=2','data-hybrid-week44-strength-schedule'),40);
+    setTimeout(()=>loadScript('./week44-strength-schedule.js?v=3','data-hybrid-week44-strength-schedule'),40);
     setTimeout(()=>loadScript('./remove-readiness.js?v=1','data-hybrid-remove-readiness'),70);
     setTimeout(()=>loadScript('./overview-insights.js?v=1','data-hybrid-overview-insights'),85);
     setTimeout(()=>loadScript('./push-pull-plan-v5.js?v=5','data-hybrid-push-pull-v5'),110);
@@ -65,7 +65,7 @@
     setTimeout(()=>loadScript('./set-editor.js?v=2','data-hybrid-set-editor'),380);
     setTimeout(()=>loadScript('./progression-coach.js?v=3','data-hybrid-progression-coach'),580);
     setTimeout(()=>loadScript('./cc-cloud.js?v=4','data-hybrid-cloud-runtime'),960);
-    setTimeout(()=>loadScript('./today-mode.js?v=3','data-hybrid-today-mode'),1120);
+    setTimeout(()=>loadScript('./today-mode.js?v=4','data-hybrid-today-mode'),1120);
     setTimeout(()=>loadScript('./recovery-auto.js?v=1','data-hybrid-recovery-auto'),1300);
   }
 
