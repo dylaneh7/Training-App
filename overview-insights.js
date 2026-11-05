@@ -38,7 +38,9 @@
     return parts.slice(0,2).join(' · ')||`Week ${i+1}`;
   }
 
-  function scheduleFor(wi){return wi===0?WEEK44_SCHEDULE:STANDARD_SCHEDULE}
+  function scheduleFor(wi){return wi===0||wi===1?WEEK44_SCHEDULE:STANDARD_SCHEDULE}
+  function liftSessions(wi){return wi===1?['Mon','Tue','UpperThu','LegsFri']:DAY_ORDER}
+  function runSessions(wi){return wi===1?['Mon','Tue','Wed','UpperThu']:DAY_ORDER}
 
   function getDay(state,wi,d){return state.days?.[`${wi}-${d}`]||null}
 
@@ -49,18 +51,21 @@
 
   function summarizeWeek(state,wi){
     const out={miles:0,runs:0,lifts:0,sets:0,volume:0,rpe:[],days:0};
-    DAY_ORDER.forEach(d=>{
-      const x=getDay(state,wi,d);if(!x)return;
+    for(const d of liftSessions(wi)){
+      const x=getDay(state,wi,d);if(!x)continue;
       out.days++;
-      if(x.runDone)out.runs++;
       if(x.liftDone)out.lifts++;
-      out.miles+=Number(x.run?.miles)||0;
-      if(Number(x.run?.rpe)>0)out.rpe.push(Number(x.run.rpe));
       loggedSetValues(x).forEach(v=>{
         out.sets++;
         out.volume+=(Number(v.w)||0)*(Number(v.r)||0);
       });
-    });
+    }
+    for(const d of runSessions(wi)){
+      const x=getDay(state,wi,d);if(!x)continue;
+      if(x.runDone)out.runs++;
+      out.miles+=Number(x.run?.miles)||0;
+      if(Number(x.run?.rpe)>0)out.rpe.push(Number(x.run.rpe));
+    }
     out.avgRpe=out.rpe.length?out.rpe.reduce((a,b)=>a+b,0)/out.rpe.length:null;
     return out;
   }
@@ -68,7 +73,7 @@
   function currentStreak(state,type,wi){
     const slots=[];
     for(let w=0;w<=wi;w++){
-      DAY_ORDER.forEach(d=>slots.push(getDay(state,w,d)?.[type]===true));
+      (type==='liftDone'?liftSessions(w):runSessions(w)).forEach(d=>slots.push(getDay(state,w,d)?.[type]===true));
     }
     let last=-1;
     for(let i=slots.length-1;i>=0;i--){if(slots[i]){last=i;break}}
@@ -93,7 +98,7 @@
   function nextWorkout(state,wi){
     const schedule=scheduleFor(wi);
     for(const item of schedule){
-      if(!getDay(state,wi,item.key)?.liftDone)return item;
+      if(!getDay(state,wi,wi===1?(item.value||item.key):item.key)?.liftDone)return item;
     }
     return null;
   }
