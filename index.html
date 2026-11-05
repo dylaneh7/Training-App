@@ -290,6 +290,12 @@ E('Cable crunch / ab wheel',3,'10–15','Core','Trunk',['Machine crunch','Hangin
 ]}
 };
 
+// Week-specific moved sessions are valid renderer keys, so logging a set or
+// refreshing a workout cannot crash while a shifted day is selected.
+training.RestWed={title:'Rest from lifting',coverage:'Recovery day',ex:[]};
+training.UpperThu=training.Wed;
+training.LegsFri=training.Thu;
+
 const defaultState=()=>({
   version:1,
   days:{},
@@ -583,5 +589,6 @@ if('serviceWorker' in navigator){
 }
 })();
 </script>
+<script src="./cc-sync-v2.js?v=29" defer></script>
 </body>
 </html>
