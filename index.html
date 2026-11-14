@@ -296,6 +296,40 @@ training.RestWed={title:'Rest from lifting',coverage:'Recovery day',ex:[]};
 training.UpperThu=training.Wed;
 training.LegsFri=training.Thu;
 
+training.SatUpper={
+  title:'Saturday Full Upper — Return-to-Training',
+  coverage:'One-time Nov 14 session · Chest · Lats · Mid-back · Shoulders · Rear delts · Triceps · Biceps · 21 work sets',
+  ex:[
+    E('Flat barbell bench press',3,'6–8','Chest','Primary horizontal press',
+      ['DB bench press','Smith machine bench press','Machine chest press'],
+      'Warm up with two lighter ramp sets. Retract your shoulder blades and drive smoothly. Use controlled working sets and stop with 2–3 reps in reserve today.'),
+    E('Neutral-grip lat pulldown',3,'8–12','Lats / upper back','Vertical pull',
+      ['Weighted pull-up','Wide-grip lat pulldown','Neutral-grip machine pulldown'],
+      'Pull elbows toward your ribs without swinging or leaning far back. Slow controlled lowering. Keep roughly 2 reps in reserve.'),
+    E('Incline dumbbell press',2,'8–10','Upper chest','Secondary incline press',
+      ['Incline machine press','Incline Smith press'],
+      'Use a moderate incline and smooth range of motion. Choose a comfortable load rather than testing a maximum.'),
+    E('Seated Row',3,'8–12','Mid-back / rhomboids','Horizontal pull',
+      ['Seated cable row','Chest-supported row','Machine seated row'],
+      'Brace your torso, pull the handles toward your midsection and pause briefly. Avoid momentum. Keep 2 reps in reserve.'),
+    E('Seated dumbbell shoulder press',2,'8–10','Anterior / lateral delts','Shoulder press',
+      ['Machine shoulder press','Smith shoulder press'],
+      'Press in a comfortable shoulder-friendly range. Avoid arching your low back or grinding reps.'),
+    E('Cable lateral raise',2,'12–15','Side delts','Lateral raise',
+      ['Dumbbell lateral raise','Machine lateral raise'],
+      'Lead with the upper arm, raise with control, and avoid shrugging. Focus on tension instead of heavy loading.'),
+    E('Reverse pec deck',2,'12–15','Rear delts','Rear-delt isolation',
+      ['Cable rear-delt fly','Reverse machine fly'],
+      'Stay chest-supported and reach wide. Keep elbows softly bent and squeeze rear delts without swinging.'),
+    E('Rope pressdown',2,'10–15','Triceps','Triceps isolation',
+      ['Cable bar pressdown','Overhead rope extension'],
+      'Keep elbows pinned near your sides, extend fully without snapping elbows and control the return.'),
+    E('Hammer curl',2,'10–12','Biceps / brachialis','Arm flexion',
+      ['Dumbbell curl','Incline dumbbell curl','Rope hammer curl'],
+      'Stay upright and avoid swinging. Smooth repetitions with a neutral grip, leaving 2 reps in reserve.')
+  ]
+};
+
 const defaultState=()=>({
   version:1,
   days:{},
@@ -362,7 +396,7 @@ function render(){
   root.innerHTML=`
   <article class="card">
     <div class="dayhead">
-      <div><div class="tiny">${day.value.toUpperCase()} · DOUBLE SESSION</div><h2>${T.title}</h2><div class="coverage">${T.coverage}</div></div>
+      <div><div class="tiny">${day.value==='SatUpper'?'SATURDAY · UPPER CATCH-UP':day.value.toUpperCase()+' · DOUBLE SESSION'}</div><h2>${T.title}</h2><div class="coverage">${T.coverage}</div></div>
       <div style="text-align:right"><strong class="${r.class}">${r.label}${r.score!==null?' · '+r.score+'/100':''}</strong><div class="tiny">${r.msg}</div></div>
     </div>
 
@@ -373,6 +407,8 @@ function render(){
       </div>
       <label style="display:block;margin-top:8px">Pain notes<input data-rec="painNotes" value="${esc(x.rec.painNotes)}"></label>
     </div>
+
+    ${day.value==='SatUpper'?'<div class="guidebox" style="margin-top:12px"><strong>Return-to-training focus · Nov 14</strong><p class="tiny" style="margin:6px 0 0">5–10 minutes warm-up and two light ramp sets before your first press and row. Start around 90% of your prior comparable working load, keep 2–3 reps in reserve and skip max-effort sets. This is a dedicated full upper session; your normal weekly split stays unchanged.</p></div>':''}
 
     <div class="split2">
       <section class="${x.runDone?'complete':''}">
@@ -396,6 +432,13 @@ function render(){
       </section>
     </div>
   </article>`;
+
+  if(day.value==='SatUpper'){
+    const runSection=root.querySelector('#runDone')?.closest('section');
+    if(runSection)runSection.style.display='none';
+    const split=root.querySelector('.split2');
+    if(split)split.style.gridTemplateColumns='minmax(0,1fr)';
+  }
 
   document.getElementById('runDone').onchange=e=>{x.runDone=e.target.checked;save();render();updateAll()};
   document.getElementById('liftDone').onchange=e=>{x.liftDone=e.target.checked;save();render();updateAll()};
