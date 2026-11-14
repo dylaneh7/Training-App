@@ -101,7 +101,8 @@
   function nextWorkout(state,wi){
     const schedule=scheduleFor(wi);
     // Today's one-off session is the actionable next lift, not an old missed day.
-    if(wi===2 && !getDay(state,2,'SatUpper')?.liftDone && new Date().toLocaleDateString('en-CA')==='2026-11-14')return SATURDAY_UPPER;
+    const now=new Date();
+    if(wi===2 && !getDay(state,2,'SatUpper')?.liftDone && now.getFullYear()===2026 && now.getMonth()===10 && now.getDate()===14)return SATURDAY_UPPER;
     for(const item of schedule){
       if(!getDay(state,wi,wi===1?(item.value||item.key):item.key)?.liftDone)return item;
     }
