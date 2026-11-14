@@ -206,7 +206,7 @@
     if(tw===w&&tr===r&&r<range.hi)tr=Math.min(range.hi,r+1);
     return {w:tw,r:tr,rir,mode,growth:g};
   }
-  function fmtSet(x,showRir=true){return `${x.w||0}×${x.r||'?'}${showRir&&x.rir!==null&&Number.isFinite(x.rir)?` @${x.rir} RIR`:''}`}
+  function fmtSet(x,showRir=true){return `${x.w===null||x.w===undefined?'—':x.w}×${x.r||'?'}${showRir&&x.rir!==null&&Number.isFinite(x.rir)?` @${x.rir} RIR`:''}`}
   function reason(history,sugs){
     const rirs=history.sets.map(x=>x.rir).filter(x=>x!==null&&Number.isFinite(x)),avg=rirs.length?rirs.reduce((a,b)=>a+b,0)/rirs.length:null,hasLoad=sugs.some(x=>x.mode==='load');
     if(avg!==null&&avg<1)return 'Last exposure was near failure, so aggressive mode caps the jump. Beat it cleanly before forcing a larger increase.';
@@ -284,7 +284,7 @@
       const returnDay=rawDay()==='SatUpper';
       const sugs=changedGrip?variationTargets(hist,range):returnDay?returnToTrainingTargets(hist,range):hist.sets.map(x=>suggestionFor(x,range));
       const prior=hist.sets.map(x=>fmtSet(x,true)).join(' · '),target=sugs.map(x=>fmtSet(x,false)).join(' · ');
-      card.innerHTML=`<div class="hc-progression-head"><span class="hc-progression-badge">${changedGrip?'Grip variation · starter estimate':returnDay?'Return to training · auto-filled':'Aggressive target · auto-filled'}</span><button type="button" class="hc-apply-target">Reapply to empty sets</button></div><div class="hc-progression-last">Last logged ${esc(hist.selected)} (${esc(hist.sessionKey)}): ${esc(prior)}</div><div class="hc-progression-target">Suggested: ${esc(target)}</div><div class="hc-progression-reason">${changedGrip?'Grip changed. A conservative starting weight is suggested; check the load before lifting.':returnDay?'Start about 10% below your previous comparable working load. Keep 2–3 reps in reserve today; no +10% aggressive jump.':esc(reason(hist,sugs))} Blank weight/reps will be filled automatically; previously entered sets will not be overwritten.</div>`;
+      card.innerHTML=`<div class="hc-progression-head"><span class="hc-progression-badge">${changedGrip?'Grip variation · starter estimate':returnDay?'Return to training · auto-filled':'Aggressive target · auto-filled'}</span><button type="button" class="hc-apply-target">Reapply to empty sets</button></div><div class="hc-progression-last">Last logged ${esc(hist.selected)} (${esc(hist.sessionKey)}): ${esc(prior)}</div><div class="hc-progression-target">Suggested: ${esc(target)}</div><div class="hc-progression-reason">${changedGrip?'Grip changed. A conservative starting weight is suggested; check the load before lifting.':returnDay?(sugs.some(x=>x.w===null)?'Earlier reps found, but some weights were not recorded. Reps are prefilled; choose those working weights yourself and keep 2–3 reps in reserve.':'Start about 10% below your previous comparable working load. Keep 2–3 reps in reserve today; no +10% aggressive jump.'):esc(reason(hist,sugs))} Blank weight/reps will be filled automatically; previously entered sets will not be overwritten.</div>`;
       card.querySelector('.hc-apply-target')?.addEventListener('click',()=>applyTargets(box,sugs));
       setTimeout(()=>applyTargets(box,sugs),70);
     }
