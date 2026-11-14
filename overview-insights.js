@@ -38,8 +38,11 @@
     return parts.slice(0,2).join(' · ')||`Week ${i+1}`;
   }
 
-  function scheduleFor(wi){return wi===0||wi===1?WEEK44_SCHEDULE:STANDARD_SCHEDULE}
-  function liftSessions(wi){return wi===1?['Mon','Tue','UpperThu','LegsFri']:DAY_ORDER}
+  const SATURDAY_UPPER={key:'SatUpper',value:'SatUpper',label:'Saturday, Nov 14',title:'Full Upper — Return-to-Training'};
+  function scheduleFor(wi){
+    return wi===0||wi===1?WEEK44_SCHEDULE:wi===2?[...STANDARD_SCHEDULE,SATURDAY_UPPER]:STANDARD_SCHEDULE;
+  }
+  function liftSessions(wi){return wi===1?['Mon','Tue','UpperThu','LegsFri']:wi===2?[...DAY_ORDER,'SatUpper']:DAY_ORDER}
   function runSessions(wi){return wi===1?['Mon','Tue','Wed','UpperThu']:DAY_ORDER}
 
   function getDay(state,wi,d){return state.days?.[`${wi}-${d}`]||null}
@@ -97,6 +100,8 @@
 
   function nextWorkout(state,wi){
     const schedule=scheduleFor(wi);
+    // Today's one-off session is the actionable next lift, not an old missed day.
+    if(wi===2 && !getDay(state,2,'SatUpper')?.liftDone && new Date().toLocaleDateString('en-CA')==='2026-11-14')return SATURDAY_UPPER;
     for(const item of schedule){
       if(!getDay(state,wi,wi===1?(item.value||item.key):item.key)?.liftDone)return item;
     }
@@ -191,7 +196,7 @@
       </div>
 
       <div class="hc-overview-grid">
-        <div class="hc-overview-metric"><div class="k">Lifts complete</div><div class="v">${summary.lifts}/4</div></div>
+        <div class="hc-overview-metric"><div class="k">Lifts complete</div><div class="v">${summary.lifts}/${liftSessions(wi).length}</div></div>
         <div class="hc-overview-metric"><div class="k">Runs complete</div><div class="v">${summary.runs}/4</div></div>
         <div class="hc-overview-metric"><div class="k">Logged work sets</div><div class="v">${summary.sets}</div></div>
         <div class="hc-overview-metric"><div class="k">Week miles</div><div class="v">${summary.miles.toFixed(1)}</div></div>
