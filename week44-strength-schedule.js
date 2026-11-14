@@ -24,6 +24,7 @@
 
   function defaultOptions(prefer){
     const map=[['Mon','Monday — Push'],['Tue','Tuesday — Pull'],['Wed','Wednesday — Upper Support'],['Thu','Thursday — Legs']];
+    if(String(week.value)==='2')map.push(['SatUpper','Saturday Nov 14 — Full Upper']);
     day.innerHTML='';map.forEach(([v,t])=>day.appendChild(makeOption(v,t)));
     day.value=map.some(([v])=>v===prefer)?prefer:'Mon';
   }
