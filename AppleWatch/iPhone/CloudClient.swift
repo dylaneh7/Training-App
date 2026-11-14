@@ -164,6 +164,22 @@ actor HCCloudClient {
         return (planner, history)
     }
 
+    func fetchPublishedPlan(date: String) async throws -> HCWorkout? {
+        let authenticated = try await authorizedToken()
+        let data = try await send(path: "/rest/v1/health_coach_native_plans",
+                                  query: [
+                                    URLQueryItem(name: "select", value: "plan"),
+                                    URLQueryItem(name: "user_id", value: "eq.\(authenticated.userID)"),
+                                    URLQueryItem(name: "workout_date", value: "eq.\(date)"),
+                                    URLQueryItem(name: "limit", value: "1")
+                                  ], bearer: authenticated.access)
+        guard let rows = try JSONSerialization.jsonObject(with: data) as? [[String: Any]]
+        else { throw HCCloudError.malformedResponse }
+        guard let plan = rows.first?["plan"] as? [String: Any] else { return nil }
+        let bytes = try JSONSerialization.data(withJSONObject: plan)
+        return try JSONDecoder().decode(HCWorkout.self, from: bytes)
+    }
+
     func upload(_ set: HCLoggedSet) async throws {
         let authenticated = try await authorizedToken()
         let stamp = ISO8601DateFormatter()
