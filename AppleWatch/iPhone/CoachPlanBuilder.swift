@@ -127,16 +127,7 @@ enum HCPlanBuilder {
         return Dictionary(uniqueKeysWithValues: found.map { ($0.key, $0.value.weight) })
     }
 
-    static func identity(for movement: String) -> String {
-        let value = HCProgramCatalog.normalized(movement)
-        if value.contains("bench") && value.contains("barbell") && value.contains("press") {
-            return "barbell bench press"
-        }
-        if value.contains("lat") && value.contains("pulldown") && value.contains("neutral") {
-            return "neutral lat pulldown"
-        }
-        return value
-    }
+    static func identity(for movement: String) -> String { HCProgramCatalog.identity(for: movement) }
 
     private static func number(_ value: Any?) -> Double? {
         if let value = value as? NSNumber { return value.doubleValue }
