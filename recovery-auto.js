@@ -4,7 +4,7 @@
   const URL='https://ecmosmmqloyahsdcxvpz.supabase.co';
   const KEY='sb_publishable_ClssY_cSAW7Lv7O2VG6jBg_yTDZW1fJ';
   const AUTH='hybrid-coach-command-center-auth';
-  const OFFSETS={Mon:0,Tue:1,Wed:2,Thu:3,Fri:4,Sat:5,Sun:6,RestWed:2,UpperThu:3,LegsFri:4};
+  const OFFSETS={Mon:0,Tue:1,Wed:2,Thu:3,Fri:4,Sat:5,Sun:6,RestWed:2,UpperThu:3,LegsFri:4,SatUpper:5};
   let client=null,timer=null,request=0,panelRef=null,retries=0;
   function dateISO(){
     const wi=Number(document.getElementById('week')?.value||0);
