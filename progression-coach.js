@@ -4,13 +4,14 @@
 
   const TRAINING_KEY='hybridCoachData_v1';
   const TARGET=0.10;
-  const DAY_INDEX={Mon:0,Tue:1,Wed:2,Thu:3,Fri:4,Sat:5,Sun:6};
+  const DAY_INDEX={Mon:0,Tue:1,Wed:2,Thu:3,Fri:4,Sat:5,Sun:6,SatUpper:5};
   const DAY_VALUE_MAP={UpperThu:'Wed',LegsFri:'Thu',RestWed:'Wed'};
   const DAY_ORDER={
     Mon:['Flat barbell bench press','Incline dumbbell press','Weighted dip — chest bias','Seated dumbbell shoulder press','Chest-supported lateral raise','Standing lateral raise','Single-arm cable rear-delt fly','Close-grip bench press','Overhead cable triceps extension','Rope pressdown','Push-up plus'],
     Tue:['Weighted pull-up / neutral pulldown','Chest-supported T-bar row','Single-arm cable lat row — elbow to hip','Wide high row','Straight-arm cable pulldown','Dumbbell shrug','Cable Y-raise','Reverse pec deck','Face pull with external rotation','Incline dumbbell curl','Preacher curl','Hammer curl','Reverse EZ-bar curl','Farmer carry'],
     Wed:['Paused bench press','Low-to-high cable fly','Neutral-grip pulldown','Chest-supported machine row','Cable lateral raise','Cable rear-delt fly','Rope pressdown','Cable curl','Cable external rotation'],
-    Thu:['Back squat / hack squat','Romanian deadlift','Leg press','Bulgarian split squat','Leg extension','Seated leg curl','Hip thrust','Standing calf raise','Seated soleus raise','Cable crunch / ab wheel']
+    Thu:['Back squat / hack squat','Romanian deadlift','Leg press','Bulgarian split squat','Leg extension','Seated leg curl','Hip thrust','Standing calf raise','Seated soleus raise','Cable crunch / ab wheel'],
+    SatUpper:['Flat barbell bench press','Neutral-grip lat pulldown','Incline dumbbell press','Seated Row','Seated dumbbell shoulder press','Cable lateral raise','Reverse pec deck','Rope pressdown','Hammer curl']
   };
   const MANUAL_CLEARED=new Set();
   let timer=null;
@@ -158,7 +159,7 @@
       found.push({selected,sets,sessionKey:sk,ordinal:ord,source,match:exact?'exact':'variation',variation:variant});
     }
     keys.forEach(sk=>{
-      const m=sk.match(/^(\d+)-(Mon|Tue|Wed|Thu|Fri|Sat|Sun|UpperThu|LegsFri)$/);
+      const m=sk.match(/^(\d+)-(Mon|Tue|Wed|Thu|Fri|Sat|Sun|UpperThu|LegsFri|SatUpper)$/);
       if(!m)return;
       const w=Number(m[1]),d=DAY_VALUE_MAP[m[2]]||m[2],ord=w*7+(DAY_INDEX[m[2]]??DAY_INDEX[d]??0);
       if(ord>=currentOrdinal())return;
@@ -231,6 +232,15 @@
     });
     return changed;
   }
+  function returnToTrainingTargets(hist,range){
+    return hist.sets.map(x=>({
+      w:x.w>0?roundLoad(x.w*0.9):0,
+      r:Math.min(range.hi,Math.max(range.lo,x.r)),
+      rir:x.rir,
+      mode:'return',
+      growth:0
+    }));
+  }
   function variationTargets(hist,range){
     const factor=hist.variation?.factor||1;
     return hist.sets.map(x=>{
@@ -271,9 +281,10 @@
       setTimeout(()=>repOnly(box,range),70);
     }else{
       const changedGrip=hist.match==='variation';
-      const sugs=changedGrip?variationTargets(hist,range):hist.sets.map(x=>suggestionFor(x,range));
+      const returnDay=rawDay()==='SatUpper';
+      const sugs=changedGrip?variationTargets(hist,range):returnDay?returnToTrainingTargets(hist,range):hist.sets.map(x=>suggestionFor(x,range));
       const prior=hist.sets.map(x=>fmtSet(x,true)).join(' · '),target=sugs.map(x=>fmtSet(x,false)).join(' · ');
-      card.innerHTML=`<div class="hc-progression-head"><span class="hc-progression-badge">${changedGrip?'Grip variation · starter estimate':'Aggressive target · auto-filled'}</span><button type="button" class="hc-apply-target">Reapply to empty sets</button></div><div class="hc-progression-last">Last logged ${esc(hist.selected)} (${esc(hist.sessionKey)}): ${esc(prior)}</div><div class="hc-progression-target">Suggested: ${esc(target)}</div><div class="hc-progression-reason">${changedGrip?'Grip changed. A conservative starting weight is suggested; check the load before lifting.':esc(reason(hist,sugs))} Blank weight/reps will be filled automatically; previously entered sets will not be overwritten.</div>`;
+      card.innerHTML=`<div class="hc-progression-head"><span class="hc-progression-badge">${changedGrip?'Grip variation · starter estimate':returnDay?'Return to training · auto-filled':'Aggressive target · auto-filled'}</span><button type="button" class="hc-apply-target">Reapply to empty sets</button></div><div class="hc-progression-last">Last logged ${esc(hist.selected)} (${esc(hist.sessionKey)}): ${esc(prior)}</div><div class="hc-progression-target">Suggested: ${esc(target)}</div><div class="hc-progression-reason">${changedGrip?'Grip changed. A conservative starting weight is suggested; check the load before lifting.':returnDay?'Start about 10% below your previous comparable working load. Keep 2–3 reps in reserve today; no +10% aggressive jump.':esc(reason(hist,sugs))} Blank weight/reps will be filled automatically; previously entered sets will not be overwritten.</div>`;
       card.querySelector('.hc-apply-target')?.addEventListener('click',()=>applyTargets(box,sugs));
       setTimeout(()=>applyTargets(box,sugs),70);
     }
