@@ -83,7 +83,7 @@
       }});
       const {data:{session},error:authError}=await client.auth.getSession();
       if(authError)throw authError;
-      if(!session?.user?.id)return;
+      if(!session?.user?.id){lastAttempt='';return;}
       const {error}=await client.from('health_coach_native_plans').upsert({
         user_id:session.user.id,workout_date:plan.date,plan,updated_at:new Date().toISOString()
       },{onConflict:'user_id,workout_date'});
