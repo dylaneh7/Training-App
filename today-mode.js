@@ -7,7 +7,7 @@
   const AUTH_STORAGE_KEY='hybrid-coach-command-center-auth';
   const SUPABASE_URL='https://ecmosmmqloyahsdcxvpz.supabase.co';
   const SUPABASE_KEY='sb_publishable_ClssY_cSAW7Lv7O2VG6jBg_yTDZW1fJ';
-  const DAY_OFFSETS={Mon:0,Tue:1,Wed:2,Thu:3,Fri:4,Sat:5,Sun:6,RestWed:2,UpperThu:3,LegsFri:4};
+  const DAY_OFFSETS={Mon:0,Tue:1,Wed:2,Thu:3,Fri:4,Sat:5,Sun:6,RestWed:2,UpperThu:3,LegsFri:4,SatUpper:5};
   const WEEKDAY_KEYS=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
   const WORKOUT_DAYS=['Mon','Tue','Wed','Thu'];
   let autoClient=null;
@@ -104,6 +104,7 @@
   function desiredValueForToday(wi,key){
     if(wi===0){const iso=isoDate(today());if(iso==='2026-10-28')return'RestWed';if(iso==='2026-10-29')return'UpperThu';if(iso==='2026-10-30')return'LegsFri'}
     if(wi===1){return {Wed:'RestWed',Thu:'UpperThu',Fri:'LegsFri'}[key]||key}
+    if(wi===2&&key==='Sat'&&isoDate(today())==='2026-11-14')return 'SatUpper';
     return key;
   }
 
@@ -127,7 +128,8 @@
         option.textContent={
           RestWed:'Wednesday — Strength Rest',
           UpperThu:'Thursday — Upper Support',
-          LegsFri:'Friday — Legs'
+          LegsFri:'Friday — Legs',
+          SatUpper:'Saturday — Full Upper Body'
         }[wanted]||`${key} — Today`;
         day.appendChild(option);
       }
@@ -162,6 +164,7 @@
     for(let wi=0;wi<week.options.length;wi++){
       const shifted=[{d:'Mon',v:'Mon'},{d:'Tue',v:'Tue'},{d:'Thu',v:'UpperThu'},{d:'Fri',v:'LegsFri'}];
       const days=(wi===0||wi===1)?shifted:WORKOUT_DAYS.map(d=>({d,v:d}));
+      if(wi===2)days.push({d:'SatUpper',v:'SatUpper'});
       days.forEach(x=>slots.push({wi,key:x.d,value:x.v,date:dateFor(wi,x.d)}));
     }
     return slots;
