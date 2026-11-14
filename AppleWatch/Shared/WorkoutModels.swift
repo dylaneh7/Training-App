@@ -1,10 +1,12 @@
 import Foundation
 
-/// Shared, Codable contract used by the iPhone and Apple Watch targets.
-/// IDs are stable so future cloud writes can be idempotent.
+// MARK: - Data shared by the iPhone and the watch
+
 struct HCExercise: Codable, Identifiable, Hashable {
     let id: String
     let name: String
+    let originalName: String
+    let exerciseIndex: Int
     let prescribedSets: Int
     let repMin: Int
     let repMax: Int
@@ -16,36 +18,40 @@ struct HCExercise: Codable, Identifiable, Hashable {
 
 struct HCWorkout: Codable, Identifiable {
     let id: String
-    let date: String     // Local ISO 8601 calendar date (YYYY-MM-DD)
+    let date: String                 // Local calendar YYYY-MM-DD
+    let sessionKey: String           // Health Coach session key, e.g. 2-SatUpper
     let title: String
     let exercises: [HCExercise]
+    let isPreview: Bool
 
-    /// Offline example until the existing Health Coach cloud plan is connected.
-    /// Sample loads are deliberately nil: the watch must never invent a weight.
-    static let preview = HCWorkout(
-        id: "demo-full-upper",
-        date: "2026-11-14",
-        title: "Full Upper — Return to Training",
-        exercises: [
-            .init(id: "bench", name: "Barbell Bench Press", prescribedSets: 3, repMin: 6, repMax: 8, suggestedWeightLb: nil, restSeconds: 180),
-            .init(id: "pulldown", name: "Neutral-Grip Lat Pulldown", prescribedSets: 3, repMin: 8, repMax: 12, suggestedWeightLb: nil, restSeconds: 120),
-            .init(id: "incline", name: "Incline Dumbbell Press", prescribedSets: 2, repMin: 8, repMax: 10, suggestedWeightLb: nil, restSeconds: 120),
-            .init(id: "row", name: "Seated Row", prescribedSets: 3, repMin: 8, repMax: 12, suggestedWeightLb: nil, restSeconds: 120),
-            .init(id: "shoulder", name: "Seated DB Shoulder Press", prescribedSets: 2, repMin: 8, repMax: 10, suggestedWeightLb: nil, restSeconds: 120),
-            .init(id: "lateral", name: "Cable Lateral Raise", prescribedSets: 2, repMin: 12, repMax: 15, suggestedWeightLb: nil, restSeconds: 75),
-            .init(id: "rear", name: "Reverse Pec Deck", prescribedSets: 2, repMin: 12, repMax: 15, suggestedWeightLb: nil, restSeconds: 75),
-            .init(id: "triceps", name: "Rope Pressdown", prescribedSets: 2, repMin: 10, repMax: 15, suggestedWeightLb: nil, restSeconds: 75),
-            .init(id: "biceps", name: "Hammer Curl", prescribedSets: 2, repMin: 10, repMax: 12, suggestedWeightLb: nil, restSeconds: 75)
-        ]
-    )
+    var prescribedSetCount: Int { exercises.reduce(0) { $0 + $1.prescribedSets } }
+
+    static let preview = HCProgramCatalog.makeWorkout(date: "2026-11-14",
+                                                     sessionKey: "2-SatUpper",
+                                                     title: "Full Upper — Return to Training",
+                                                     savedHistory: [:],
+                                                     isPreview: true)
 }
 
 struct HCLoggedSet: Codable, Identifiable, Hashable {
     let id: UUID
     let workoutID: String
+    let workoutDate: String
+    let sessionKey: String
+    let workoutTitle: String
     let exerciseID: String
+    let exerciseName: String
+    let exerciseIndex: Int
     let index: Int
-    let weightLb: Double
+    let weightLb: Double?
     let reps: Int
+    let rir: Double?
     let completedAt: Date
+}
+
+enum HCPayload {
+    static let workout = "workout"
+    static let loggedSet = "loggedSet"
+    static let kind = "kind"
+    static let data = "payload"
 }
