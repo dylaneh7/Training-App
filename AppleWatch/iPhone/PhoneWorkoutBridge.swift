@@ -89,8 +89,11 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
         Task {
             do {
                 let snapshot = try await cloud.fetchPlannerAndHistory()
-                let planned = HCPlanBuilder.workout(for: date, planner: snapshot.planner,
-                                                     history: snapshot.history)
+                // Prefer the exact exercises and rep/weight edits exported by
+                // Health Coach web; use the locally versioned plan as fallback.
+                let published = try? await cloud.fetchPublishedPlan(date: HCPlanBuilder.dateString(date))
+                let planned = published ?? HCPlanBuilder.workout(for: date, planner: snapshot.planner,
+                                                                history: snapshot.history)
                 DispatchQueue.main.async {
                     self.workout = planned
                     self.loading = false
