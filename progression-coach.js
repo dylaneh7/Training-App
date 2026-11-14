@@ -234,7 +234,7 @@
   }
   function returnToTrainingTargets(hist,range){
     return hist.sets.map(x=>({
-      w:x.w>0?roundLoad(x.w*0.9):0,
+      w:x.w>0?roundLoad(x.w*0.9):null,
       r:Math.min(range.hi,Math.max(range.lo,x.r)),
       rir:x.rir,
       mode:'return',
