@@ -1,0 +1,48 @@
+name: Build Health Coach iPhone and Apple Watch
+
+on:
+  push:
+    paths:
+      - "AppleWatch/**"
+      - ".github/workflows/native-health-coach.yml"
+  pull_request:
+    paths:
+      - "AppleWatch/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  apple-simulator-build:
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Show Apple toolchain
+        run: |
+          xcodebuild -version
+          xcodebuild -showsdks
+      - name: Validate Xcode project and schemes
+        run: |
+          xcodebuild -list -project AppleWatch/HealthCoachNative.xcodeproj
+      - name: Build iPhone app with embedded watch app
+        run: |
+          set -o pipefail
+          xcodebuild build \
+            -project AppleWatch/HealthCoachNative.xcodeproj \
+            -scheme HealthCoach \
+            -configuration Debug \
+            -destination 'generic/platform=iOS Simulator' \
+            CODE_SIGNING_ALLOWED=NO \
+            | tee /tmp/healthcoach-build.log
+      - name: Build Apple Watch app
+        run: |
+          set -o pipefail
+          xcodebuild build \
+            -project AppleWatch/HealthCoachNative.xcodeproj \
+            -scheme HealthCoachWatch \
+            -configuration Debug \
+            -destination 'generic/platform=watchOS Simulator' \
+            CODE_SIGNING_ALLOWED=NO \
+            | tee /tmp/healthcoach-watch-build.log
