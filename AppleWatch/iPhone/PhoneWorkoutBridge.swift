@@ -1,4 +1,5 @@
 import Foundation
+import Combine
 import WatchConnectivity
 
 /// iPhone counterpart for the Apple Watch MVP.
