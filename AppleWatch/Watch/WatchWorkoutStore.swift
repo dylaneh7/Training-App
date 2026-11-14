@@ -1,4 +1,5 @@
 import Foundation
+import Combine
 import WatchConnectivity
 
 /// Offline-first watch store. A logged set is saved locally before being
