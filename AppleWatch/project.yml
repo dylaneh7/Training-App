@@ -1,0 +1,49 @@
+name: HealthCoachNative
+options:
+  deploymentTarget:
+    iOS: "17.0"
+    watchOS: "10.0"
+settings:
+  base:
+    HC_IOS_BUNDLE_ID: com.dylaneh7.HealthCoachNative
+    SWIFT_VERSION: "5.0"
+    CODE_SIGN_STYLE: Automatic
+targets:
+  HealthCoach:
+    type: application
+    platform: iOS
+    sources:
+      - path: iPhone
+        excludes:
+          - Info.plist
+      - path: Shared
+    info:
+      path: iPhone/Info.plist
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: "$(HC_IOS_BUNDLE_ID)"
+        TARGETED_DEVICE_FAMILY: "1"
+        GENERATE_INFOPLIST_FILE: NO
+        SWIFT_STRICT_CONCURRENCY: minimal
+    dependencies:
+      - target: HealthCoachWatch
+        embed: true
+  HealthCoachWatch:
+    type: application.watchapp2
+    platform: watchOS
+    sources:
+      - path: Watch
+        excludes:
+          - Info.plist
+          - HealthCoachWatch.entitlements
+      - path: Shared
+    info:
+      path: Watch/Info.plist
+    entitlements:
+      path: Watch/HealthCoachWatch.entitlements
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: "$(HC_IOS_BUNDLE_ID).watchkitapp"
+        TARGETED_DEVICE_FAMILY: "4"
+        GENERATE_INFOPLIST_FILE: NO
+        SWIFT_STRICT_CONCURRENCY: minimal
