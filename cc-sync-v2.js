@@ -67,6 +67,8 @@
     setTimeout(()=>loadScript('./cc-cloud.js?v=5','data-hybrid-cloud-runtime'),960);
     setTimeout(()=>loadScript('./today-mode.js?v=6','data-hybrid-today-mode'),1120);
     setTimeout(()=>loadScript('./recovery-auto.js?v=2','data-hybrid-recovery-auto'),1300);
+    setTimeout(()=>loadScript('./native-plan-publisher.js?v=2','data-hc-native-plan-publisher'),2100);
+    setTimeout(()=>loadScript('./watch-set-bridge.js?v=1','data-hc-watch-set-bridge'),2300);
   }
 
   document.addEventListener('change',e=>{
