@@ -35,6 +35,17 @@ enum HCProgramCatalog {
             .joined(separator: " ")
     }
 
+    static func identity(for movement: String) -> String {
+        let value = normalized(movement)
+        if value.contains("bench") && value.contains("barbell") && value.contains("press") {
+            return "barbell bench press"
+        }
+        if value.contains("neutral") && value.contains("pulldown") {
+            return "neutral lat pulldown"
+        }
+        return value
+    }
+
     static func templates(for sessionKey: String) -> [Template] {
         let key = String(sessionKey.split(separator: "-").last ?? "")
         switch key {
@@ -107,7 +118,7 @@ enum HCProgramCatalog {
     ) -> HCWorkout {
         let returning = sessionKey.hasSuffix("SatUpper")
         let exercises = templates(for: sessionKey).enumerated().map { index, t in
-            let previous = savedHistory[normalized(t.name)]
+            let previous = savedHistory[identity(for: t.name)]
             let load: Double?
             if !isPreview, let previous, previous > 0 {
                 let multiplier = returning ? 0.90 : 1.0
