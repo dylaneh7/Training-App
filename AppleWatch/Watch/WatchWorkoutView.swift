@@ -243,12 +243,12 @@ struct WatchWorkoutView: View {
                                 store.workout.prescribedSetCount : 0)
                     }
                     .padding(.vertical, 9)
-                    .listRowBackground {
+                    .listRowBackground(
                         RoundedRectangle(cornerRadius: 18)
                             .fill(LinearGradient(colors:
                                 [WTheme.lime.opacity(0.27), WTheme.panel],
                                 startPoint: .topLeading, endPoint: .bottomTrailing))
-                    }
+                    )
 
                     NavigationLink {
                         WatchStrengthScreen()
