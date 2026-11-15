@@ -1477,6 +1477,50 @@ private struct PremiumCoachPage: View {
                             .foregroundStyle(HCDesign.secondary)
                     }
                 }
+                HCSectionTitle(title: "Connected training history")
+                HCCard {
+                    VStack(alignment: .leading, spacing: 13) {
+                        HStack(spacing: 8) {
+                            HCMetricBlock(label: "Working sets",
+                                          value: String(coach.performanceHistory.count))
+                            HCMetricBlock(label: "Past sessions",
+                                          value: String(coach.trainingActivities.count))
+                        }
+                        HStack(spacing: 8) {
+                            HCMetricBlock(label: "Run records",
+                                          value: String(coach.runHistory.count))
+                            HCMetricBlock(label: "Recovery days",
+                                          value: String(coach.recoveryHistory.count))
+                        }
+                        Text("IMUN uses the original Health Coach and Tredict records stored in your Command Center account. Recording sources are preserved; activity and recovery metrics are not combined into made-up values.")
+                            .font(.caption)
+                            .foregroundStyle(HCDesign.secondary)
+                        HCOutlineButton(title: "Refresh all connected data",
+                                        icon: "arrow.clockwise") {
+                            coach.refresh(date: Date())
+                        }
+                        if let archive = coach.legacyArchiveURL {
+                            ShareLink(item: archive) {
+                                Label("Export original source archive",
+                                      systemImage: "square.and.arrow.up")
+                                    .font(.system(size: 13, weight: .semibold))
+                                    .foregroundStyle(HCDesign.electric)
+                                    .padding(.vertical, 6)
+                            }
+                            Text("Contains your full legacy planner and training state, plus available workout and recovery records. Sharing is your choice.")
+                                .font(.caption2)
+                                .foregroundStyle(HCDesign.secondary)
+                        }
+                        Link(destination: URL(string: "https://www.tredict.com/faq/garmin-connect---how-to-connect-and-synchronize-my-device/")!) {
+                            Label("Tredict Garmin history import instructions",
+                                  systemImage: "arrow.up.right")
+                                .font(.system(size: 12, weight: .medium))
+                        }
+                        Text("Additional Garmin sessions must first be made available through Tredict and your Command Center integration. IMUN cannot read a separate Garmin or Tredict account without that connection.")
+                            .font(.caption2)
+                            .foregroundStyle(HCDesign.secondary)
+                    }
+                }
                 HCSectionTitle(title: "Connections")
                 HCCard {
                     VStack(alignment: .leading, spacing: 14) {
