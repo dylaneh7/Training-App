@@ -1,170 +1,244 @@
 import SwiftUI
 import WatchKit
 
+private func clockText(_ seconds: TimeInterval) -> String {
+    let total = max(0, Int(seconds.rounded(.down)))
+    return String(format: "%02d:%02d", total / 60, total % 60)
+}
+
 struct WatchWorkoutView: View {
     @EnvironmentObject private var store: WatchWorkoutStore
     @EnvironmentObject private var health: WatchHealthSession
 
-    private var totalDone: Int {
-        store.workout.exercises.reduce(0) { $0 + store.completedSets(for: $1).count }
-    }
-
     var body: some View {
-        NavigationStack {
-            List {
-                Section {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(store.workout.title)
-                            .font(.headline)
-                        Text("\(totalDone) / \(store.workout.prescribedSetCount) working sets")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        if store.workout.isPreview {
-                            Label("Demo — connect iPhone for live plan", systemImage: "iphone")
-                                .font(.caption2)
-                                .foregroundStyle(.orange)
-                        }
-                    }
-                }
-
-                Section("Apple Fitness") {
-                    HStack {
-                        if let bpm = health.heartRateBPM {
-                            Label("\(Int(bpm.rounded())) bpm", systemImage: "heart.fill")
-                                .foregroundStyle(.red)
-                        } else {
-                            Label("Heart rate —", systemImage: "heart")
-                        }
-                    }
-                    if health.isRunning {
-                        Button("End & Save Workout", role: .destructive) { health.finish() }
-                    } else {
-                        Button("Start Strength Workout") { health.start() }
-                    }
-                    Text(health.message)
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                }
-
-                Section("Today's Exercises") {
-                    ForEach(store.workout.exercises) { exercise in
-                        NavigationLink {
-                            WatchExerciseView(exercise: exercise)
-                                .environmentObject(store)
-                        } label: {
-                            VStack(alignment: .leading, spacing: 3) {
-                                Text(exercise.name)
-                                    .font(.subheadline.weight(.semibold))
-                                HStack {
-                                    Text("\(store.completedSets(for: exercise).count)/\(exercise.prescribedSets) sets")
-                                    Spacer()
-                                    Text("\(exercise.repDescription) reps")
+        TabView {
+            NavigationStack {
+                List {
+                    Section {
+                        Text(store.workout.title).font(.headline)
+                        Text("\(store.workout.exercises.count) exercises · \(store.workout.prescribedSetCount) work sets")
+                            .font(.caption2).foregroundStyle(.secondary)
+                        TimelineView(.periodic(from: .now, by: 1)) { context in
+                            VStack(alignment: .leading) {
+                                Text(clockText(store.liftClock?.duration(at: context.date) ?? 0))
+                                    .font(.title2.monospacedDigit().bold())
+                                if let bpm = health.heartRateBPM, health.kind == .strength {
+                                    Text("\(Int(bpm.rounded())) bpm").foregroundStyle(.red)
                                 }
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
+                            }
+                        }
+                        if store.liftClock?.isActive == true {
+                            if store.liftClock?.isPaused == true {
+                                Button("Resume Workout") {
+                                    store.resumeLifting()
+                                    health.resume()
+                                }
+                            } else {
+                                Button("Pause Workout") {
+                                    store.pauseLifting()
+                                    health.pause()
+                                }
+                            }
+                            Button("Finish Workout", role: .destructive) {
+                                store.endLifting()
+                                if health.kind == .strength { health.finish() }
+                            }
+                            .disabled(store.liftClock?.setStartedAt != nil)
+                        } else {
+                            Button("Start Workout") {
+                                store.startLifting()
+                                health.start(kind: .strength)
+                            }
+                            .buttonStyle(.borderedProminent)
+                        }
+                        if store.workout.isPreview {
+                            Text("Preview program. Sync iPhone for your actual plan.")
+                                .font(.caption2).foregroundStyle(.orange)
+                        }
+                    }
+                    Section("Exercises") {
+                        ForEach(store.workout.exercises) { exercise in
+                            NavigationLink {
+                                WatchExerciseView(exercise: exercise)
+                            } label: {
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text(exercise.name)
+                                        .font(.subheadline.weight(.semibold))
+                                    HStack {
+                                        Text("\(store.completedSets(for: exercise).count)/\(exercise.prescribedSets) sets")
+                                        Spacer()
+                                        Text(exercise.repDescription)
+                                    }
+                                    .font(.caption2).foregroundStyle(.secondary)
+                                }
                             }
                         }
                     }
-                    if store.workout.exercises.isEmpty {
-                        Text("Rest day · No scheduled strength training")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
+                    Text(store.status).font(.caption2).foregroundStyle(.secondary)
                 }
-
-                Text(store.status).font(.caption2).foregroundStyle(.secondary)
+                .navigationTitle("Strength")
             }
-            .navigationTitle("Health Coach")
+            NavigationStack { WatchRunView() }
+                .tabItem { Label("Run", systemImage: "figure.run") }
         }
+        .tabViewStyle(.page)
     }
 }
 
 private struct WatchExerciseView: View {
     @EnvironmentObject private var store: WatchWorkoutStore
     let exercise: HCExercise
-
-    @State private var useWeight = false
-    @State private var weightLb: Double = 0
+    @State private var weightLb = 0.0
+    @State private var hasWeight = false
     @State private var reps = 8
     @State private var rir = 2
-    @State private var restUntil: Date?
 
     private var completed: [HCLoggedSet] { store.completedSets(for: exercise) }
+    private var active: Bool {
+        store.liftClock?.setExerciseID == exercise.id &&
+        store.liftClock?.setStartedAt != nil
+    }
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 10) {
-                Text(exercise.name)
-                    .font(.headline)
-
-                Text("Plan: \(exercise.prescribedSets) × \(exercise.repDescription)")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-
-                if let suggested = exercise.suggestedWeightLb {
-                    Text("Suggested load: ~\(suggested.formatted()) lb")
-                        .font(.caption)
-                        .foregroundStyle(.green)
-                } else {
-                    Text("Load not recorded previously — select your weight")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 9) {
+                Text(exercise.name).font(.headline)
+                Text("\(exercise.prescribedSets) sets × \(exercise.repDescription) reps")
+                    .font(.caption).foregroundStyle(.secondary)
+                if let suggestion = exercise.suggestedWeightLb {
+                    Text("Suggested ~\(suggestion.formatted()) lb")
+                        .font(.caption).foregroundStyle(.green)
                 }
 
-                Toggle("Record weight", isOn: $useWeight)
-                    .font(.caption)
-
-                if useWeight {
+                Toggle("Use weight", isOn: $hasWeight).font(.caption)
+                if hasWeight {
                     Stepper(value: $weightLb, in: 0...1500, step: 5) {
-                        Text("\(weightLb.formatted()) lb")
-                            .font(.headline)
+                        Text("\(weightLb.formatted()) lb").font(.headline)
                     }
                 }
-
-                Stepper(value: $reps, in: 1...50) {
+                Stepper(value: $reps, in: 1...60) {
                     Text("\(reps) reps").font(.headline)
                 }
-
-                Stepper(value: $rir, in: 0...5) {
-                    Text("\(rir) RIR").font(.caption)
+                Stepper(value: $rir, in: 0...6) {
+                    Text("\(rir) reps in reserve").font(.caption)
                 }
 
-                Button("Log Set \(completed.count + 1)") {
-                    store.log(exercise: exercise,
-                              weightLb: useWeight ? weightLb : nil,
-                              reps: reps,
-                              rir: Double(rir))
-                    restUntil = Date().addingTimeInterval(TimeInterval(exercise.restSeconds))
-                    WKInterfaceDevice.current().play(.success)
-                }
-                .buttonStyle(.borderedProminent)
-
-                if let restUntil {
-                    TimelineView(.periodic(from: .now, by: 1)) { timeline in
-                        let remaining = max(0, Int(restUntil.timeIntervalSince(timeline.date)))
-                        Text(remaining == 0 ? "Rest complete ✓" : "Rest: \(remaining) sec")
+                if store.liftClock?.isActive != true {
+                    Button("Start Overall Workout") { store.startLifting() }
+                        .buttonStyle(.borderedProminent)
+                } else if store.liftClock?.isPaused == true {
+                    Text("Resume overall workout first").font(.caption2)
+                } else if active {
+                    TimelineView(.periodic(from: .now, by: 1)) { context in
+                        Text("Set: \(clockText(context.date.timeIntervalSince(store.liftClock?.setStartedAt ?? context.date)))")
                             .font(.headline.monospacedDigit())
-                            .foregroundStyle(remaining == 0 ? .green : .secondary)
+                    }
+                    Button("Stop & Save Set \(completed.count + 1)") {
+                        if store.stopSet(for: exercise, weightLb: hasWeight ? weightLb : nil,
+                                         reps: reps, rir: Double(rir)) {
+                            WKInterfaceDevice.current().play(.success)
+                        }
+                    }
+                    .tint(.orange)
+                    Button("Cancel Set", role: .destructive) { store.cancelSet() }
+                } else if store.liftClock?.setStartedAt != nil {
+                    Text("Finish the active set before starting another.")
+                        .font(.caption2)
+                } else {
+                    Button("Start Set \(completed.count + 1)") {
+                        store.startSet(for: exercise)
+                        WKInterfaceDevice.current().play(.start)
+                    }
+                    .buttonStyle(.borderedProminent)
+                }
+
+                if let end = store.liftClock?.restEndsAt {
+                    TimelineView(.periodic(from: .now, by: 1)) { context in
+                        let remaining = max(0, end.timeIntervalSince(context.date))
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(remaining > 0 ? "Rest \(clockText(remaining))" : "Rest complete")
+                                .font(.headline.monospacedDigit())
+                                .foregroundStyle(remaining > 0 ? Color.secondary : Color.green)
+                            if remaining > 0 {
+                                Button("Skip Rest") { store.skipRest() }
+                            }
+                        }
                     }
                 }
 
-                if !completed.isEmpty {
-                    Divider()
-                    ForEach(completed) { set in
-                        Label("\(set.weightLb.map { $0.formatted() + " lb" } ?? "— lb") × \(set.reps)", systemImage: "checkmark.circle.fill")
-                            .font(.caption)
-                    }
+                ForEach(completed) { set in
+                    HStack {
+                        Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+                        Text("\(set.weightLb.map { $0.formatted() + " lb" } ?? "No load") × \(set.reps)")
+                        if let seconds = set.durationSeconds {
+                            Text(clockText(seconds)).foregroundStyle(.secondary)
+                        }
+                    }.font(.caption2)
                 }
-            }
-            .padding(.horizontal, 5)
+            }.padding(.horizontal, 5)
         }
-        .navigationTitle("Record Set")
+        .navigationTitle("Set Editor")
         .onAppear {
-            if let suggested = exercise.suggestedWeightLb {
-                useWeight = true
-                weightLb = suggested
+            if let target = exercise.suggestedWeightLb {
+                hasWeight = true
+                weightLb = target
             }
             reps = exercise.repMin
         }
+    }
+}
+
+private struct WatchRunView: View {
+    @EnvironmentObject private var store: WatchWorkoutStore
+    @EnvironmentObject private var health: WatchHealthSession
+
+    var body: some View {
+        List {
+            Section {
+                Text(store.runPlan?.title ?? "Run")
+                    .font(.headline)
+                Text(store.runPlan?.notes ?? "Start a run from your watch or load today's plan from iPhone.")
+                    .font(.caption).foregroundStyle(.secondary)
+                if let miles = store.runPlan?.targetDistanceMiles {
+                    Text("Target \(miles.formatted()) miles").font(.headline)
+                }
+
+                TimelineView(.periodic(from: .now, by: 1)) { context in
+                    Text(clockText(store.runClock?.duration(at: context.date) ?? 0))
+                        .font(.title2.monospacedDigit().bold())
+                }
+                if let meters = health.distanceMeters {
+                    Text(String(format: "%.2f miles", meters / 1609.344))
+                }
+                if let bpm = health.heartRateBPM, health.kind == .run {
+                    Text("\(Int(bpm.rounded())) bpm").foregroundStyle(.red)
+                }
+
+                if store.runClock?.isActive == true {
+                    if store.runClock?.isPaused == true {
+                        Button("Resume Run") {
+                            store.resumeRun()
+                            health.resume()
+                        }
+                    } else {
+                        Button("Pause Run") {
+                            store.pauseRun()
+                            health.pause()
+                        }
+                    }
+                    Button("Finish Run", role: .destructive) {
+                        store.finishRun(distanceMeters: health.distanceMeters,
+                                        heartRateBPM: health.averageHeartRateBPM)
+                        if health.kind == .run { health.finish() }
+                    }
+                } else {
+                    Button("Start Run") {
+                        store.startRun()
+                        health.start(kind: .run)
+                    }.buttonStyle(.borderedProminent)
+                }
+            }
+        }
+        .navigationTitle("Run")
     }
 }
