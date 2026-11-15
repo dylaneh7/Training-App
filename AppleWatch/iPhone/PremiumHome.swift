@@ -8,6 +8,7 @@ struct PremiumHomeView: View {
     @EnvironmentObject private var coach: PhoneWorkoutBridge
     @StateObject private var appleHealth = HCAppleHealthReader()
     @StateObject private var runImporter = HCRunHealthImporter()
+    @StateObject private var tredictImporter = HCTredictImporter()
     @AppStorage("hcAccentStyle") private var accentStyle = "crimson"
     @Environment(\.scenePhase) private var scenePhase
 
@@ -27,6 +28,12 @@ struct PremiumHomeView: View {
         .tint(HCDesign.electric)
         .preferredColorScheme(.dark)
         .environmentObject(runImporter)
+        .environmentObject(tredictImporter)
+        .onReceive(tredictImporter.$snapshot) { snapshot in
+            if snapshot.lastSync != nil {
+                coach.updateTredictSnapshot(snapshot)
+            }
+        }
         .onReceive(runImporter.$runs) { imported in
             coach.updateHealthRuns(imported)
         }
@@ -1314,6 +1321,8 @@ private struct PremiumRecoveryPage: View {
 
 private struct PremiumCoachPage: View {
     @EnvironmentObject private var coach: PhoneWorkoutBridge
+    @EnvironmentObject private var tredict: HCTredictImporter
+    @State private var tredictToken = ""
     @AppStorage("hcAggressiveProgression") private var aggressive = true
     @AppStorage("hcCoachingNotes") private var notes = ""
     @AppStorage("hcIncludeRecoveryExport") private var includeRecovery = false
@@ -1477,6 +1486,71 @@ private struct PremiumCoachPage: View {
                         Text("Only you decide whether and where to share this export.")
                             .font(.caption2)
                             .foregroundStyle(HCDesign.secondary)
+                    }
+                }
+                HCSectionTitle(title: "Tredict / Garmin", detail: "Full-history personal connection")
+                HCCard {
+                    VStack(alignment: .leading, spacing: 13) {
+                        HStack {
+                            Image(systemName: "waveform.path")
+                                .foregroundStyle(HCDesign.electric)
+                            Text(tredict.connected ? "Tredict connection saved" :
+                                 "Connect your Tredict account")
+                                .font(.system(size: 15, weight: .semibold))
+                        }
+                        Text("Use a read-only Personal API token from Tredict → Settings → Personal API. Choose activityRead and bodyvaluesRead. The token stays in your iPhone Keychain; training data is downloaded to this device.")
+                            .font(.caption)
+                            .foregroundStyle(HCDesign.secondary)
+                        if !tredict.connected {
+                            SecureField("Personal API token", text: $tredictToken)
+                                .textContentType(.password)
+                                .textInputAutocapitalization(.never)
+                                .autocorrectionDisabled()
+                                .padding(12)
+                                .background(HCDesign.raised,
+                                            in: RoundedRectangle(cornerRadius: 12))
+                            HCFilledButton(title: "CONNECT & IMPORT HISTORY",
+                                           icon: "arrow.down.circle.fill",
+                                           disabled: tredictToken.isEmpty || tredict.loading) {
+                                tredict.connect(token: tredictToken)
+                                tredictToken = ""
+                            }
+                        } else {
+                            HCFilledButton(title: tredict.loading ? "IMPORTING HISTORY…" :
+                                                "SYNC ALL TREDICT HISTORY",
+                                           icon: "arrow.clockwise",
+                                           disabled: tredict.loading) {
+                                tredict.refresh()
+                            }
+                            HCOutlineButton(title: "Disconnect Tredict", icon: "xmark.circle") {
+                                tredict.disconnect()
+                            }
+                        }
+                        if tredict.loading { ProgressView().tint(HCDesign.electric) }
+                        Text(tredict.status)
+                            .font(.caption)
+                            .foregroundStyle(HCDesign.secondary)
+                        if tredict.snapshot.lastSync != nil {
+                            Text("Imported \(tredict.snapshot.rawActivityCount) activities · " +
+                                 "\(tredict.snapshot.recovery.count) recovery days")
+                                .font(.system(size: 12, weight: .medium))
+                            Text("Included: " + tredict.snapshot.dataTypes.joined(separator: ", "))
+                                .font(.caption2)
+                                .foregroundStyle(HCDesign.secondary)
+                        }
+                        if let archive = tredict.archiveURL {
+                            ShareLink(item: archive) {
+                                Label("Export original Tredict data archive",
+                                      systemImage: "square.and.arrow.up")
+                                    .font(.system(size: 13, weight: .semibold))
+                                    .foregroundStyle(HCDesign.electric)
+                            }
+                        }
+                        Link(destination: URL(string: "https://www.tredict.com/faq/personal-api---connect-your-own-scripts-or-personal-applications/")!) {
+                            Label("How to create a Tredict API token",
+                                  systemImage: "arrow.up.right")
+                                .font(.system(size: 12))
+                        }
                     }
                 }
                 HCSectionTitle(title: "Connected training history")
