@@ -2,104 +2,170 @@ import Foundation
 import Combine
 import HealthKit
 
-/// Optional on-watch Apple Fitness workout recording.
-/// Weight/repetition logging is independent and works if permission is denied.
+/// Optional Apple Health recorder. Strength-set clocks and running elapsed time
+/// continue working if the user chooses not to grant HealthKit access.
 final class WatchHealthSession: NSObject, ObservableObject,
                                 HKWorkoutSessionDelegate, HKLiveWorkoutBuilderDelegate {
+    enum Kind { case strength, run }
+
     @Published private(set) var isRunning = false
+    @Published private(set) var isPaused = false
+    @Published private(set) var kind: Kind?
     @Published private(set) var heartRateBPM: Double?
-    @Published private(set) var message = "Fitness session not started"
+    @Published private(set) var averageHeartRateBPM: Double?
+    @Published private(set) var distanceMeters: Double?
+    @Published private(set) var message = "Apple Fitness ready"
 
     private let store = HKHealthStore()
     private var session: HKWorkoutSession?
     private var builder: HKLiveWorkoutBuilder?
+    private var ending = false
 
-    func start() {
+    func start(kind requestedKind: Kind) {
         guard HKHealthStore.isHealthDataAvailable() else {
-            message = "HealthKit is unavailable on this watch."
+            message = "Apple Health unavailable. Training timers still work."
             return
         }
-        guard !isRunning else { return }
+        guard session == nil && !isRunning && !ending else {
+            message = "Finish the current Apple Fitness session first."
+            return
+        }
 
-        let heartRateType = HKObjectType.quantityType(forIdentifier: .heartRate)!
+        let heart = HKObjectType.quantityType(forIdentifier: .heartRate)!
+        let distance = HKObjectType.quantityType(forIdentifier: .distanceWalkingRunning)!
         store.requestAuthorization(toShare: [HKObjectType.workoutType()],
-                                   read: [heartRateType]) { [weak self] _, error in
+                                   read: [heart, distance]) { [weak self] _, error in
             DispatchQueue.main.async {
                 guard let self else { return }
                 if let error {
-                    self.message = "Health permission: \(error.localizedDescription)"
-                    return
+                    self.message = "Apple Health access: \(error.localizedDescription)"
+                } else {
+                    self.begin(kind: requestedKind)
                 }
-                self.begin()
             }
         }
     }
 
-    private func begin() {
+    private func begin(kind requestedKind: Kind) {
         let configuration = HKWorkoutConfiguration()
-        configuration.activityType = .traditionalStrengthTraining
-        configuration.locationType = .indoor
+        configuration.activityType = requestedKind == .run ? .running : .traditionalStrengthTraining
+        configuration.locationType = requestedKind == .run ? .outdoor : .indoor
+
         do {
-            let current = try HKWorkoutSession(healthStore: store,
-                                               configuration: configuration)
-            let collector = current.associatedWorkoutBuilder()
-            collector.dataSource = HKLiveWorkoutDataSource(
-                healthStore: store, workoutConfiguration: configuration
-            )
-            current.delegate = self
+            let next = try HKWorkoutSession(healthStore: store, configuration: configuration)
+            let collector = next.associatedWorkoutBuilder()
+            collector.dataSource = HKLiveWorkoutDataSource(healthStore: store,
+                                                            workoutConfiguration: configuration)
+            next.delegate = self
             collector.delegate = self
-            session = current
+            session = next
             builder = collector
+            kind = requestedKind
+            heartRateBPM = nil
+            distanceMeters = nil
+            averageHeartRateBPM = nil
 
             let now = Date()
-            current.startActivity(with: now)
+            next.startActivity(with: now)
             collector.beginCollection(withStart: now) { [weak self] success, error in
                 DispatchQueue.main.async {
-                    self?.message = success ? "Apple Fitness strength workout recording"
-                        : (error?.localizedDescription ?? "Could not start Fitness recording")
-                    self?.isRunning = success
+                    guard let self else { return }
+                    self.isRunning = success
+                    self.message = success
+                        ? (requestedKind == .run ? "Apple Fitness run recording" : "Apple Fitness strength recording")
+                        : (error?.localizedDescription ?? "Could not record Apple Fitness workout")
+                    if !success {
+                        self.session?.end()
+                        self.builder = nil
+                        self.session = nil
+                        self.kind = nil
+                    }
                 }
             }
         } catch {
-            message = "Workout start failed: \(error.localizedDescription)"
+            message = "Fitness start unavailable: \(error.localizedDescription)"
         }
     }
 
+    func pause() {
+        guard isRunning && !isPaused else { return }
+        session?.pause()
+        isPaused = true
+    }
+
+    func resume() {
+        guard isRunning && isPaused else { return }
+        session?.resume()
+        isPaused = false
+    }
+
+    /// Use stopActivity and wait for the stopped delegate state before finishing
+    /// HKLiveWorkoutBuilder. This follows Apple's current HealthKit lifecycle.
     func finish() {
-        guard let current = session, let collector = builder else { return }
-        isRunning = false
-        current.end()
-        collector.endCollection(withEnd: Date()) { [weak self] success, error in
+        guard session != nil && !ending else { return }
+        ending = true
+        session?.stopActivity(with: Date())
+        message = "Saving Apple Fitness workout…"
+    }
+
+    private func finishRecording(end: Date) {
+        guard let current = session, let collector = builder else {
+            reset(); return
+        }
+        collector.endCollection(withEnd: end) { [weak self] success, error in
+            guard let self else { return }
             guard success else {
                 DispatchQueue.main.async {
-                    self?.message = error?.localizedDescription ?? "Unable to end collection"
+                    self.message = error?.localizedDescription ?? "Unable to end HealthKit collection"
+                    current.end()
+                    self.reset()
                 }
                 return
             }
-            collector.finishWorkout { _, error in
+            collector.finishWorkout { saved, error in
                 DispatchQueue.main.async {
-                    self?.message = error == nil ? "Workout saved to Apple Fitness"
-                        : "Fitness save failed: \(error!.localizedDescription)"
-                    self?.session = nil
-                    self?.builder = nil
+                    self.message = saved != nil
+                        ? "Workout saved to Apple Fitness"
+                        : "Apple Fitness save failed: \(error?.localizedDescription ?? "Unknown error")"
+                    current.end()
+                    self.reset()
                 }
             }
         }
     }
 
+    private func reset() {
+        isRunning = false
+        isPaused = false
+        ending = false
+        session = nil
+        builder = nil
+        kind = nil
+    }
+
     func workoutSession(_ workoutSession: HKWorkoutSession,
-                        didChangeTo toState: HKWorkoutSessionState,
-                        from fromState: HKWorkoutSessionState,
+                        didChangeTo newState: HKWorkoutSessionState,
+                        from oldState: HKWorkoutSessionState,
                         date: Date) {
         DispatchQueue.main.async {
-            if toState == .ended { self.isRunning = false }
+            switch newState {
+            case .stopped:
+                if self.ending { self.finishRecording(end: date) }
+            case .paused:
+                self.isPaused = true
+            case .running:
+                self.isPaused = false
+            case .ended:
+                self.isRunning = false
+            default: break
+            }
         }
     }
 
     func workoutSession(_ workoutSession: HKWorkoutSession, didFailWithError error: Error) {
         DispatchQueue.main.async {
-            self.isRunning = false
             self.message = error.localizedDescription
+            self.reset()
         }
     }
 
@@ -107,11 +173,25 @@ final class WatchHealthSession: NSObject, ObservableObject,
 
     func workoutBuilder(_ workoutBuilder: HKLiveWorkoutBuilder,
                         didCollectDataOf collectedTypes: Set<HKSampleType>) {
-        guard let heart = HKQuantityType.quantityType(forIdentifier: .heartRate),
-              collectedTypes.contains(heart),
-              let latest = workoutBuilder.statistics(for: heart)?.mostRecentQuantity()
-        else { return }
-        let bpm = latest.doubleValue(for: HKUnit.count().unitDivided(by: .minute()))
-        DispatchQueue.main.async { self.heartRateBPM = bpm }
+        let heart = HKObjectType.quantityType(forIdentifier: .heartRate)!
+        let distance = HKObjectType.quantityType(forIdentifier: .distanceWalkingRunning)!
+        let live = collectedTypes.contains(heart)
+            ? workoutBuilder.statistics(for: heart)?.mostRecentQuantity()?
+                .doubleValue(for: HKUnit.count().unitDivided(by: .minute()))
+            : nil
+        let avg = collectedTypes.contains(heart)
+            ? workoutBuilder.statistics(for: heart)?.averageQuantity()?
+                .doubleValue(for: HKUnit.count().unitDivided(by: .minute()))
+            : nil
+        let meters = collectedTypes.contains(distance)
+            ? workoutBuilder.statistics(for: distance)?.sumQuantity()?
+                .doubleValue(for: .meter())
+            : nil
+
+        DispatchQueue.main.async {
+            if let live { self.heartRateBPM = live }
+            if let avg { self.averageHeartRateBPM = avg }
+            if let meters { self.distanceMeters = meters }
+        }
     }
 }
