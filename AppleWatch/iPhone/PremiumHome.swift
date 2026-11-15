@@ -2106,9 +2106,9 @@ private struct PremiumCoachPage: View {
                                 .background(HCDesign.aqua.opacity(0.12),
                                             in: RoundedRectangle(cornerRadius: 14))
                             VStack(alignment: .leading, spacing: 5) {
-                                Text("Ask Coach")
+                                Text("Full-screen coaching")
                                     .font(HCDesign.display(19))
-                                Text("Understand your progress, workouts and training choices")
+                                Text("Separate workspace for longer questions")
                                     .font(.caption).foregroundStyle(HCDesign.secondary)
                             }
                             Spacer(minLength: 5)
