@@ -929,7 +929,19 @@ struct HCHealthMetric:Identifiable {
     let date:String
 }
 
+
+/// Source-specific, per-calendar-day Apple Health quantities for personal trends.
+/// HRV SDNN is never mixed with Tredict RMSSD or WHOOP Recovery scores.
+struct HCHealthTrendSample: Identifiable {
+    let name: String
+    let source: String
+    let date: String
+    let value: Double
+    var id: String { name + ":" + source + ":" + date }
+}
+
 final class HCAppleHealthReader:ObservableObject {
+    @Published private(set) var metricHistory:[HCHealthTrendSample]=[]
     @Published private(set) var metrics:[HCHealthMetric]=[]
     @Published private(set) var status="Not connected. No health data is read without permission."
     private let store=HKHealthStore()
@@ -966,20 +978,40 @@ final class HCAppleHealthReader:ObservableObject {
         for (type,name,unit) in kinds {
             guard let quantity=HKObjectType.quantityType(forIdentifier:type) else {continue}
             let predicate=HKQuery.predicateForSamples(
-                withStart:Calendar.current.date(byAdding:.day,value:-7,to:Date()),
+                withStart:Calendar.current.date(byAdding:.day,value:-35,to:Date()),
                 end:Date(),options:.strictStartDate)
-            let q=HKSampleQuery(sampleType:quantity,predicate:predicate,limit:1,
+            let q=HKSampleQuery(sampleType:quantity,predicate:predicate,
+                                limit:HKObjectQueryNoLimit,
                                 sortDescriptors:[NSSortDescriptor(key:HKSampleSortIdentifierEndDate,ascending:false)])
             { [weak self] _,samples,error in
-                guard error == nil, let sample=samples?.first as? HKQuantitySample else {return}
+                guard error == nil,
+                      let quantities=samples as? [HKQuantitySample],
+                      let sample=quantities.first else {return}
+                let source=sample.sourceRevision.source.name
+                // Never average values from incompatible hardware/source pipelines.
+                let sameSource=quantities.filter{$0.sourceRevision.source.name==source}
+                let byDay=Dictionary(grouping:sameSource,by:{
+                    HCPlanBuilder.dateString($0.endDate)
+                })
+                let series=byDay.map { day, values -> HCHealthTrendSample in
+                    let amounts=values.map{$0.quantity.doubleValue(for:unit)}.sorted()
+                    let middle=amounts.count/2
+                    let median=amounts.count.isMultiple(of:2)
+                        ? (amounts[middle-1]+amounts[middle])/2
+                        : amounts[middle]
+                    return HCHealthTrendSample(name:name,source:source,
+                                               date:day,value:median)
+                }.sorted{$0.date<$1.date}
                 let number=sample.quantity.doubleValue(for:unit)
                 let result=HCHealthMetric(name:name,value:String(format:"%.1f",number),
-                                          source:sample.sourceRevision.source.name,
+                                          source:source,
                                           date:HCPlanBuilder.dateString(sample.endDate))
                 DispatchQueue.main.async {
                     self?.metrics.removeAll(where:{$0.name==name})
                     self?.metrics.append(result)
-                    self?.status="Showing latest available, source-labeled samples."
+                    self?.metricHistory.removeAll(where:{$0.name==name})
+                    self?.metricHistory.append(contentsOf:series)
+                    self?.status="Showing source-specific Apple Health trends."
                 }
             }
             store.execute(q)
