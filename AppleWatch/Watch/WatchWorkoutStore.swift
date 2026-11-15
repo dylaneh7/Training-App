@@ -223,7 +223,13 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
 
         clock.setExerciseID = nil
         clock.setStartedAt = nil
-        clock.restEndsAt = now.addingTimeInterval(Double(exercise.restSeconds))
+        let remaining = workout.exercises.contains { movement in
+            let count = completedSets(for: movement).count
+            return count < movement.prescribedSets
+        }
+        let override = UserDefaults.standard.integer(forKey: "hcRestOverrideSeconds")
+        let restSeconds = override > 0 ? override : exercise.restSeconds
+        clock.restEndsAt = remaining ? now.addingTimeInterval(Double(restSeconds)) : nil
         liftClock = clock
         // Present the next remaining set automatically when the rest expires.
         // If this movement has more sets, it stays selected.
@@ -324,6 +330,23 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
     // MARK: - WatchConnectivity
 
     private func applyContext(_ context: [String: Any]) {
+        // Settings arrive from the user's iPhone. Users may also adjust these
+        // locally through the watch Preferences screen.
+        if let color = context[HCPayload.accentStyle] as? String,
+           ["crimson", "lime", "aqua", "white"].contains(color) {
+            UserDefaults.standard.set(color, forKey: "hcAccentStyle")
+        }
+        if let weightStep = context[HCPayload.weightIncrement] as? Double,
+           [2.5, 5.0, 10.0].contains(weightStep) {
+            UserDefaults.standard.set(weightStep, forKey: "hcWeightIncrement")
+        }
+        if let rest = context[HCPayload.restOverride] as? Int,
+           [0, 60, 90, 120, 180].contains(rest) {
+            UserDefaults.standard.set(rest, forKey: "hcRestOverrideSeconds")
+        }
+        if let haptics = context[HCPayload.watchHaptics] as? Bool {
+            UserDefaults.standard.set(haptics, forKey: "hcWatchHaptics")
+        }
         if let data = context[HCPayload.workout] as? Data,
            let next = try? decoder.decode(HCWorkout.self, from: data) {
             DispatchQueue.main.async {
