@@ -213,6 +213,13 @@ private struct WatchRunView: View {
                 if let bpm = health.heartRateBPM, health.kind == .run {
                     Text("\(Int(bpm.rounded())) bpm").foregroundStyle(.red)
                 }
+                if let splits = store.runClock?.splits, !splits.isEmpty {
+                    ForEach(splits) { split in
+                        Text("Split \(split.index): \(clockText(split.elapsedSeconds))" +
+                             (split.distanceMeters.map { String(format: " · %.2f mi", $0 / 1609.344) } ?? ""))
+                            .font(.caption2)
+                    }
+                }
 
                 if store.runClock?.isActive == true {
                     if store.runClock?.isPaused == true {
@@ -225,6 +232,10 @@ private struct WatchRunView: View {
                             store.pauseRun()
                             health.pause()
                         }
+                    }
+                    Button("Lap / Split") {
+                        store.addRunSplit(currentDistanceMeters: health.distanceMeters)
+                        WKInterfaceDevice.current().play(.click)
                     }
                     Button("Finish Run", role: .destructive) {
                         store.finishRun(distanceMeters: health.distanceMeters,
