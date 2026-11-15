@@ -84,6 +84,31 @@ struct HCRunSplit: Codable, Hashable, Identifiable {
 
 /// A saved run from HealthKit, the watch, or an authorized existing provider.
 /// Optional fields reflect what that source actually shared: never invent metrics.
+/// Planner items sourced from Command Center, including changes made in IMUN.
+struct HCPlannedSession: Codable, Identifiable, Hashable {
+    let id: String
+    let date: String
+    let title: String
+    let kind: String
+    let notes: String
+    let completed: Bool
+    let originalDate: String?
+}
+
+struct HCTrainingActivity: Codable, Identifiable {
+    let id: String
+    let date: String
+    let title: String
+    let kind: String
+    let source: String
+    let distanceMeters: Double?
+    let durationSeconds: Double?
+    let averageBPM: Double?
+    let maxBPM: Double?
+    let calories: Double?
+    let perceivedEffort: Double?
+}
+
 struct HCProgressRun: Codable, Identifiable {
     let id: String
     let date: String
