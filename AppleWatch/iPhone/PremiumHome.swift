@@ -6,7 +6,6 @@ import MapKit
 
 struct PremiumHomeView: View {
     @EnvironmentObject private var coach: PhoneWorkoutBridge
-    @State private var selectedDate = Date()
     @StateObject private var appleHealth = HCAppleHealthReader()
     @StateObject private var runImporter = HCRunHealthImporter()
     @AppStorage("hcAccentStyle") private var accentStyle = "crimson"
@@ -14,9 +13,9 @@ struct PremiumHomeView: View {
 
     var body: some View {
         TabView {
-            NavigationStack { PremiumStrengthPage(date: $selectedDate) }
+            NavigationStack { PremiumStrengthPage() }
                 .tabItem { Label("Strength", systemImage: "dumbbell.fill") }
-            NavigationStack { PremiumRunPage(date: $selectedDate) }
+            NavigationStack { PremiumRunPage() }
                 .tabItem { Label("Run", systemImage: "figure.run") }
             NavigationStack { PremiumProgressPage() }
                 .tabItem { Label("Progress", systemImage: "chart.xyaxis.line") }
@@ -32,15 +31,17 @@ struct PremiumHomeView: View {
             coach.updateHealthRuns(imported)
         }
         .onChange(of: scenePhase) { _, phase in
-            if phase == .active { runImporter.startIfAuthorized() }
+            if phase == .active {
+                runImporter.startIfAuthorized()
+                if coach.signedIn { coach.refresh(date: Date()) }
+            }
         }
-        .onChange(of: selectedDate) { _, value in coach.refresh(date: value) }
         .onChange(of: accentStyle) { _, _ in
             configureTabAppearance()
             coach.sendToWatch()
         }
         .onAppear {
-            if coach.signedIn && coach.workout == nil { coach.refresh(date: selectedDate) }
+            if coach.signedIn && coach.workout == nil { coach.refresh(date: Date()) }
             configureTabAppearance()
         }
     }
@@ -88,27 +89,6 @@ private struct PremiumHeader: View {
     }
 }
 
-private struct PremiumDatePicker: View {
-    @Binding var date: Date
-    var body: some View {
-        HStack {
-            Label("TRAINING DATE", systemImage: "calendar")
-                .font(HCDesign.label(11))
-                .tracking(1.2)
-                .foregroundStyle(HCDesign.secondary)
-            Spacer()
-            DatePicker("Workout day", selection: $date, displayedComponents: .date)
-                .labelsHidden()
-                .datePickerStyle(.compact)
-                .tint(HCDesign.electric)
-                .fixedSize()
-                .accessibilityLabel("Select training day")
-        }
-        .padding(12)
-        .background(HCDesign.card, in: RoundedRectangle(cornerRadius: 15))
-    }
-}
-
 private struct PremiumLogin: View {
     @EnvironmentObject private var coach: PhoneWorkoutBridge
     @State private var email = ""
@@ -149,7 +129,8 @@ private struct PremiumLogin: View {
 
 private struct PremiumStrengthPage: View {
     @EnvironmentObject private var coach: PhoneWorkoutBridge
-    @Binding var date: Date
+    private var date: Date { Date() }
+    @State private var movingSession: HCPlannedSession?
     @AppStorage("hcAggressiveProgression") private var aggressive = true
     @State private var showEditor = false
     @State private var showNew = false
@@ -167,11 +148,10 @@ private struct PremiumStrengthPage: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 19) {
-                PremiumHeader(eyebrow: "PERFORMANCE / STRENGTH",
-                              title: "Own the session.",
-                              subtitle: "Track every rep. Make every set count.",
-                              badge: aggressive ? "SMART PROGRESSION" : "CONTROLLED")
-                PremiumDatePicker(date: $date)
+                PremiumHeader(eyebrow: "IMUN / STRENGTH",
+                              title: "Today",
+                              subtitle: Date().formatted(.dateTime.weekday(.wide).month(.abbreviated).day()),
+                              badge: aggressive ? "COACHED" : nil)
                 HCSyncStatus(pending: coach.cloudPendingCount,
                              saving: coach.savingPlan, connected: coach.signedIn)
 
@@ -217,6 +197,13 @@ private struct PremiumStrengthPage: View {
                                     coach.sendToWatch()
                                 }
                             }
+                            if let entry = coach.plannedSessions.first(where: {
+                                $0.date == HCPlanBuilder.dateString(date) && $0.kind == "lift"
+                            }) {
+                                HCOutlineButton(title: "Move this workout", icon: "calendar.badge.clock") {
+                                    movingSession = entry
+                                }
+                            }
                         }
                     }
                     HCSectionTitle(title: "Workout lineup", detail: "Tap to train")
@@ -242,7 +229,7 @@ private struct PremiumStrengthPage: View {
                                 .font(.largeTitle).foregroundStyle(HCDesign.electric)
                             Text("No strength session planned")
                                 .font(HCDesign.display(23))
-                            Text("Build one for this date or pick another training day.")
+                            Text("Create a session for today, or move an upcoming one here from Progress.")
                                 .font(.subheadline).foregroundStyle(HCDesign.secondary)
                             HCFilledButton(title: "CREATE WORKOUT", icon: "plus") {
                                 showNew = true
@@ -267,6 +254,10 @@ private struct PremiumStrengthPage: View {
                 }
                 .accessibilityLabel("Refresh strength workout")
             }
+        }
+        .sheet(item: $movingSession) { entry in
+            IMUNMoveWorkoutSheet(entry: entry)
+                .environmentObject(coach)
         }
         .sheet(isPresented: $showEditor) {
             PremiumWorkoutEditor()
@@ -621,7 +612,8 @@ private struct PremiumExerciseSession: View {
 private struct PremiumRunPage: View {
     @EnvironmentObject private var coach: PhoneWorkoutBridge
     @EnvironmentObject private var importer: HCRunHealthImporter
-    @Binding var date: Date
+    private var date: Date { Date() }
+    @State private var movingSession: HCPlannedSession?
 
     private var actual: HCProgressRun? {
         coach.runHistory.first { $0.date == HCPlanBuilder.dateString(date) }
@@ -630,10 +622,9 @@ private struct PremiumRunPage: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 19) {
-                PremiumHeader(eyebrow: "ENDURANCE / RUN",
-                              title: "Find your pace.",
-                              subtitle: "The plan, the splits, and the real result.")
-                PremiumDatePicker(date: $date)
+                PremiumHeader(eyebrow: "IMUN / RUN",
+                              title: "Today's run",
+                              subtitle: Date().formatted(.dateTime.weekday(.wide).month(.abbreviated).day()))
                 if !coach.signedIn { PremiumLogin() }
                 HCCard(accent: HCDesign.aqua) {
                     VStack(alignment: .leading, spacing: 12) {
@@ -674,6 +665,13 @@ private struct PremiumRunPage: View {
                         HCFilledButton(title: "SEND RUN TO WATCH", icon: "applewatch",
                                        tint: HCDesign.aqua, disabled: coach.runPlan == nil) {
                             coach.sendToWatch()
+                        }
+                        if let entry = coach.plannedSessions.first(where: {
+                            $0.date == HCPlanBuilder.dateString(date) && $0.kind == "run"
+                        }) {
+                            HCOutlineButton(title: "Move this run", icon: "calendar.badge.clock") {
+                                movingSession = entry
+                            }
                         }
                     }
                 }
@@ -769,6 +767,10 @@ private struct PremiumRunPage: View {
         .scrollIndicators(.hidden)
         .hcPage()
         .navigationBarTitleDisplayMode(.inline)
+        .sheet(item: $movingSession) { entry in
+            IMUNMoveWorkoutSheet(entry: entry)
+                .environmentObject(coach)
+        }
     }
 }
 
