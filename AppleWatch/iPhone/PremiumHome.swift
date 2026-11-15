@@ -1009,6 +1009,93 @@ private struct IMUNSetHistoryPage: View {
     }
 }
 
+private struct IMUNActivityDetails: View {
+    let activity: HCTrainingActivity
+
+    private var measurements: [(String, String)] {
+        var rows: [(String, String)] = []
+        if let seconds = activity.durationSeconds { rows.append(("Moving time", hcDuration(seconds))) }
+        if let seconds = activity.totalDurationSeconds { rows.append(("Total elapsed", hcDuration(seconds))) }
+        if let meters = activity.distanceMeters { rows.append(("Distance", String(format: "%.2f miles", meters / 1609.344))) }
+        if let seconds = activity.paceSecondsPerKm { rows.append(("Pace", hcDuration(seconds * 1.609344) + " /mi")) }
+        if let avg = activity.averageBPM { rows.append(("Average heart rate", "\(Int(avg)) bpm")) }
+        if let max = activity.maxBPM { rows.append(("Maximum heart rate", "\(Int(max)) bpm")) }
+        if let kcal = activity.calories { rows.append(("Calories", "\(Int(kcal)) kcal")) }
+        if let watts = activity.powerWatts { rows.append(("Average power", "\(Int(watts)) W")) }
+        if let cadence = activity.cadenceSPM { rows.append(("Cadence", "\(Int(cadence)) spm")) }
+        if let ascent = activity.ascentMeters { rows.append(("Elevation gained", "\(Int(ascent)) m")) }
+        if let sets = activity.strengthSetCount { rows.append(("Recorded strength sets", "\(sets)")) }
+        if let reps = activity.strengthRepetitions { rows.append(("Total repetitions", "\(reps)")) }
+        if let volume = activity.tonnageKilograms {
+            rows.append(("Tonnage", String(format: "%.1f kg", volume)))
+        }
+        if let load = activity.maxSetWeightKilograms {
+            rows.append(("Highest set load", String(format: "%.1f kg", load)))
+        }
+        if let seconds = activity.activeSetSeconds { rows.append(("Time lifting", hcDuration(seconds))) }
+        if let seconds = activity.restSeconds { rows.append(("Time resting", hcDuration(seconds))) }
+        if let score = activity.runningEffectiveness {
+            rows.append(("Running effectiveness", score.formatted(.number.precision(.fractionLength(2)))))
+        }
+        if let vo2 = activity.vo2Max {
+            rows.append(("Estimated VO₂max", vo2.formatted(.number.precision(.fractionLength(1)))))
+        }
+        if let effort = activity.perceivedEffort {
+            rows.append(("Recorded RPE", effort.formatted(.number.precision(.fractionLength(1)))))
+        }
+        if let enjoyment = activity.enjoyment {
+            rows.append(("Recorded enjoyment", enjoyment.formatted(.number.precision(.fractionLength(1)))))
+        }
+        return rows
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 17) {
+                PremiumHeader(eyebrow: "IMUN / TRAINING HISTORY",
+                              title: activity.title,
+                              subtitle: activity.date + " · " + activity.source)
+                HCCard {
+                    VStack(alignment: .leading, spacing: 13) {
+                        ForEach(measurements.indices, id: \.self) { i in
+                            HStack(alignment: .firstTextBaseline) {
+                                Text(measurements[i].0)
+                                    .font(.system(size: 13))
+                                    .foregroundStyle(HCDesign.secondary)
+                                Spacer(minLength: 7)
+                                Text(measurements[i].1)
+                                    .font(.system(size: 13, weight: .semibold))
+                                    .multilineTextAlignment(.trailing)
+                            }
+                            if i != measurements.count - 1 { Divider().overlay(HCDesign.outline) }
+                        }
+                        if measurements.isEmpty {
+                            Text("The original service recorded a workout, but did not provide numeric measurements.")
+                                .font(.subheadline).foregroundStyle(HCDesign.secondary)
+                        }
+                    }
+                }
+                HCCard {
+                    VStack(alignment: .leading, spacing: 7) {
+                        Text("ORIGINAL RECORD").font(HCDesign.label(11)).foregroundStyle(HCDesign.electric)
+                        Text("Source: " + activity.source)
+                            .font(.system(size: 13))
+                        if let name = activity.attribution {
+                            Text("Device: " + name).font(.system(size: 12)).foregroundStyle(HCDesign.secondary)
+                        }
+                        Text("All available values retain their original recorded units. Additional raw Tredict fields remain in your local source archive.")
+                            .font(.caption).foregroundStyle(HCDesign.secondary)
+                    }
+                }
+            }
+            .padding(18)
+        }
+        .scrollIndicators(.hidden)
+        .hcPage()
+        .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
 private struct PremiumProgressPage: View {
     @EnvironmentObject private var coach: PhoneWorkoutBridge
     @State private var selectedExercise = ""
@@ -1121,7 +1208,10 @@ private struct PremiumProgressPage: View {
                         .foregroundStyle(HCDesign.secondary)
                 } else {
                     ForEach(coach.trainingActivities.prefix(35)) { activity in
-                        HCCard {
+                        NavigationLink {
+                            IMUNActivityDetails(activity: activity)
+                        } label: {
+                            HCCard {
                             VStack(alignment: .leading, spacing: 7) {
                                 HStack {
                                     Text(activity.date).foregroundStyle(HCDesign.electric)
@@ -1149,7 +1239,9 @@ private struct PremiumProgressPage: View {
                                 .foregroundStyle(HCDesign.secondary)
                                 .lineLimit(1)
                             }
+                            }
                         }
+                        .buttonStyle(.plain)
                     }
                 }
                 HCSectionTitle(title: "Past working sets", detail: "\(coach.performanceHistory.count) records")
