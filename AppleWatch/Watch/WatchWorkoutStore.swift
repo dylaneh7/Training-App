@@ -185,6 +185,21 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
         save(runClock, name: "running-clock.json")
     }
 
+    func pauseRun() {
+        guard var clock = runClock, clock.isActive, !clock.isPaused else { return }
+        clock.pausedAt = Date()
+        runClock = clock
+        save(clock, name: "running-clock.json")
+    }
+
+    func resumeRun() {
+        guard var clock = runClock, clock.isPaused, let start = clock.pausedAt else { return }
+        clock.pausedSeconds += Date().timeIntervalSince(start)
+        clock.pausedAt = nil
+        runClock = clock
+        save(clock, name: "running-clock.json")
+    }
+
     func finishRun(distanceMeters: Double?, heartRateBPM: Double?) {
         guard var clock = runClock, clock.isActive else { return }
         let now = Date()
