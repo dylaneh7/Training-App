@@ -12,6 +12,7 @@ struct HCExercise: Codable, Identifiable, Hashable {
     let repMax: Int
     let suggestedWeightLb: Double?
     let restSeconds: Int
+    var instructions: String? = nil
 
     var repDescription: String { "\(repMin)–\(repMax)" }
 }
