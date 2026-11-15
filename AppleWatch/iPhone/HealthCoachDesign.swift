@@ -8,7 +8,21 @@ enum HCDesign {
     static let outline = Color(red: 0.18, green: 0.22, blue: 0.26)
     static let ink = Color(red: 0.96, green: 0.97, blue: 0.96)
     static let secondary = Color(red: 0.60, green: 0.66, blue: 0.70)
-    static let electric = Color(red: 0.76, green: 0.98, blue: 0.43)
+    // Default: Crimson + White. Users can change this in Coach → Appearance.
+    static var style: String {
+        UserDefaults.standard.string(forKey: "hcAccentStyle") ?? "crimson"
+    }
+    static var electric: Color {
+        switch style {
+        case "lime": return Color(red: 0.76, green: 0.98, blue: 0.43)
+        case "aqua": return Color(red: 0.41, green: 0.85, blue: 0.82)
+        case "white": return .white
+        default: return Color(red: 0.83, green: 0.20, blue: 0.31) // crimson
+        }
+    }
+    static var onAccent: Color {
+        style == "crimson" ? .white : canvas
+    }
     static let aqua = Color(red: 0.41, green: 0.85, blue: 0.82)
     static let amber = Color(red: 1.0, green: 0.73, blue: 0.39)
 
@@ -145,7 +159,7 @@ struct HCFilledButton: View {
                     .font(.system(size: 11, weight: .bold))
                     .opacity(0.56)
             }
-            .foregroundStyle(HCDesign.canvas)
+            .foregroundStyle(tint == HCDesign.electric ? HCDesign.onAccent : HCDesign.canvas)
             .padding(.horizontal, 18)
             .frame(height: 55)
             .background(tint, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
