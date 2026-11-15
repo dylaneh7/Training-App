@@ -1,4 +1,61 @@
-# imun — iPhone + Apple Watch
+# IMUN — Strength, Running & Recovery
+
+IMUN is the native iPhone and Apple Watch app. The Home Screen name is **imun**.
+Its identity is intentionally simple: dark charcoal, an ivory **im** monogram,
+and a restrained crimson accent. The Coach screen contains
+**1 Corinthians 9:24–27 (KJV)** as an optional expanded reading.
+
+## Everyday use
+
+- **Strength:** shows today's lifting plan. Adjust reps, weight and RIR
+  on iPhone or Watch, record sets and use the rest timer. No date picker.
+- **Run:** shows today's planned run and recorded result. Older running results
+  remain accessible below. No date picker.
+- **Progress:** shows future training days, running volume, exercise progression,
+  recorded strength sets and prior workouts. Tap **Move day** to choose a date,
+  or **Today** to move an upcoming session to the current date.
+- **Schedule editing:** updates your signed-in Command Center planner through
+  user-scoped database functions. Strength rotation templates become real
+  planner entries when moved; past recorded workouts keep their dates.
+
+## Personal history and permissions
+
+1. On iPhone, sign in with your existing **Health Coach / Command Center**
+   account. IMUN reads the original planner, hybrid-coach history, completion
+   events, Watch sets, running sessions and daily recovery records.
+2. In **Coach → Connected training history**, review the imported counts and
+   optionally export your original source archive, stored locally on iPhone.
+3. In **Coach → Tredict / Garmin**, create a read-only Tredict personal API
+   token from Tredict → Settings → Personal API with activityRead and
+   bodyvaluesRead scopes. Enter it **on your phone**, not in chat.
+   Tap **Connect & Import History**. IMUN imports paginated activity summaries,
+   HRV/sleep, body measurements, capacity and equipment where available, and
+   archives the original response locally. Extended metrics include pace,
+   heart rate, power, cadence, elevation and lifting totals when supplied.
+   The Tredict token remains in iPhone Keychain, not Command Center.
+4. If your Garmin data is missing in Tredict, connect Garmin under Tredict →
+   Settings → Services. Tredict offers an automatic import of roughly two
+   years of Garmin activities and a manual upload path for older Garmin exports.
+   [Garmin-to-Tredict instructions](https://www.tredict.com/faq/garmin-connect---how-to-connect-and-synchronize-my-device/)
+5. In **Run → Connect Apple Health**, grant workout-reading permissions on your
+   physical iPhone. Completed Apple Workout runs and WHOOP workouts actually
+   written to Apple Health can be imported, but not every metric is available
+   from every source.
+
+Automatic HealthKit background delivery requires physical-device testing.
+Full Tredict/Garmin history cannot be downloaded without the user's token
+and connected Garmin data. Raw original workouts are never replaced by
+fabricated metrics. Existing bundle identifiers are retained so an app
+upgrade can preserve its local data.
+
+**Install:** download the latest repository ZIP and open the Xcode project
+at AppleWatch/HealthCoachNative.xcodeproj. Select your Apple signing team;
+run **HealthCoach** on the physical iPhone. The Home Screen displays **imun**.
+Install its companion via the iPhone Watch app, or run the HealthCoachWatch
+scheme on your paired Apple Watch.
+
+---
+
 
 ## Current IMUN workflow (native 2.2)
 
