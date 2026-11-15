@@ -70,6 +70,35 @@ struct HCRunFinished: Codable, Identifiable, Hashable {
     let endedAt: Date
     let distanceMeters: Double?
     let averageHeartRate: Double?
+    var splits: [HCRunSplit] = []
+}
+
+struct HCRunSplit: Codable, Hashable, Identifiable {
+    let index: Int
+    let elapsedSeconds: Double
+    let distanceMeters: Double?
+    var id: Int { index }
+}
+
+struct HCProgressRun: Identifiable {
+    let id: String
+    let date: String
+    let title: String
+    let source: String
+    let distanceMeters: Double?
+    let durationSeconds: Double?
+    let averageBPM: Double?
+    let splits: [HCRunSplit]
+}
+
+struct HCRecoveryDatum: Identifiable {
+    let date: String
+    let sleepSeconds: Double?
+    let hrvMS: Double?
+    let hrvBaselineMS: Double?
+    let dailyLowHR: Double?
+    let source: String
+    var id: String { date }
 }
 
 enum HCPayload {
