@@ -102,6 +102,22 @@ struct HCProgressRun: Codable, Identifiable {
     var elevationGainMeters: Double? = nil
     var sourceBundleID: String? = nil
     var fromAppleHealth: Bool = false
+    // On-device detail data from the same attributed HealthKit source.
+    // These are not uploaded to a remote server.
+    var heartRateTrace: [HCRunHeartPoint] = []
+    var routePoints: [HCRunRoutePoint] = []
+}
+
+struct HCRunHeartPoint: Codable, Hashable, Identifiable {
+    let at: Date
+    let bpm: Double
+    var id: Date { at }
+}
+
+struct HCRunRoutePoint: Codable, Hashable {
+    let latitude: Double
+    let longitude: Double
+    let altitudeMeters: Double?
 }
 
 struct HCRecoveryDatum: Identifiable {
