@@ -157,7 +157,9 @@ struct HCRecoveryDatum: Codable, Identifiable {
     let hrvBaselineMS: Double?
     let dailyLowHR: Double?
     let source: String
-    var id: String { date }
+    // Different devices and services may each record a value on the same day.
+    // Keep provenance separate instead of silently dropping the second source.
+    var id: String { date + ":" + source }
 }
 
 enum HCPayload {
