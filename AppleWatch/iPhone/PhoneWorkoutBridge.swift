@@ -500,6 +500,29 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
         } else {
             lines.append("No run scheduled today")
         }
+        // Coach gets the same seven-day calendar shown on its home screen.
+        // Include future workout details only when a signed-in athlete asks.
+        let start = Calendar.current.startOfDay(for: Date())
+        let comingDates = Set((0..<7).compactMap { offset in
+            Calendar.current.date(byAdding: .day, value: offset, to: start)
+                .map { HCPlanBuilder.dateString($0) }
+        })
+        let upcomingSessions = plannedSessions
+            .filter { comingDates.contains($0.date) }
+            .sorted { ($0.date, $0.title) < ($1.date, $1.title) }
+        lines.append("Training calendar: next seven days starting \(today)")
+        if upcomingSessions.isEmpty {
+            lines.append("No next-week sessions found in the currently connected calendar")
+        } else {
+            for planned in upcomingSessions.prefix(21) {
+                var summary = "\(planned.date): \(planned.kind) — \(planned.title)"
+                summary += planned.completed ? " (completed)" : " (planned)"
+                if !planned.notes.isEmpty {
+                    summary += ". Notes: " + String(planned.notes.prefix(140))
+                }
+                lines.append(summary)
+            }
+        }
         for entry in performanceHistory.prefix(10) {
             lines.append("Strength history: \(entry.date) \(entry.exercise) \(String(format: "%.1f", entry.weightLb)) lb x \(entry.reps)")
         }
