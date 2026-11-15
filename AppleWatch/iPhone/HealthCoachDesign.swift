@@ -13,10 +13,12 @@ enum HCDesign {
     static let amber = Color(red: 1.0, green: 0.73, blue: 0.39)
 
     static func display(_ size: CGFloat = 34) -> Font {
-        .system(size: size, weight: .bold, design: .rounded)
+        // Avenir Next is bundled with iOS: a distinctive geometric display face
+        // without shipping a third-party font binary.
+        .custom("AvenirNext-Heavy", fixedSize: size)
     }
     static func metric(_ size: CGFloat = 28) -> Font {
-        .system(size: size, weight: .bold, design: .rounded).monospacedDigit()
+        .custom("DINCondensed-Bold", fixedSize: size).monospacedDigit()
     }
     static func label(_ size: CGFloat = 11) -> Font {
         .system(size: size, weight: .heavy, design: .rounded)
