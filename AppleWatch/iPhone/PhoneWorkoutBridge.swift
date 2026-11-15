@@ -114,7 +114,7 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
                                           aggressive: aggressive, returning: returned)
     }
 
-    private func smartTargets(_ plan: HCWorkout, history: [HCPerformanceSet]) -> HCWorkout {
+    private func smartTargets(_ plan: HCWorkout, history: [HCPerformanceSet], preserveExisting: Bool) -> HCWorkout {
         let smartExercises = plan.exercises.map { exercise -> HCExercise in
             let target = HCProgressionEngine.suggest(exercise,
                 history: history.filter { $0.date < plan.date },
@@ -122,7 +122,9 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
             return HCExercise(id:exercise.id, name:exercise.name,
                 originalName:exercise.originalName,exerciseIndex:exercise.exerciseIndex,
                 prescribedSets:exercise.prescribedSets,repMin:exercise.repMin,repMax:exercise.repMax,
-                suggestedWeightLb:exercise.suggestedWeightLb ?? target.weightLb,
+                suggestedWeightLb:preserveExisting
+                    ? (exercise.suggestedWeightLb ?? target.weightLb)
+                    : (target.weightLb ?? exercise.suggestedWeightLb),
                 restSeconds:exercise.restSeconds)
         }
         return HCWorkout(id:plan.id,date:plan.date,sessionKey:plan.sessionKey,
@@ -148,7 +150,9 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
                 let baseline = saved ?? HCPlanBuilder.workout(for:date,planner:snapshot.planner,
                                                               history:snapshot.history)
                 let active = pendingEditedWorkout?.date == dateText
-                    ? pendingEditedWorkout : baseline.map { smartTargets($0,history:history) }
+                    ? pendingEditedWorkout
+                    : baseline.map { smartTargets($0,history:history,
+                                                   preserveExisting:saved != nil) }
                 let run = HCPlanBuilder.run(for:date,planner:snapshot.planner)
                 let priorRuns = (try? await cloud.fetchRunHistory()) ?? []
                 let recovery = (try? await cloud.fetchRecoveryHistory()) ?? []
