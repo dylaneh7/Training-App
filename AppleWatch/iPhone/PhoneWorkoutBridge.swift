@@ -495,19 +495,17 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
             lines.append("Strength history: \(entry.date) \(entry.exercise) \(String(format: "%.1f", entry.weightLb)) lb x \(entry.reps)")
         }
         for run in runHistory.prefix(8) {
-            lines.append("Run: \(run.date) \(run.title), \(run.distanceMeters.map {
-                String(format: "%.2f mi", $0 / 1609.344)
-            } ?? "distance unknown"), source \(run.source)")
+            let distance = run.distanceMeters.map { String(format: "%.2f mi", $0 / 1609.344) }
+                ?? "distance unknown"
+            lines.append("Run: \(run.date) \(run.title), \(distance), source \(run.source)")
         }
         if shareRecovery {
             for datum in recoveryHistory.prefix(12) {
-                lines.append("Recovery \(datum.source) \(datum.date): HRV RMSSD \(datum.hrvMS.map {
-                    String(format: "%.0f ms", $0)
-                } ?? "missing"), sleep \(datum.sleepSeconds.map {
-                    String(format: "%.1f h", $0 / 3600)
-                } ?? "missing"), low HR \(datum.dailyLowHR.map {
-                    String(format: "%.0f bpm", $0)
-                } ?? "missing")")
+                let hrv = datum.hrvMS.map { String(format: "%.0f ms", $0) } ?? "missing"
+                let sleep = datum.sleepSeconds.map { String(format: "%.1f h", $0 / 3600) }
+                    ?? "missing"
+                let hr = datum.dailyLowHR.map { String(format: "%.0f bpm", $0) } ?? "missing"
+                lines.append("Recovery \(datum.source) \(datum.date): HRV RMSSD \(hrv), sleep \(sleep), low HR \(hr)")
             }
         }
         return try await cloud.askIMUNCoach(question: question,
