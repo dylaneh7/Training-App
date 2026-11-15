@@ -270,6 +270,8 @@ enum HCProgressionEngine {
         }
         let from = signature(previous.exercise)
         let rir = max(0,min(4,previous.rir ?? 2))
+        let earnedIncrease = exact && aggressive && !returning &&
+            previous.reps >= exercise.repMax && (previous.rir ?? 1) >= 1
         let estimated1RM = previous.weightLb * (1 + (Double(previous.reps)+rir)/30)
         var estimate = estimated1RM / (1 + (Double(target)+(returning ? 3:2))/30)
         var confidence = exact ? "High" : "Medium"
@@ -296,7 +298,11 @@ enum HCProgressionEngine {
         if returning {estimate *= 0.9}
         if !exact {estimate *= 0.95}
         let step = perDB ? 2.5 : (estimate >= 50 ? 5.0 : 2.5)
-        let suggestion = max(step, floor(estimate/step)*step)
+        // When a lifter *earns* a load increase, round up to an actual
+        // available increment; flooring 155*1.025 to 155 would prevent progress.
+        let suggestion = earnedIncrease
+            ? max(previous.weightLb + step, ceil(estimate/step)*step)
+            : max(step, floor(estimate/step)*step)
         let reason = exact
             ? "Last comparable set: \(previous.weightLb.formatted()) lb × \(previous.reps) @\(previous.rir.map{$0.formatted()} ?? "?") RIR. Progress by reps first; raise weight when you reach your rep ceiling with control."
             : "From \(previous.exercise) \(previous.weightLb.formatted()) lb × \(previous.reps). Cross-variation conversion is a cautious starting estimate, not a personal strength equivalence. Recalibrate after the first set."
