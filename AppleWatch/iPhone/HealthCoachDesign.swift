@@ -37,7 +37,12 @@ struct HCAppBackground: View {
 
 struct HCCard<Content: View>: View {
     var accent: Color? = nil
-    @ViewBuilder var content: Content
+    let content: Content
+
+    init(accent: Color? = nil, @ViewBuilder content: () -> Content) {
+        self.accent = accent
+        self.content = content()
+    }
 
     var body: some View {
         content
