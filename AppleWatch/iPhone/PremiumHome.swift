@@ -635,24 +635,6 @@ private struct PremiumRunPage: View {
                               subtitle: Date().formatted(.dateTime.weekday(.wide).month(.abbreviated).day()))
                 if !coach.signedIn { PremiumLogin() }
                 HCCard(accent: HCDesign.aqua) {
-                    VStack(alignment: .leading, spacing: 12) {
-                        HCAccentTag(title: "AUTO-IMPORT / APPLE HEALTH", color: HCDesign.aqua)
-                        Text(importer.enabled ? "Runs sync automatically" : "Connect completed workouts")
-                            .font(.system(size: 17, weight: .bold, design: .rounded))
-                        Text("Bring in running workouts from Apple Workout and WHOOP when they appear in Apple Health. Individual metrics depend on what each source shares.")
-                            .font(.system(size: 12))
-                            .foregroundStyle(HCDesign.secondary)
-                        if importer.enabled {
-                            HCOutlineButton(title: importer.refreshing ? "Checking Health…" : "Check new runs",
-                                            icon: "arrow.clockwise") { importer.refresh() }
-                        } else {
-                            HCFilledButton(title: "CONNECT APPLE HEALTH", icon: "heart.fill",
-                                           tint: HCDesign.aqua) { importer.connect() }
-                        }
-                        Text(importer.status).font(.caption2).foregroundStyle(HCDesign.secondary)
-                    }
-                }
-                HCCard(accent: HCDesign.aqua) {
                     VStack(alignment: .leading, spacing: 17) {
                         HCAccentTag(title: "TODAY'S RUN", color: HCDesign.aqua)
                         Text(coach.runPlan?.title ?? "Nothing scheduled")
@@ -737,6 +719,24 @@ private struct PremiumRunPage: View {
                                 }
                             }
                         }
+                    }
+                }
+                HCCard(accent: HCDesign.aqua) {
+                    VStack(alignment: .leading, spacing: 12) {
+                        HCAccentTag(title: "AUTO-IMPORT / APPLE HEALTH", color: HCDesign.aqua)
+                        Text(importer.enabled ? "Runs sync automatically" : "Connect completed workouts")
+                            .font(.system(size: 17, weight: .bold, design: .rounded))
+                        Text("Bring in running workouts from Apple Workout and WHOOP when they appear in Apple Health. Individual metrics depend on what each source shares.")
+                            .font(.system(size: 12))
+                            .foregroundStyle(HCDesign.secondary)
+                        if importer.enabled {
+                            HCOutlineButton(title: importer.refreshing ? "Checking Health…" : "Check new runs",
+                                            icon: "arrow.clockwise") { importer.refresh() }
+                        } else {
+                            HCFilledButton(title: "CONNECT APPLE HEALTH", icon: "heart.fill",
+                                           tint: HCDesign.aqua) { importer.connect() }
+                        }
+                        Text(importer.status).font(.caption2).foregroundStyle(HCDesign.secondary)
                     }
                 }
                 HCSectionTitle(title: "Previous runs", detail: "Recorded only")
