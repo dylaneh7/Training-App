@@ -897,7 +897,15 @@ final class HCAppleHealthReader:ObservableObject {
         guard HKHealthStore.isHealthDataAvailable() else {
             status="Apple Health unavailable on this device.";return
         }
-        let types=Set(kinds.compactMap{HKObjectType.quantityType(forIdentifier:$0.0)})
+        var types=Set<HKObjectType>()
+        for entry in kinds {
+            if let quantity=HKObjectType.quantityType(forIdentifier:entry.0) {
+                types.insert(quantity)
+            }
+        }
+        if let sleep=HKObjectType.categoryType(forIdentifier:.sleepAnalysis) {
+            types.insert(sleep)
+        }
         store.requestAuthorization(toShare:[],read:types) { [weak self] _, error in
             DispatchQueue.main.async {
                 if let error {self?.status=error.localizedDescription;return}
@@ -908,6 +916,7 @@ final class HCAppleHealthReader:ObservableObject {
     }
 
     private func refresh() {
+        readSleep()
         for (type,name,unit) in kinds {
             guard let quantity=HKObjectType.quantityType(forIdentifier:type) else {continue}
             let predicate=HKQuery.predicateForSamples(
@@ -929,5 +938,43 @@ final class HCAppleHealthReader:ObservableObject {
             }
             store.execute(q)
         }
+    }
+
+    private func readSleep() {
+        guard let sleep=HKObjectType.categoryType(forIdentifier:.sleepAnalysis) else{return}
+        let predicate=HKQuery.predicateForSamples(withStart:
+            Calendar.current.date(byAdding:.hour,value:-40,to:Date()),
+            end:Date(),options:.strictEndDate)
+        let query=HKSampleQuery(sampleType:sleep,predicate:predicate,
+            limit:HKObjectQueryNoLimit,sortDescriptors:nil) { [weak self] _, samples, error in
+            guard error == nil,let items=samples as? [HKCategorySample], !items.isEmpty else{return}
+            let accepted:Set<Int>=[
+                HKCategoryValueSleepAnalysis.asleepUnspecified.rawValue,
+                HKCategoryValueSleepAnalysis.asleepCore.rawValue,
+                HKCategoryValueSleepAnalysis.asleepDeep.rawValue,
+                HKCategoryValueSleepAnalysis.asleepREM.rawValue
+            ]
+            let sleepItems=items.filter{accepted.contains($0.value)}
+            // Apple Health can contain duplicate uploads from multiple devices.
+            // Choose one source (prefer WHOOP if present) rather than summing
+            // sources and inflating total sleep time.
+            let grouped=Dictionary(grouping:sleepItems,by:{$0.sourceRevision.source.name})
+            let source=grouped.keys.first(where:{$0.localizedCaseInsensitiveContains("whoop")})
+                ?? grouped.keys.first(where:{$0.localizedCaseInsensitiveContains("apple")})
+                ?? grouped.keys.sorted().first
+            guard let name=source,let selected=grouped[name], !selected.isEmpty else{return}
+            // Only count one night's latest samples from the selected source.
+            let lastEnd=selected.map(\.endDate).max() ?? Date()
+            let subset=selected.filter{lastEnd.timeIntervalSince($0.endDate) < 20*3600}
+            let seconds=subset.reduce(0.0){$0+$1.endDate.timeIntervalSince($1.startDate)}
+            let result=HCHealthMetric(name:"Sleep (asleep time)",
+                value:String(format:"%.1f h",seconds/3600),
+                source:name,date:HCPlanBuilder.dateString(lastEnd))
+            DispatchQueue.main.async {
+                self?.metrics.removeAll(where:{$0.name=="Sleep (asleep time)"})
+                self?.metrics.append(result)
+            }
+        }
+        store.execute(query)
     }
 }
