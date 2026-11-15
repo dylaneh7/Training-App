@@ -546,6 +546,9 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
             return result
         }
         context[HCPayload.runHistory] = try encoder.encode(summaries)
+        if let recent = recoveryHistory.first {
+            context["hcRecoverySnapshot"] = try encoder.encode(recent)
+        }
         return context
     }
 
