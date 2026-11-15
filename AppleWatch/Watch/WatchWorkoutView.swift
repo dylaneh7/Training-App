@@ -134,6 +134,56 @@ private struct WStepper: View {
     }
 }
 
+/// Always-visible, one-tap weight/reps adjustment. Large hit targets and a
+/// centered readout make the active set editable without watchOS scrolling.
+private struct WQuickEditor: View {
+    let title: String
+    let value: String
+    let decrease: () -> Void
+    let increase: () -> Void
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Button(action: decrease) {
+                Image(systemName: "minus")
+                    .font(.system(size: 20, weight: .bold))
+                    .frame(width: 46, height: 46)
+                    .foregroundStyle(.white)
+                    .background(WTheme.panel, in: RoundedRectangle(cornerRadius: 12))
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Decrease " + title)
+
+            VStack(spacing: 1) {
+                Text(title.uppercased())
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(WTheme.muted)
+                Text(value)
+                    .font(WTheme.metric(27))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.72)
+                    .foregroundStyle(.white)
+                    .contentTransition(.numericText())
+            }
+            .frame(maxWidth: .infinity, minHeight: 44)
+
+            Button(action: increase) {
+                Image(systemName: "plus")
+                    .font(.system(size: 20, weight: .bold))
+                    .frame(width: 46, height: 46)
+                    .foregroundStyle(WTheme.onAccent)
+                    .background(WTheme.lime, in: RoundedRectangle(cornerRadius: 12))
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Increase " + title)
+        }
+        .frame(minHeight: 48)
+        .padding(.horizontal, 2)
+    }
+}
+
 /// A List-based navigation hub fixes the page-gesture / scrolling conflict on
 /// watchOS. Large Strength and Run targets are immediately reachable.
 struct WatchWorkoutView: View {
@@ -331,7 +381,7 @@ private struct WatchGuidedSession: View {
     @EnvironmentObject private var health: WatchHealthSession
     @AppStorage("hcWeightIncrement") private var increment = 5.0
     @State private var weight = 0.0
-    @State private var includeWeight = true
+    @State private var hasWeight = false
     @State private var reps = 8
     @State private var rir = 2
     @State private var readyHapticSent = false
@@ -347,28 +397,16 @@ private struct WatchGuidedSession: View {
         return store.liftClock?.setExerciseID == current.id &&
                store.liftClock?.setStartedAt != nil
     }
-    private var activeOther: Bool {
+    private var otherActive: Bool {
         store.liftClock?.setStartedAt != nil && !active
     }
-    private var restEnd: Date? { store.liftClock?.restEndsAt }
     private var nextSetToken: String {
-        (current?.id ?? "none") + "-" + String(setCount)
+        (current?.id ?? "none") + ":" + String(setCount)
     }
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 12) {
-                HStack(spacing: 8) {
-                    Text("GUIDED LIFT")
-                        .font(WTheme.label(10)).tracking(1.3)
-                        .foregroundStyle(WTheme.aqua)
-                    Spacer()
-                    TimelineView(.periodic(from: .now, by: 1)) { time in
-                        Text(wClock(store.liftClock?.duration(at: time.date) ?? 0))
-                            .font(WTheme.metric(16))
-                            .foregroundStyle(WTheme.muted)
-                    }
-                }
+            VStack(alignment: .leading, spacing: 5) {
                 if store.liftClock?.isPaused == true {
                     WPrimary(title: "RESUME WORKOUT", symbol: "play.fill") {
                         store.resumeLifting()
@@ -376,31 +414,36 @@ private struct WatchGuidedSession: View {
                         wHaptic(.start)
                     }
                 }
+
                 if store.guidedAllFinished {
                     finishedSection
                 } else if let current {
-                    Text(current.name)
-                        .font(.system(size: 21, weight: .heavy, design: .rounded))
-                        .fixedSize(horizontal: false, vertical: true)
-                        .foregroundStyle(.white)
-                    HStack {
-                        Text("SET \(setCount + 1) OF \(current.prescribedSets)")
+                    // Put the two most important editable values at the top.
+                    // Do not hide the weight controls for exercises lacking
+                    // a suggested load: a first-time lift starts at BW/0 lb.
+                    HStack(spacing: 4) {
+                        Text(current.name)
+                            .font(.system(size: 16, weight: .heavy, design: .rounded))
+                            .lineLimit(2)
+                            .minimumScaleFactor(0.8)
+                            .foregroundStyle(.white)
+                        Spacer(minLength: 2)
+                        Text("\(setCount + 1)/\(current.prescribedSets)")
+                            .font(WTheme.metric(16))
                             .foregroundStyle(WTheme.lime)
-                        Spacer()
-                        Text("\(store.guidedCompletedSets) / \(store.workout.prescribedSetCount) DONE")
-                            .foregroundStyle(WTheme.muted)
                     }
-                    .font(WTheme.label(10))
-                    if let end = restEnd, !active {
-                        TimelineView(.periodic(from: .now, by: 1)) { time in
-                            let remaining = max(0, end.timeIntervalSince(time.date))
-                            if remaining > 0 {
-                                restPanel(remaining: remaining)
+                    .padding(.bottom, 2)
+
+                    if let until = store.liftClock?.restEndsAt, !active {
+                        TimelineView(.periodic(from: .now, by: 1)) { tick in
+                            let timeLeft = max(0, until.timeIntervalSince(tick.date))
+                            if timeLeft > 0 {
+                                restPanel(seconds: timeLeft)
                             } else {
-                                setPanel(current)
+                                quickSetControls(current)
                             }
                             Color.clear.frame(height: 1)
-                                .onChange(of: remaining <= 0) { _, finished in
+                                .onChange(of: timeLeft <= 0) { _, finished in
                                     if finished && !readyHapticSent {
                                         readyHapticSent = true
                                         wHaptic(.notification)
@@ -408,157 +451,161 @@ private struct WatchGuidedSession: View {
                                 }
                         }
                     } else {
-                        setPanel(current)
+                        quickSetControls(current)
                     }
-                    if let last = store.completedSets(for: current).last {
-                        HStack(spacing: 6) {
-                            Image(systemName: "checkmark.circle.fill")
-                                .foregroundStyle(WTheme.lime)
-                            Text("LAST: \(last.weightLb?.formatted() ?? "BW") × \(last.reps) · RIR \(Int(last.rir ?? 0))")
-                                .font(.system(size: 11, weight: .medium))
-                                .foregroundStyle(WTheme.muted)
+
+                    HStack(spacing: 5) {
+                        Text("\(store.guidedCompletedSets) / \(store.workout.prescribedSetCount) COMPLETED")
+                            .font(WTheme.label(9))
+                            .foregroundStyle(WTheme.muted)
+                        Spacer(minLength: 1)
+                        if active {
+                            TimelineView(.periodic(from: .now, by: 1)) { tick in
+                                Text("SET " + wClock(tick.date.timeIntervalSince(
+                                    store.liftClock?.setStartedAt ?? tick.date)))
+                                    .font(WTheme.label(10))
+                                    .foregroundStyle(WTheme.amber)
+                            }
                         }
                     }
+                    .padding(.top, 3)
+
+                    // Secondary options are intentionally *below* the critical
+                    // editor so the first view remains a one-tap workflow.
                     NavigationLink {
                         WatchMovementPicker()
                     } label: {
-                        Label("SWITCH EXERCISE", systemImage: "arrow.left.arrow.right")
-                            .font(.system(size: 12, weight: .bold))
+                        Label("CHOOSE DIFFERENT EXERCISE", systemImage: "arrow.left.arrow.right")
+                            .font(WTheme.label(11))
                     }
-                    .buttonStyle(.bordered)
-                    .tint(WTheme.panel)
-                    .disabled(active)
+                    .disabled(active || otherActive)
+
+                    WQuickEditor(title: "RIR", value: "\(rir)",
+                                 decrease: { rir = max(0, rir - 1) },
+                                 increase: { rir = min(10, rir + 1) })
+                    .padding(.top, 4)
                 } else {
-                    Text("No remaining sets. You can finish the workout.")
+                    Text("No unfinished exercises are available.")
                         .foregroundStyle(WTheme.muted)
-                    WPrimary(title: "FINISH WORKOUT", symbol: "flag.checkered",
-                             color: WTheme.amber, action: onFinish)
                 }
+
                 NavigationLink {
                     WatchSessionOptions(onFinish: onFinish)
                 } label: {
-                    Label("PAUSE / FINISH OPTIONS", systemImage: "slider.horizontal.3")
+                    Label("PAUSE OR FINISH WORKOUT", systemImage: "slider.horizontal.3")
                         .font(WTheme.label(11))
                 }
                 .tint(WTheme.muted)
-                Text(store.status)
-                    .font(.system(size: 10))
-                    .foregroundStyle(WTheme.muted)
-                    .lineLimit(2)
+                .padding(.top, 5)
             }
-            .padding(.horizontal, 8)
-            .padding(.bottom, 10)
+            .padding(.horizontal, 5)
+            .padding(.bottom, 12)
         }
         .scrollIndicators(.hidden)
-        .safeAreaInset(edge: .bottom, spacing: 0) {
-            if !store.guidedAllFinished && store.liftClock?.isPaused != true {
-                TimelineView(.periodic(from: .now, by: 1)) { time in
-                    let resting = restEnd.map { $0 > time.date } ?? false
-                    if !resting, let current {
-                        WPrimary(title: active ? "END SET · SAVE" : "START SET \(setCount + 1)",
-                                 symbol: active ? "checkmark.circle.fill" : "play.fill",
-                                 color: active ? WTheme.amber : WTheme.lime) {
-                            if active {
-                                let saved = store.stopSet(for: current,
-                                                          weightLb: includeWeight ? weight : nil,
-                                                          reps: reps, rir: Double(rir))
-                                if saved {
-                                    readyHapticSent = false
-                                    wHaptic(.success)
-                                }
-                            } else if !activeOther {
-                                store.startSet(for: current)
-                                wHaptic(.start)
-                            }
-                        }
-                        .disabled(activeOther)
-                        .padding(.horizontal, 7)
-                        .padding(.top, 5)
-                        .padding(.bottom, 2)
-                    }
-                }
-                .background(WTheme.bg)
-            }
-        }
+        .background(WTheme.bg.ignoresSafeArea())
         .task(id: nextSetToken) {
             loadNextTargets()
         }
     }
 
     @ViewBuilder
-    private func setPanel(_ exercise: HCExercise) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            if let suggested = exercise.suggestedWeightLb {
-                Text("SUGGESTED · \(suggested.formatted()) LB")
-                    .font(WTheme.label(10))
-                    .foregroundStyle(WTheme.aqua)
-            }
-            if active {
-                TimelineView(.periodic(from: .now, by: 1)) { now in
-                    HStack {
-                        Text("SET IN PROGRESS")
-                            .font(WTheme.label(9)).foregroundStyle(WTheme.amber)
-                        Spacer()
-                        Text(wClock(now.date.timeIntervalSince(
-                            store.liftClock?.setStartedAt ?? now.date)))
-                            .font(WTheme.metric(23))
-                            .foregroundStyle(WTheme.amber)
+    private func quickSetControls(_ exercise: HCExercise) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            WQuickEditor(
+                title: "WEIGHT · LB",
+                value: hasWeight ? weight.formatted() : "BW",
+                decrease: {
+                    if hasWeight && weight > 0 {
+                        weight = max(0, weight - increment)
+                        if weight == 0 { hasWeight = false }
                     }
+                    wHaptic(.click)
+                },
+                increase: {
+                    hasWeight = true
+                    weight = min(1500, weight + increment)
+                    wHaptic(.click)
                 }
+            )
+            WQuickEditor(
+                title: "REPS",
+                value: String(reps),
+                decrease: {
+                    reps = max(1, reps - 1)
+                    wHaptic(.click)
+                },
+                increase: {
+                    reps = min(100, reps + 1)
+                    wHaptic(.click)
+                }
+            )
+            Button {
+                if active {
+                    let saved = store.stopSet(for: exercise,
+                                              weightLb: hasWeight ? weight : nil,
+                                              reps: reps, rir: Double(rir))
+                    if saved {
+                        readyHapticSent = false
+                        wHaptic(.success)
+                    }
+                } else if !otherActive && store.liftClock?.isPaused != true {
+                    store.startSet(for: exercise)
+                    wHaptic(.start)
+                }
+            } label: {
+                HStack(spacing: 7) {
+                    Image(systemName: active ? "checkmark.circle.fill" : "play.fill")
+                    Text(active ? "END SET & SAVE" : "START SET \(setCount + 1)")
+                        .lineLimit(1).minimumScaleFactor(0.8)
+                }
+                .font(.system(size: 16, weight: .heavy, design: .rounded))
+                .foregroundStyle(active ? WTheme.bg : WTheme.onAccent)
+                .frame(maxWidth: .infinity, minHeight: 53)
+                .background(active ? WTheme.amber : WTheme.lime,
+                            in: RoundedRectangle(cornerRadius: 14))
             }
-            HStack(spacing: 5) {
-                Text("LOAD")
-                    .font(WTheme.label(10)).foregroundStyle(WTheme.muted)
-                Spacer()
-                Toggle("WEIGHT", isOn: $includeWeight)
-                    .labelsHidden()
-                    .tint(WTheme.lime)
-            }
-            if includeWeight {
-                WStepper(title: "WEIGHT · LB", value: weight.formatted(),
-                         minus: { weight = max(0, weight - increment) },
-                         plus: { weight = min(1500, weight + increment) })
-            }
-            WStepper(title: "REPS", value: "\(reps)",
-                     minus: { reps = max(1, reps - 1) },
-                     plus: { reps = min(100, reps + 1) })
-            WStepper(title: "RIR", value: "\(rir)",
-                     minus: { rir = max(0, rir - 1) },
-                     plus: { rir = min(10, rir + 1) })
+            .buttonStyle(.plain)
+            .disabled(otherActive || store.liftClock?.isPaused == true)
+            .accessibilityLabel(active ? "End set and save weight and repetitions" : "Start set")
+            .padding(.top, 2)
         }
-        .padding(10)
-        .background(WTheme.panel.opacity(0.5), in: RoundedRectangle(cornerRadius: 15))
     }
 
-    private func restPanel(remaining: TimeInterval) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("REST BETWEEN SETS")
-                .font(WTheme.label(11))
-                .tracking(1.1)
+    private func restPanel(seconds: TimeInterval) -> some View {
+        VStack(alignment: .center, spacing: 6) {
+            Text("REST · NEXT SET READY SOON")
+                .font(WTheme.label(10))
                 .foregroundStyle(WTheme.aqua)
-            Text(wClock(remaining))
-                .font(WTheme.metric(55))
-                .foregroundStyle(WTheme.aqua)
-                .frame(maxWidth: .infinity, alignment: .center)
-            Text("Next: \(current?.name ?? "Workout complete")")
-                .font(.system(size: 13, weight: .medium))
-                .lineLimit(2)
-            WPrimary(title: "SKIP REST", symbol: "forward.end.fill",
-                     color: WTheme.aqua) { store.skipRest() }
+            Text(wClock(seconds))
+                .font(WTheme.metric(52))
+                .foregroundStyle(WTheme.lime)
+            Button {
+                store.skipRest()
+                readyHapticSent = true
+                wHaptic(.click)
+            } label: {
+                Label("SKIP REST", systemImage: "forward.end.fill")
+                    .font(.system(size: 15, weight: .heavy))
+                    .foregroundStyle(WTheme.onAccent)
+                    .frame(maxWidth: .infinity, minHeight: 50)
+                    .background(WTheme.lime,
+                                in: RoundedRectangle(cornerRadius: 14))
+            }
+            .buttonStyle(.plain)
         }
-        .padding(13)
-        .background(WTheme.panel, in: RoundedRectangle(cornerRadius: 15))
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 8)
     }
 
     private var finishedSection: some View {
-        VStack(alignment: .leading, spacing: 13) {
+        VStack(alignment: .leading, spacing: 9) {
             Image(systemName: "checkmark.seal.fill")
-                .font(.system(size: 34))
+                .font(.system(size: 32))
                 .foregroundStyle(WTheme.lime)
             Text("ALL SETS DONE")
                 .font(.system(size: 22, weight: .heavy, design: .rounded))
-            Text("\(store.guidedCompletedSets) working sets recorded.")
-                .font(.system(size: 13))
+            Text("\(store.guidedCompletedSets) working sets logged")
+                .font(.system(size: 12))
                 .foregroundStyle(WTheme.muted)
             WPrimary(title: "FINISH WORKOUT", symbol: "flag.checkered",
                      action: onFinish)
@@ -569,12 +616,12 @@ private struct WatchGuidedSession: View {
         guard let next = current else { return }
         let previous = store.completedSets(for: next).last
         let suggested = previous?.weightLb ?? next.suggestedWeightLb
-        if let suggested {
+        if let suggested, suggested > 0 {
             weight = suggested
-            includeWeight = true
+            hasWeight = true
         } else {
             weight = 0
-            includeWeight = false
+            hasWeight = false
         }
         reps = previous?.reps ?? next.repMin
         rir = Int((previous?.rir ?? 2).rounded())
