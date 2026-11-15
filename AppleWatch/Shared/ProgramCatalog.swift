@@ -226,6 +226,7 @@ struct HCPerformanceSet: Hashable {
     let reps: Int
     let rir: Double?
     let date: String
+    var source: String = "Hybrid Coach"
 }
 
 struct HCLoadSuggestion {
