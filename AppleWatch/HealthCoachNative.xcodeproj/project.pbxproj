@@ -431,7 +431,7 @@
 			name = HealthCoachWatch;
 			productName = HealthCoachWatch;
 			productReference = 000000000000000000000013;
-			productType = "com.apple.product-type.application.watchapp2";
+			productType = "com.apple.product-type.application";
 		};
 		000000000000000000000036 = {
 			isa = PBXContainerItemProxy;
