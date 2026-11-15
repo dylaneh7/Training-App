@@ -1901,11 +1901,37 @@ private struct PremiumCoachPage: View {
                             .font(.system(size: 15, weight: .medium))
                             .foregroundStyle(HCDesign.ink)
                             .fixedSize(horizontal: false, vertical: true)
-                        Text("This first version uses your real schedule, not generative AI or an invented recovery score.")
+                        Text("This briefing uses your real schedule. Open Ask Coach for optional AI-powered advice.")
                             .font(.caption2)
                             .foregroundStyle(HCDesign.secondary)
                     }
                 }
+
+                HCSectionTitle(title: "Ask imun", detail: "Secure AI coaching")
+                NavigationLink {
+                    PremiumAskCoachPage()
+                } label: {
+                    HCCard(accent: HCDesign.aqua) {
+                        HStack(spacing: 14) {
+                            Image(systemName: "sparkles.rectangle.stack.fill")
+                                .font(.system(size: 27))
+                                .foregroundStyle(HCDesign.aqua)
+                                .frame(width: 48, height: 48)
+                                .background(HCDesign.aqua.opacity(0.12),
+                                            in: RoundedRectangle(cornerRadius: 14))
+                            VStack(alignment: .leading, spacing: 5) {
+                                Text("Ask Coach")
+                                    .font(HCDesign.display(19))
+                                Text("Understand your progress, workouts and training choices")
+                                    .font(.caption).foregroundStyle(HCDesign.secondary)
+                            }
+                            Spacer(minLength: 5)
+                            Image(systemName: "arrow.up.right")
+                                .foregroundStyle(HCDesign.aqua)
+                        }
+                    }
+                }
+                .buttonStyle(.plain)
 
                 HCSectionTitle(title: "Coach & app controls")
                 NavigationLink {
@@ -1980,6 +2006,127 @@ private struct PremiumCoachPage: View {
 }
 
 // All original settings, exports and integrations are preserved here.
+// User-initiated AI, no continuous health upload and no client-side provider keys.
+private struct PremiumAskCoachPage: View {
+    @EnvironmentObject private var coach: PhoneWorkoutBridge
+    @AppStorage("hcAIShareRecovery") private var shareRecovery = false
+    @State private var question = ""
+    @State private var answer = ""
+    @State private var loading = false
+    @State private var errorMessage: String?
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                HCPremiumHero(eyebrow: "IMUN / ASK COACH",
+                              title: "Get perspective.",
+                              subtitle: "Ask about training, trends and your planned sessions.",
+                              icon: "sparkles", tint: HCDesign.aqua) {
+                    HCInsightChip(title: "AI GENERATED",
+                                  symbol: "sparkle.magnifyingglass",
+                                  tint: HCDesign.aqua)
+                }
+                HCCard {
+                    VStack(alignment: .leading, spacing: 13) {
+                        Text("WHAT'S ON YOUR MIND?")
+                            .font(HCDesign.label(11))
+                            .tracking(1.2)
+                            .foregroundStyle(HCDesign.secondary)
+                        TextField("Should I adjust today's session?", text: $question,
+                                  axis: .vertical)
+                            .lineLimit(3...6)
+                            .font(.system(size: 16))
+                            .padding(14)
+                            .background(HCDesign.raised,
+                                        in: RoundedRectangle(cornerRadius: 13))
+                        HStack(spacing: 7) {
+                            prompt("What should I focus on today?")
+                            prompt("How is my running progressing?")
+                        }
+                        Toggle(isOn: $shareRecovery) {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("Include recovery measurements")
+                                    .font(.subheadline)
+                                Text("Off by default. Shares only limited source-labeled recovery summaries for this question.")
+                                    .font(.caption2)
+                                    .foregroundStyle(HCDesign.secondary)
+                            }
+                        }
+                        .tint(HCDesign.aqua)
+                        Text("By pressing Ask, your question and a short training summary are sent securely to the AI service. No conversation is saved in imun's database.")
+                            .font(.caption2).foregroundStyle(HCDesign.secondary)
+                        HCFilledButton(title: loading ? "THINKING…" : "ASK COACH",
+                                       icon: "arrow.up.right", tint: HCDesign.aqua,
+                                       disabled: loading || question.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !coach.signedIn) {
+                            send()
+                        }
+                        if !coach.signedIn {
+                            Text("Sign in to your imun account before using the AI coach.")
+                                .font(.caption2).foregroundStyle(HCDesign.caution)
+                        }
+                    }
+                }
+                if loading { ProgressView("Analyzing your question…").tint(HCDesign.aqua) }
+                if let errorMessage {
+                    HCStatusLine(text: errorMessage, symbol: "exclamationmark.circle",
+                                 tint: HCDesign.caution)
+                }
+                if !answer.isEmpty {
+                    HCCard(accent: HCDesign.aqua) {
+                        VStack(alignment: .leading, spacing: 13) {
+                            HCInsightChip(title: "COACH RESPONSE · AI",
+                                          symbol: "sparkles", tint: HCDesign.aqua)
+                            Text(answer)
+                                .font(.system(size: 15))
+                                .foregroundStyle(HCDesign.ink)
+                                .textSelection(.enabled)
+                        }
+                    }
+                }
+                Text("Coach advice is training guidance, not medical care. Review suggested changes before making them to your calendar.")
+                    .font(.caption2).foregroundStyle(HCDesign.secondary)
+            }
+            .padding(18)
+        }
+        .hcPage()
+        .navigationTitle("Ask Coach")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private func prompt(_ phrase: String) -> some View {
+        Button(phrase) { question = phrase }
+            .font(.system(size: 11, weight: .medium))
+            .foregroundStyle(HCDesign.aqua)
+            .padding(9)
+            .frame(maxWidth: .infinity)
+            .background(HCDesign.raised, in: RoundedRectangle(cornerRadius: 10))
+            .buttonStyle(.plain)
+    }
+
+    private func send() {
+        let ask = question.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !ask.isEmpty, !loading else { return }
+        loading = true
+        errorMessage = nil
+        answer = ""
+        Task {
+            do {
+                let reply = try await coach.askIMUNCoach(
+                    question: ask, shareRecovery: shareRecovery)
+                await MainActor.run {
+                    answer = reply
+                    loading = false
+                }
+            } catch {
+                await MainActor.run {
+                    errorMessage = error.localizedDescription
+                    loading = false
+                }
+            }
+        }
+    }
+}
+
 private struct PremiumSettingsPage: View {
     @EnvironmentObject private var coach: PhoneWorkoutBridge
     @EnvironmentObject private var tredict: HCTredictImporter
@@ -1991,6 +2138,10 @@ private struct PremiumSettingsPage: View {
     @AppStorage("hcWeightIncrement") private var weightIncrement = 5.0
     @AppStorage("hcRestOverrideSeconds") private var restOverride = 0
     @AppStorage("hcWatchHaptics") private var watchHaptics = true
+    @AppStorage("hcRunVoiceCues") private var runVoiceCues = false
+    @AppStorage("hcRunAutoLaps") private var runAutoLaps = true
+    @AppStorage("hcRunIntervals") private var runIntervals = false
+    @AppStorage("hcRunCueMinutes") private var runCueMinutes = 5
 
     private var export: String {
         var lines = ["# IMUN Training Export",
@@ -2128,6 +2279,37 @@ private struct PremiumSettingsPage: View {
                 .onChange(of: weightIncrement) { _, _ in coach.sendToWatch() }
                 .onChange(of: restOverride) { _, _ in coach.sendToWatch() }
                 .onChange(of: watchHaptics) { _, _ in coach.sendToWatch() }
+                HCSectionTitle(title: "Run coaching & auto laps")
+                HCCard(accent: HCDesign.aqua) {
+                    VStack(alignment: .leading, spacing: 14) {
+                        Toggle("Spoken cues through Watch audio", isOn: $runVoiceCues)
+                            .tint(HCDesign.aqua)
+                        Divider().overlay(HCDesign.outline)
+                        Toggle("Automatic mile laps & split announcements", isOn: $runAutoLaps)
+                            .tint(HCDesign.aqua)
+                        Divider().overlay(HCDesign.outline)
+                        Toggle("Timed interval coaching", isOn: $runIntervals)
+                            .tint(HCDesign.aqua)
+                        if runIntervals {
+                            HCStatusLine(text: "5-min warm-up · 5 × (3-min effort / 2-min recovery) · cool-down",
+                                         symbol: "timer", tint: HCDesign.aqua)
+                        }
+                        Picker("Spoken pace & HR updates", selection: $runCueMinutes) {
+                            Text("Off").tag(0)
+                            Text("Every minute").tag(1)
+                            Text("Every 2 min").tag(2)
+                            Text("Every 5 min").tag(5)
+                            Text("Every 10 min").tag(10)
+                        }
+                        .tint(HCDesign.aqua)
+                        Text("Audio plays from the Apple Watch recording the run. Pair your headphones with that Watch. GPS/HealthKit data and watchOS playback availability determine which cues can be spoken. Haptics remain available when audio cannot play.")
+                            .font(.caption2).foregroundStyle(HCDesign.secondary)
+                    }
+                }
+                .onChange(of: runVoiceCues) { _, _ in coach.sendToWatch() }
+                .onChange(of: runAutoLaps) { _, _ in coach.sendToWatch() }
+                .onChange(of: runIntervals) { _, _ in coach.sendToWatch() }
+                .onChange(of: runCueMinutes) { _, _ in coach.sendToWatch() }
                 HCSectionTitle(title: "Your coaching notes")
                 HCCard {
                     VStack(alignment: .leading, spacing: 12) {
