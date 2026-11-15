@@ -1979,7 +1979,6 @@ private struct PremiumRecoveryPage: View {
 private struct PremiumCoachPage: View {
     @EnvironmentObject private var coach: PhoneWorkoutBridge
     @State private var movingSession: HCPlannedSession?
-    @FocusState private var isChatFocused: Bool
 
     private var days: [Date] {
         let start = Calendar.current.startOfDay(for: Date())
@@ -1993,8 +1992,7 @@ private struct PremiumCoachPage: View {
     }
 
     var body: some View {
-        ScrollViewReader { proxy in
-            ScrollView {
+        ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
                     HStack(alignment: .center) {
                         VStack(alignment: .leading, spacing: 5) {
@@ -2164,7 +2162,6 @@ private struct PremiumCoachPage: View {
                 IMUNMoveWorkoutSheet(entry: session)
                     .environmentObject(coach)
             }
-        }
     }
 
     private func sessionSymbol(_ kind: String) -> String {
@@ -2194,268 +2191,285 @@ private struct PremiumCoachPage: View {
 // All original settings, exports and integrations are preserved here.
 // Real on-screen AI conversation. The model is called only on explicit Send.
 // The server uses the signed-in user's JWT; provider credentials stay server-side.
-private struct IMUNCoachTurn: Identifiable {
-    let id = UUID()
+private struct IMUNCoachTurn: Identifiable, Codable {
+    var id: UUID = UUID()
     let role: String
     let text: String
 }
 
-private struct PremiumCoachQuickChat: View {
+// A real conversation surface, not a backend diagnostics panel. Chats remain
+// on the phone. Nothing is transmitted until the athlete chooses Send.
+private struct PremiumCoachConversation: View {
     @EnvironmentObject private var coach: PhoneWorkoutBridge
     @AppStorage("hcAIShareRecovery") private var shareRecovery = false
+    @AppStorage("hcCoachConversationLocalV1") private var storedConversation = Data()
+    @FocusState private var composerFocused: Bool
     @State private var question = ""
     @State private var turns: [IMUNCoachTurn] = []
-    @State private var waiting = false
-    @State private var serviceStatus = "Checking the AI service…"
-    @State private var serviceError: String?
-    private var priorContext: String {
-        turns.suffix(6).map { ($0.role == "user" ? "Athlete: " : "Coach: ") + $0.text }
-            .joined(separator: "\n")
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HCSectionTitle(title: "AI Coach", detail: "Ask about your training")
-            HCCard(accent: HCDesign.aqua) {
-                VStack(alignment: .leading, spacing: 13) {
-                    HStack {
-                        Label("ASK IMUN", systemImage: "sparkles")
-                            .font(HCDesign.label(11))
-                            .tracking(1.2)
-                            .foregroundStyle(HCDesign.aqua)
-                        Spacer()
-                        Text(serviceStatus)
-                            .font(HCDesign.label(10))
-                            .foregroundStyle(serviceError == nil ?
-                                             HCDesign.good : HCDesign.caution)
-                            .lineLimit(2)
-                            .multilineTextAlignment(.trailing)
-                    }
-                    if !turns.isEmpty {
-                        ForEach(turns.suffix(8)) { turn in
-                            VStack(alignment: .leading, spacing: 5) {
-                                Text(turn.role == "user" ? "YOU" : "IMUN COACH · AI")
-                                    .font(HCDesign.label(9))
-                                    .tracking(1)
-                                    .foregroundStyle(turn.role == "user" ?
-                                                     HCDesign.secondary : HCDesign.aqua)
-                                Text(turn.text)
-                                    .font(.system(size: 14))
-                                    .foregroundStyle(HCDesign.ink)
-                                    .textSelection(.enabled)
-                            }
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(11)
-                            .background(turn.role == "user" ?
-                                        HCDesign.raised : HCDesign.canvas.opacity(0.68),
-                                        in: RoundedRectangle(cornerRadius: 12))
-                        }
-                    } else {
-                        Text("Ask about today's workout, your running progress, or how to balance training with recovery.")
-                            .font(.system(size: 14))
-                            .foregroundStyle(HCDesign.secondary)
-                    }
-                    TextField("Ask your coach a question…",
-                              text: $question, axis: .vertical)
-                        .lineLimit(2...4)
-                        .font(.system(size: 14))
-                        .padding(12)
-                        .background(HCDesign.raised, in: RoundedRectangle(cornerRadius: 11))
-                    Toggle("Include recovery data in this question", isOn: $shareRecovery)
-                        .font(.system(size: 12))
-                        .tint(HCDesign.aqua)
-                    HStack(alignment: .center) {
-                        Text("Training context is shared only when you send.")
-                            .font(.caption2)
-                            .foregroundStyle(HCDesign.secondary)
-                        Spacer(minLength: 10)
-                        Button {
-                            send()
-                        } label: {
-                            Label(waiting ? "ASKING…" : "SEND", systemImage: "arrow.up")
-                                .font(.system(size: 12, weight: .bold))
-                                .foregroundStyle(HCDesign.canvas)
-                                .padding(.horizontal, 15)
-                                .padding(.vertical, 10)
-                                .background(HCDesign.aqua, in: Capsule())
-                        }
-                        .buttonStyle(.plain)
-                        .disabled(waiting || !coach.signedIn ||
-                                  question.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                    }
-                    if waiting { ProgressView().tint(HCDesign.aqua) }
-                    if let serviceError {
-                        HCStatusLine(text: serviceError,
-                                     symbol: "exclamationmark.triangle",
-                                     tint: HCDesign.caution)
-                    }
-                }
-            }
-        }
-        .task(id: coach.signedIn) {
-            if coach.signedIn {
-                let status = await coach.checkCoachAIConnection()
-                serviceStatus = status.hasPrefix("Secure AI") ? "SERVER CONFIGURED" : "SETUP NEEDED"
-                serviceError = status.hasPrefix("Secure AI") ? nil : status
-            } else {
-                serviceStatus = "SIGN IN REQUIRED"
-                serviceError = nil
-            }
-        }
-    }
-
-    private func send() {
-        let ask = question.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !waiting, !ask.isEmpty, coach.signedIn else { return }
-        let context = priorContext
-        question = ""
-        turns.append(IMUNCoachTurn(role: "user", text: ask))
-        waiting = true
-        serviceError = nil
-        Task {
-            do {
-                let response = try await coach.askIMUNCoach(
-                    question: ask, shareRecovery: shareRecovery,
-                    recentConversation: context)
-                await MainActor.run {
-                    turns.append(IMUNCoachTurn(role: "assistant", text: response))
-                    waiting = false
-                    serviceStatus = "AI RESPONDING"
-                }
-            } catch {
-                await MainActor.run {
-                    turns.append(IMUNCoachTurn(role: "assistant",
-                                               text: "I couldn't answer that request."))
-                    serviceError = error.localizedDescription
-                    serviceStatus = "CONNECTION ISSUE"
-                    waiting = false
-                }
-            }
-        }
-    }
-}
-
-// User-initiated AI, no continuous health upload and no client-side provider keys.
-private struct PremiumAskCoachPage: View {
-    @EnvironmentObject private var coach: PhoneWorkoutBridge
-    @AppStorage("hcAIShareRecovery") private var shareRecovery = false
-    @State private var question = ""
-    @State private var answer = ""
-    @State private var loading = false
+    @State private var isSending = false
     @State private var errorMessage: String?
 
-    var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
-                HCPremiumHero(eyebrow: "IMUN / ASK COACH",
-                              title: "Get perspective.",
-                              subtitle: "Ask about training, trends and your planned sessions.",
-                              icon: "sparkles", tint: HCDesign.aqua) {
-                    HCInsightChip(title: "AI GENERATED",
-                                  symbol: "sparkle.magnifyingglass",
-                                  tint: HCDesign.aqua)
-                }
-                HCCard {
-                    VStack(alignment: .leading, spacing: 13) {
-                        Text("WHAT'S ON YOUR MIND?")
-                            .font(HCDesign.label(11))
-                            .tracking(1.2)
-                            .foregroundStyle(HCDesign.secondary)
-                        TextField("Should I adjust today's session?", text: $question,
-                                  axis: .vertical)
-                            .lineLimit(3...6)
-                            .font(.system(size: 16))
-                            .padding(14)
-                            .background(HCDesign.raised,
-                                        in: RoundedRectangle(cornerRadius: 13))
-                        HStack(spacing: 7) {
-                            prompt("What should I focus on today?")
-                            prompt("How is my running progressing?")
-                        }
-                        Toggle(isOn: $shareRecovery) {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text("Include recovery measurements")
-                                    .font(.subheadline)
-                                Text("Off by default. Shares only limited source-labeled recovery summaries for this question.")
-                                    .font(.caption2)
-                                    .foregroundStyle(HCDesign.secondary)
-                            }
-                        }
-                        .tint(HCDesign.aqua)
-                        Text("By pressing Ask, your question and a short training summary are sent securely to the AI service. No conversation is saved in imun's database.")
-                            .font(.caption2).foregroundStyle(HCDesign.secondary)
-                        HCFilledButton(title: loading ? "THINKING…" : "ASK COACH",
-                                       icon: "arrow.up.right", tint: HCDesign.aqua,
-                                       disabled: loading || question.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !coach.signedIn) {
-                            send()
-                        }
-                        if !coach.signedIn {
-                            Text("Sign in to your imun account before using the AI coach.")
-                                .font(.caption2).foregroundStyle(HCDesign.caution)
-                        }
-                    }
-                }
-                if loading { ProgressView("Analyzing your question…").tint(HCDesign.aqua) }
-                if let errorMessage {
-                    HCStatusLine(text: errorMessage, symbol: "exclamationmark.circle",
-                                 tint: HCDesign.caution)
-                }
-                if !answer.isEmpty {
-                    HCCard(accent: HCDesign.aqua) {
-                        VStack(alignment: .leading, spacing: 13) {
-                            HCInsightChip(title: "COACH RESPONSE · AI",
-                                          symbol: "sparkles", tint: HCDesign.aqua)
-                            Text(answer)
-                                .font(.system(size: 15))
-                                .foregroundStyle(HCDesign.ink)
-                                .textSelection(.enabled)
-                        }
-                    }
-                }
-                Text("Coach advice is training guidance, not medical care. Review suggested changes before making them to your calendar.")
-                    .font(.caption2).foregroundStyle(HCDesign.secondary)
-            }
-            .padding(18)
-        }
-        .hcPage()
-        .navigationTitle("Ask Coach")
-        .navigationBarTitleDisplayMode(.inline)
+    private var context: String {
+        turns.suffix(6).map { turn in
+            (turn.role == "user" ? "Athlete: " : "Coach: ") + turn.text
+        }.joined(separator: "\n")
+    }
+    private var canSend: Bool {
+        coach.signedIn && !isSending &&
+        !question.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
-    private func prompt(_ phrase: String) -> some View {
-        Button(phrase) { question = phrase }
-            .font(.system(size: 11, weight: .medium))
-            .foregroundStyle(HCDesign.aqua)
-            .padding(9)
-            .frame(maxWidth: .infinity)
-            .background(HCDesign.raised, in: RoundedRectangle(cornerRadius: 10))
-            .buttonStyle(.plain)
+    var body: some View {
+        HCCard(accent: HCDesign.aqua) {
+            VStack(alignment: .leading, spacing: 14) {
+                HStack(spacing: 11) {
+                    Image(systemName: "sparkles")
+                        .font(.system(size: 21, weight: .semibold))
+                        .foregroundStyle(HCDesign.aqua)
+                        .frame(width: 40, height: 40)
+                        .background(HCDesign.aqua.opacity(0.12),
+                                    in: RoundedRectangle(cornerRadius: 12))
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("imun Coach")
+                            .font(.system(size: 18, weight: .bold, design: .rounded))
+                            .foregroundStyle(HCDesign.ink)
+                        Text("Here for your next workout—and everything between.")
+                            .font(.system(size: 11))
+                            .foregroundStyle(HCDesign.secondary)
+                    }
+                    Spacer(minLength: 5)
+                    if !turns.isEmpty {
+                        Button {
+                            turns.removeAll()
+                            storedConversation = Data()
+                            errorMessage = nil
+                            composerFocused = false
+                        } label: {
+                            Image(systemName: "square.and.pencil")
+                                .font(.system(size: 17))
+                                .foregroundStyle(HCDesign.secondary)
+                                .frame(width: 36, height: 36)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Start a new coach conversation")
+                    }
+                }
+
+                if turns.isEmpty {
+                    VStack(alignment: .leading, spacing: 11) {
+                        Text("What can I help you with?")
+                            .font(HCDesign.display(22))
+                            .foregroundStyle(HCDesign.ink)
+                        Text("Ask a question, review your progress, or get help making sense of your training.")
+                            .font(.system(size: 13))
+                            .foregroundStyle(HCDesign.secondary)
+                        suggestion("What's my focus this week?")
+                        suggestion("How can I improve my running?")
+                        suggestion("How are my workouts progressing?")
+                    }
+                    .padding(.vertical, 10)
+                } else {
+                    ScrollViewReader { proxy in
+                        ScrollView {
+                            LazyVStack(alignment: .leading, spacing: 13) {
+                                ForEach(turns) { turn in
+                                    HStack(alignment: .top, spacing: 8) {
+                                        if turn.role == "user" {
+                                            Spacer(minLength: 25)
+                                        } else {
+                                            Image(systemName: "sparkle")
+                                                .font(.system(size: 12, weight: .bold))
+                                                .foregroundStyle(HCDesign.aqua)
+                                                .frame(width: 26, height: 26)
+                                                .background(HCDesign.aqua.opacity(0.11),
+                                                            in: Circle())
+                                        }
+                                        Text(turn.text)
+                                            .font(.system(size: 14))
+                                            .foregroundStyle(HCDesign.ink)
+                                            .textSelection(.enabled)
+                                            .padding(.horizontal, 13)
+                                            .padding(.vertical, 11)
+                                            .background(turn.role == "user" ?
+                                                        HCDesign.electric.opacity(0.15) :
+                                                        HCDesign.canvas.opacity(0.65),
+                                                        in: RoundedRectangle(cornerRadius: 15))
+                                        if turn.role != "user" {
+                                            Spacer(minLength: 25)
+                                        }
+                                    }
+                                }
+                                if isSending {
+                                    HStack(spacing: 9) {
+                                        ProgressView().tint(HCDesign.aqua)
+                                        Text("Coach is thinking…")
+                                            .font(.system(size: 12))
+                                            .foregroundStyle(HCDesign.secondary)
+                                        Spacer()
+                                    }
+                                    .padding(.vertical, 8)
+                                }
+                                Color.clear.frame(height: 1).id("lastCoachMessage")
+                            }
+                            .frame(maxWidth: .infinity)
+                        }
+                        .frame(height: min(370, max(145, CGFloat(turns.count) * 93)))
+                        .scrollDismissesKeyboard(.interactively)
+                        .onChange(of: turns.count) { _, _ in
+                            withAnimation(.easeOut(duration: 0.2)) {
+                                proxy.scrollTo("lastCoachMessage", anchor: .bottom)
+                            }
+                        }
+                    }
+                }
+
+                Divider().overlay(HCDesign.outline)
+
+                HStack(alignment: .bottom, spacing: 9) {
+                    TextField("Message your coach…", text: $question, axis: .vertical)
+                        .lineLimit(2...5)
+                        .focused($composerFocused)
+                        .submitLabel(.done)
+                        .font(.system(size: 15))
+                        .tint(HCDesign.aqua)
+                        .foregroundStyle(HCDesign.ink)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 10)
+                        .background(HCDesign.canvas.opacity(0.7),
+                                    in: RoundedRectangle(cornerRadius: 13))
+                        .accessibilityLabel("Ask your coach")
+                    Button {
+                        send()
+                    } label: {
+                        Image(systemName: "arrow.up")
+                            .font(.system(size: 18, weight: .bold))
+                            .foregroundStyle(HCDesign.canvas)
+                            .frame(width: 43, height: 43)
+                            .background(canSend ? HCDesign.aqua : HCDesign.secondary.opacity(0.5),
+                                        in: RoundedRectangle(cornerRadius: 13))
+                    }
+                    .disabled(!canSend)
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Send your question")
+                }
+
+                if composerFocused {
+                    Button("Done typing") {
+                        composerFocused = false
+                    }
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(HCDesign.aqua)
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+                }
+
+                Toggle(isOn: $shareRecovery) {
+                    Text("Use my recovery metrics in answers")
+                        .font(.system(size: 12))
+                        .foregroundStyle(HCDesign.secondary)
+                }
+                .tint(HCDesign.aqua)
+
+                if !coach.signedIn {
+                    Text("Sign in above to ask Coach about your training.")
+                        .font(.system(size: 12))
+                        .foregroundStyle(HCDesign.caution)
+                }
+                if let errorMessage {
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text("Coach couldn't answer that just now.")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(HCDesign.caution)
+                        Text(errorMessage)
+                            .font(.system(size: 11))
+                            .foregroundStyle(HCDesign.secondary)
+                            .textSelection(.enabled)
+                    }
+                }
+                Text("Your question and a short training summary are shared only when you send. Recovery measurements are shared only if you enable the option.")
+                    .font(.system(size: 10))
+                    .foregroundStyle(HCDesign.secondary)
+            }
+        }
+        .onAppear {
+            if let decoded = try? JSONDecoder().decode([IMUNCoachTurn].self,
+                                                       from: storedConversation) {
+                turns = Array(decoded.suffix(24))
+            }
+        }
+        .toolbar {
+            ToolbarItemGroup(placement: .keyboard) {
+                Spacer()
+                Button("Done") { composerFocused = false }
+                    .foregroundStyle(HCDesign.aqua)
+            }
+        }
+    }
+
+    private func suggestion(_ text: String) -> some View {
+        Button {
+            question = text
+            composerFocused = true
+        } label: {
+            HStack {
+                Image(systemName: "bubble.left")
+                    .foregroundStyle(HCDesign.aqua)
+                Text(text)
+                    .foregroundStyle(HCDesign.ink)
+                Spacer()
+                Image(systemName: "arrow.up.left")
+                    .foregroundStyle(HCDesign.secondary)
+            }
+            .font(.system(size: 12, weight: .medium))
+            .padding(.horizontal, 12)
+            .padding(.vertical, 11)
+            .background(HCDesign.canvas.opacity(0.52),
+                        in: RoundedRectangle(cornerRadius: 11))
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func persist() {
+        if let saved = try? JSONEncoder().encode(Array(turns.suffix(24))) {
+            storedConversation = saved
+        }
     }
 
     private func send() {
-        let ask = question.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !ask.isEmpty, !loading else { return }
-        loading = true
+        let questionText = question.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard canSend else { return }
+        let history = context
+        question = ""
+        composerFocused = false
         errorMessage = nil
-        answer = ""
+        isSending = true
+        turns.append(IMUNCoachTurn(role: "user", text: questionText))
+        persist()
         Task {
             do {
                 let reply = try await coach.askIMUNCoach(
-                    question: ask, shareRecovery: shareRecovery)
+                    question: questionText,
+                    shareRecovery: shareRecovery,
+                    recentConversation: history)
                 await MainActor.run {
-                    answer = reply
-                    loading = false
+                    turns.append(IMUNCoachTurn(role: "assistant", text: reply))
+                    isSending = false
+                    persist()
                 }
             } catch {
                 await MainActor.run {
+                    // Keep the failed prompt visible for the athlete to retry.
+                    question = questionText
                     errorMessage = error.localizedDescription
-                    loading = false
+                    isSending = false
+                    persist()
                 }
             }
         }
     }
 }
 
+// All original settings and integrations remain available through the Coach gear.
 private struct PremiumSettingsPage: View {
     @EnvironmentObject private var coach: PhoneWorkoutBridge
     @EnvironmentObject private var tredict: HCTredictImporter
