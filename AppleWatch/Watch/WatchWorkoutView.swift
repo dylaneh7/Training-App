@@ -160,7 +160,8 @@ private struct WatchStrengthDashboard: View {
                     .tracking(1.5)
                     .foregroundStyle(WTheme.secondary)
                     .padding(.top, 4)
-                ForEach(Array(store.workout.exercises.enumerated()), id: \.element.id) { i, exercise in
+                ForEach(store.workout.exercises.indices, id: \.self) { i in
+                    let exercise = store.workout.exercises[i]
                     NavigationLink {
                         WatchSetDashboard(exercise: exercise)
                     } label: {
