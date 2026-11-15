@@ -1549,6 +1549,7 @@ private struct HCRecoverySignal: Identifiable {
     let baselineLabel: String
     let unit: String
     let lowerIsWorse: Bool
+    let alertEnabled: Bool
     let points: [HCPlotMark]
 
     var formattedValue: String {
@@ -1565,7 +1566,7 @@ private struct HCRecoverySignal: Identifiable {
     }
     // Conservative *display thresholds*, not diagnostic ranges.
     var severity: Int {
-        guard let delta = unfavorableMagnitude else { return 0 }
+        guard alertEnabled, let delta = unfavorableMagnitude else { return 0 }
         if delta > 25 { return 2 }
         if delta > 12 { return 1 }
         return 0
@@ -1584,6 +1585,7 @@ private struct HCRecoverySignal: Identifiable {
                "(\(String(format: "%.1f", baseline)) \(unit))"
     }
     var status: String {
+        !alertEnabled ? "PERSONAL TREND" :
         baseline == nil ? "BASELINE PENDING" :
         severity == 2 ? "OUTSIDE RECENT PATTERN" :
         severity == 1 ? "WORTH WATCHING" : "NEAR YOUR BASELINE"
@@ -1597,7 +1599,8 @@ private struct HCRecoverySignal: Identifiable {
 
     static func build(label: String, symbol: String, source: String,
                       unit: String, lowerIsWorse: Bool,
-                      rows: [(String, Double)], suppliedBaseline: Double? = nil)
+                      rows: [(String, Double)], suppliedBaseline: Double? = nil,
+                      alertEnabled: Bool = true)
         -> HCRecoverySignal? {
         let unique = Dictionary(grouping: rows, by: { $0.0 })
             .compactMap { date, readings -> (String, Double)? in
@@ -1629,6 +1632,7 @@ private struct HCRecoverySignal: Identifiable {
                                 source: source, date: latest.0, current: latest.1,
                                 baseline: baseline, baselineLabel: baselineName,
                                 unit: unit, lowerIsWorse: lowerIsWorse,
+                                alertEnabled: alertEnabled,
                                 points: unique.suffix(30).compactMap { row in
                                     HCPlanBuilder.startOfDate(row.0).map {
                                         HCPlotMark(date: $0, value: row.1)
@@ -1641,6 +1645,52 @@ private struct PremiumRecoveryPage: View {
     @EnvironmentObject private var coach: PhoneWorkoutBridge
     @ObservedObject var appleHealth: HCAppleHealthReader
     @State private var showHistory = false
+    @State private var selectedHealthCategory = "Overview"
+    @State private var metricSearch = ""
+
+    private let categoryOrder = ["Heart & Vitals", "Sleep", "Activity & Energy",
+                                 "Running & Cycling", "Mobility",
+                                 "Body Measurements", "Metabolic & Nutrition", "Workouts"]
+    private var healthCategories: [String] {
+        let found = Set(appleHealth.metrics.map(\.category))
+        let main = categoryOrder.filter { found.contains($0) }
+        let whoop = (appleHealth.metrics.contains {
+            $0.source.localizedCaseInsensitiveContains("whoop")
+        } || coach.recoveryHistory.contains {
+            $0.source.localizedCaseInsensitiveContains("whoop")
+        }) ? ["WHOOP"] : []
+        return ["Overview", "All"] + whoop + main
+    }
+
+    private var visibleSignals: [HCRecoverySignal] {
+        let groupFiltered: [HCRecoverySignal]
+        switch selectedHealthCategory {
+        case "Overview":
+            groupFiltered = signals.filter {
+                let name = $0.label.lowercased()
+                return name.contains("hrv") || name.contains("sleep") ||
+                       name.contains("resting heart") || name.contains("respiratory") ||
+                       name.contains("blood oxygen") || name.contains("daily low hr")
+            }
+        case "All":
+            groupFiltered = signals
+        case "WHOOP":
+            groupFiltered = signals.filter {
+                $0.source.localizedCaseInsensitiveContains("whoop")
+            }
+        default:
+            let names = Set(appleHealth.metrics.filter {
+                $0.category == selectedHealthCategory
+            }.map(\.name))
+            groupFiltered = signals.filter { names.contains($0.label) }
+        }
+        let searched = metricSearch.trimmingCharacters(in: .whitespacesAndNewlines)
+        return (searched.isEmpty ? groupFiltered : groupFiltered.filter {
+            $0.label.localizedCaseInsensitiveContains(searched) ||
+            $0.source.localizedCaseInsensitiveContains(searched)
+        }).sorted { $0.date > $1.date }
+    }
+
 
     private var signals: [HCRecoverySignal] {
         var result: [HCRecoverySignal] = []
@@ -1665,33 +1715,39 @@ private struct PremiumRecoveryPage: View {
                 rows: items.compactMap { item in item.dailyLowHR.map { (item.date, $0) } }
             ) { result.append(metric) }
         }
-        for metric in appleHealth.metrics where metric.name != "Sleep (asleep time)" {
+        for metric in appleHealth.metrics {
             let samples = appleHealth.metricHistory.filter {
                 $0.name == metric.name && $0.source == metric.source
             }
             if let signal = HCRecoverySignal.build(
                 label: metric.name,
-                symbol: metric.name.contains("HRV") ? "waveform.path.ecg" : "heart.fill",
+                symbol: metric.category == "Sleep" ? "moon.zzz.fill" :
+                    metric.category == "Activity & Energy" ? "figure.walk" :
+                    metric.category == "Running & Cycling" ? "figure.run" :
+                    metric.category == "Metabolic & Nutrition" ? "leaf.fill" :
+                    "waveform.path.ecg",
                 source: metric.source,
-                unit: metric.name.contains("HRV") ? "ms" : "bpm",
-                lowerIsWorse: metric.name.contains("HRV"),
-                rows: samples.map { ($0.date, $0.value) }
+                unit: metric.unit,
+                lowerIsWorse: metric.lowerIsWorse,
+                rows: samples.map { ($0.date, $0.value) },
+                alertEnabled: metric.lowerIsWorse || metric.higherIsWorse
             ) { result.append(signal) }
         }
         return result.sorted { $0.date > $1.date }
     }
 
     private var flags: [HCRecoverySignal] {
-        signals.filter { $0.severity > 0 && $0.baseline != nil }
+        signals.filter { $0.alertEnabled && $0.severity > 0 &&
+                         $0.baseline != nil }
     }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 19) {
-                HCPremiumHero(eyebrow: "RECOVERY / YOUR BASELINE",
-                              title: "Listen to the signals.",
-                              subtitle: "Trends that give today's numbers context.",
-                              icon: "waveform.path.ecg",
+                HCPremiumHero(eyebrow: "IMUN / HEALTH",
+                              title: "See the whole picture.",
+                              subtitle: "Your metrics, their sources, and what has changed.",
+                              icon: "heart.text.square.fill",
                               tint: HCDesign.aqua) {
                     HStack(alignment: .center, spacing: 15) {
                         HCProgressRing(progress: signals.isEmpty ? 0 :
@@ -1725,8 +1781,40 @@ private struct PremiumRecoveryPage: View {
                                  symbol: "checkmark.circle.fill", tint: HCDesign.good)
                 }
 
-                HCSectionTitle(title: "Your recovery signals",
-                               detail: "Previous 7 / 28 days")
+                HCSectionTitle(title: "Explore your health",
+                               detail: "\(appleHealth.metrics.count) synced readings")
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(healthCategories, id: \.self) { group in
+                            Button {
+                                withAnimation(.easeInOut(duration: 0.2)) {
+                                    selectedHealthCategory = group
+                                }
+                            } label: {
+                                Text(group)
+                                    .font(.system(size: 12, weight: .semibold))
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 9)
+                                    .foregroundStyle(selectedHealthCategory == group ?
+                                        HCDesign.onAccent : HCDesign.secondary)
+                                    .background(selectedHealthCategory == group ?
+                                        HCDesign.electric : HCDesign.raised,
+                                        in: Capsule())
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+                TextField("Search health metrics or sources", text: $metricSearch)
+                    .textInputAutocapitalization(.never)
+                    .padding(13)
+                    .background(HCDesign.raised, in: RoundedRectangle(cornerRadius: 12))
+                    .font(.system(size: 13))
+                    .accessibilityLabel("Search available health measurements")
+
+                HCSectionTitle(title: selectedHealthCategory == "Overview" ?
+                               "Key health signals" : selectedHealthCategory,
+                               detail: "7 / 28-day comparisons")
                 if signals.isEmpty {
                     HCCard {
                         VStack(alignment: .leading, spacing: 12) {
@@ -1737,7 +1825,7 @@ private struct PremiumRecoveryPage: View {
                         }
                     }
                 }
-                ForEach(Array(signals.prefix(9))) { metric in
+                ForEach(visibleSignals) { metric in
                     HCCard(accent: metric.color) {
                         VStack(alignment: .leading, spacing: 13) {
                             HCMetricGauge(title: metric.label,
@@ -1783,8 +1871,8 @@ private struct PremiumRecoveryPage: View {
                     }
                 }
 
-                HCSectionTitle(title: "Apple Health",
-                               detail: "Latest authorized measurements")
+                HCSectionTitle(title: "Apple Health and WHOOP",
+                               detail: "Authorized sources")
                 HCCard {
                     VStack(alignment: .leading, spacing: 14) {
                         HStack(alignment: .top) {
@@ -1798,13 +1886,29 @@ private struct PremiumRecoveryPage: View {
                             Image(systemName: "heart.text.square.fill")
                                 .font(.title).foregroundStyle(HCDesign.aqua)
                         }
-                        if appleHealth.metrics.isEmpty {
-                            HCFilledButton(title: "CONNECT APPLE HEALTH",
-                                           icon: "heart.fill", tint: HCDesign.aqua) {
-                                appleHealth.connect()
-                            }
+                        HStack(spacing: 10) {
+                            HCOutlineButton(title: "Grant Health access",
+                                            icon: "heart.fill") { appleHealth.connect() }
+                            HCOutlineButton(title: appleHealth.loading ?
+                                            "Reading…" : "Refresh",
+                                            icon: "arrow.clockwise") { appleHealth.refreshIfAuthorized() }
                         }
-                        ForEach(appleHealth.metrics) { metric in
+                        if appleHealth.loading { ProgressView().tint(HCDesign.aqua) }
+                        Text("HealthKit lists only readings you have authorized and actually recorded. Apple Watch and WHOOP exports remain labeled by source.")
+                            .font(.caption2).foregroundStyle(HCDesign.secondary)
+                        ForEach(appleHealth.metrics.filter {
+                            selectedHealthCategory == "All" ||
+                            (selectedHealthCategory == "WHOOP" &&
+                             $0.source.localizedCaseInsensitiveContains("whoop")) ||
+                            (selectedHealthCategory == "Overview" &&
+                             (["Resting heart rate","HRV · SDNN","Respiratory rate",
+                               "Total asleep","Blood oxygen","Steps"].contains($0.name))) ||
+                            $0.category == selectedHealthCategory
+                        }.filter {
+                            metricSearch.isEmpty ||
+                            $0.name.localizedCaseInsensitiveContains(metricSearch) ||
+                            $0.source.localizedCaseInsensitiveContains(metricSearch)
+                        }) { metric in
                             HStack {
                                 VStack(alignment: .leading, spacing: 3) {
                                     Text(metric.name)
@@ -1840,7 +1944,22 @@ private struct PremiumRecoveryPage: View {
                 }
                 .tint(HCDesign.aqua)
 
-                Text("Apple Health SDNN and Tredict RMSSD are separate HRV measurements. Comparisons use the same named source only. Baselines require at least five earlier daily observations unless the provider supplies one. No proprietary WHOOP recovery score is inferred.")
+                HCCard {
+                    VStack(alignment: .leading, spacing: 9) {
+                        Text("WHOOP CONNECTION")
+                            .font(HCDesign.label(10))
+                            .tracking(1.2)
+                            .foregroundStyle(HCDesign.aqua)
+                        Text("WHOOP can share several health measurements and sleep to Apple Health after you enable its integration. WHOOP's proprietary Recovery score, Strain, and HRV RMSSD are not exported to Apple Health. They require an authorized WHOOP API connection, or source-labeled records from an existing connected service.")
+                            .font(.system(size: 12))
+                            .foregroundStyle(HCDesign.secondary)
+                        Link("WHOOP → Apple Health setup",
+                             destination: URL(string:"https://support.whoop.com/s/article/Apple-Health-Integration")!)
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(HCDesign.aqua)
+                    }
+                }
+                Text("Comparisons use readings from the same named source and never mix SDNN with RMSSD. A personal baseline requires five earlier daily observations or a provider baseline. Trends and flags are informational, not diagnostic.")
                     .font(.caption2)
                     .foregroundStyle(HCDesign.secondary)
                     .padding(.bottom, 28)
@@ -1850,6 +1969,7 @@ private struct PremiumRecoveryPage: View {
         .scrollIndicators(.hidden)
         .hcPage()
         .navigationBarTitleDisplayMode(.inline)
+        .onAppear { appleHealth.refreshIfAuthorized() }
     }
 }
 
