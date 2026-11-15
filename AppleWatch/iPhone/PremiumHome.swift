@@ -905,9 +905,71 @@ private struct HCPlotMark: Identifiable {
     let value: Double
 }
 
+/// Date editing lives here, not on the daily workout dashboards.
+private struct IMUNMoveWorkoutSheet: View {
+    @EnvironmentObject private var coach: PhoneWorkoutBridge
+    @Environment(\.dismiss) private var dismiss
+    let entry: HCPlannedSession
+    @State private var destination: Date
+
+    init(entry: HCPlannedSession) {
+        self.entry = entry
+        _destination = State(initialValue: HCPlanBuilder.startOfDate(entry.date) ?? Date())
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Workout") {
+                    Text(entry.title).font(.headline)
+                    LabeledContent("Type", value: entry.kind.capitalized)
+                    LabeledContent("Current date", value: entry.date)
+                }
+                Section("Reschedule") {
+                    DatePicker("Move to", selection: $destination,
+                               displayedComponents: .date)
+                        .datePickerStyle(.graphical)
+                        .tint(HCDesign.electric)
+                    Text("Moving a workout updates your Command Center calendar. Previously recorded sets and completed runs stay on their original dates.")
+                        .font(.caption)
+                        .foregroundStyle(HCDesign.secondary)
+                }
+                Section {
+                    Button {
+                        coach.moveWorkout(entry, to: destination)
+                        dismiss()
+                    } label: {
+                        Label("Save new workout day", systemImage: "checkmark")
+                            .font(.headline)
+                            .foregroundStyle(HCDesign.electric)
+                    }
+                    .disabled(coach.movingWorkoutID != nil ||
+                              HCPlanBuilder.dateString(destination) == entry.date)
+                }
+            }
+            .scrollContentBackground(.hidden)
+            .background(HCDesign.canvas)
+            .navigationTitle("Move workout")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+            }
+        }
+        .preferredColorScheme(.dark)
+    }
+}
+
 private struct PremiumProgressPage: View {
     @EnvironmentObject private var coach: PhoneWorkoutBridge
     @State private var selectedExercise = ""
+    @State private var movingSession: HCPlannedSession?
+
+    private var upcoming: [HCPlannedSession] {
+        let today = HCPlanBuilder.dateString(Date())
+        return Array(coach.plannedSessions.filter { $0.date >= today }.prefix(45))
+    }
 
     private var names: [String] { Array(Set(coach.performanceHistory.map(\.exercise))).sorted() }
     private var current: String { selectedExercise.isEmpty ? (names.first ?? "") : selectedExercise }
@@ -930,9 +992,9 @@ private struct PremiumProgressPage: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 19) {
-                PremiumHeader(eyebrow: "PERFORMANCE / OVERVIEW",
-                              title: "Built over time.",
-                              subtitle: "Actual logged work. No invented recovery scores.")
+                PremiumHeader(eyebrow: "IMUN / PROGRESS",
+                              title: "Your training",
+                              subtitle: "Upcoming workouts and your actual history.")
                 HStack(spacing: 11) {
                     HCCard {
                         HCMetricBlock(label: "Strength sets",
@@ -949,6 +1011,98 @@ private struct PremiumProgressPage: View {
                                   value: String(format: "%.1f mi",
                                     coach.runHistory.compactMap(\.distanceMeters).reduce(0,+) / 1609.344),
                                   tint: HCDesign.electric)
+                }
+                HCSectionTitle(title: "Upcoming workouts", detail: "Tap to reschedule")
+                if upcoming.isEmpty {
+                    HCCard {
+                        Text("No upcoming sessions in your connected calendar. Add workouts through Command Center.")
+                            .font(.subheadline).foregroundStyle(HCDesign.secondary)
+                    }
+                } else {
+                    ForEach(upcoming) { entry in
+                        HCCard {
+                            VStack(alignment: .leading, spacing: 9) {
+                                HStack {
+                                    Text(entry.date)
+                                        .font(HCDesign.label(11))
+                                        .foregroundStyle(HCDesign.electric)
+                                    Spacer()
+                                    Text(entry.kind.uppercased())
+                                        .font(HCDesign.label(10))
+                                        .foregroundStyle(HCDesign.secondary)
+                                }
+                                Text(entry.title)
+                                    .font(.system(size: 16, weight: .semibold))
+                                    .foregroundStyle(HCDesign.ink)
+                                if !entry.notes.isEmpty {
+                                    Text(entry.notes)
+                                        .font(.caption)
+                                        .foregroundStyle(HCDesign.secondary)
+                                        .lineLimit(2)
+                                }
+                                HStack(spacing: 12) {
+                                    Button {
+                                        movingSession = entry
+                                    } label: {
+                                        Label("Move day", systemImage: "calendar")
+                                            .font(.system(size: 13, weight: .semibold))
+                                    }
+                                    .disabled(coach.movingWorkoutID != nil)
+                                    if entry.date != HCPlanBuilder.dateString(Date()) {
+                                        Button {
+                                            coach.moveWorkout(entry, to: Date())
+                                        } label: {
+                                            Label("Today", systemImage: "arrow.uturn.backward")
+                                                .font(.system(size: 13, weight: .semibold))
+                                        }
+                                        .disabled(coach.movingWorkoutID != nil)
+                                    }
+                                }
+                                .buttonStyle(.bordered)
+                                .tint(HCDesign.electric)
+                            }
+                        }
+                    }
+                }
+                if coach.movingWorkoutID != nil {
+                    ProgressView("Saving your schedule…").tint(HCDesign.electric)
+                }
+                HCSectionTitle(title: "Completed training", detail: "Health Coach + Tredict")
+                if coach.trainingActivities.isEmpty {
+                    Text("Your previous training sessions will appear after your account finishes syncing.")
+                        .foregroundStyle(HCDesign.secondary)
+                } else {
+                    ForEach(coach.trainingActivities.prefix(35)) { activity in
+                        HCCard {
+                            VStack(alignment: .leading, spacing: 7) {
+                                HStack {
+                                    Text(activity.date).foregroundStyle(HCDesign.electric)
+                                    Spacer()
+                                    Text(activity.source).foregroundStyle(HCDesign.secondary)
+                                }
+                                .font(HCDesign.label(10))
+                                Text(activity.title).font(.system(size: 15, weight: .semibold))
+                                HStack(spacing: 12) {
+                                    if let seconds = activity.durationSeconds {
+                                        Label(hcDuration(seconds), systemImage: "clock")
+                                    }
+                                    if let meters = activity.distanceMeters, meters > 0 {
+                                        Label(String(format: "%.2f mi", meters / 1609.344),
+                                              systemImage: "figure.run")
+                                    }
+                                    if let hr = activity.averageBPM {
+                                        Label("\(Int(hr)) bpm", systemImage: "heart")
+                                    }
+                                    if let kcal = activity.calories {
+                                        Label("\(Int(kcal)) kcal", systemImage: "flame")
+                                    }
+                                }
+                                .font(.system(size: 11))
+                                .foregroundStyle(HCDesign.secondary)
+                                .lineLimit(1)
+                            }
+                        }
+                    }
                 }
                 HCSectionTitle(title: "Exercise progression", detail: "Recorded weight")
                 HCCard {
@@ -1002,6 +1156,10 @@ private struct PremiumProgressPage: View {
         .scrollIndicators(.hidden)
         .hcPage()
         .navigationBarTitleDisplayMode(.inline)
+        .sheet(item: $movingSession) { entry in
+            IMUNMoveWorkoutSheet(entry: entry)
+                .environmentObject(coach)
+        }
     }
 }
 
