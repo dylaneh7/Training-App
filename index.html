@@ -336,6 +336,12 @@ const defaultState=()=>({
   shoes:['Brooks Glycerin Max','New Balance 1080 v14','Nike Zoom Fly','Adidas Adizero','Nike Vomero Premium']
 });
 let state=load();
+// Shared local training log; stored in the same state as strength/run history
+// so the existing Command Center backup includes unscheduled workouts.
+window.healthCoachActivities={
+  list:()=>Array.isArray(state.extraActivities)?state.extraActivities.map(item=>({...item})):[],
+  save:items=>{state.extraActivities=Array.isArray(items)?items:[];save()}
+};
 
 const week=document.getElementById('week'), day=document.getElementById('day');
 runWeeks.forEach((w,i)=>{const o=document.createElement('option');o.value=i;o.textContent=`Week ${i+1} · ${w[0]} · ${w[1]}`;week.appendChild(o)});
@@ -632,6 +638,6 @@ if('serviceWorker' in navigator){
 }
 })();
 </script>
-<script src="./cc-sync-v2.js?v=35" defer></script>
+<script src="./cc-sync-v2.js?v=36" defer></script>
 </body>
 </html>
