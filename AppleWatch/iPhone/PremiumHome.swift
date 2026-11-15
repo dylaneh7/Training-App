@@ -2134,9 +2134,6 @@ private struct PremiumCoachPage: View {
                             .foregroundStyle(HCDesign.aqua)
                     }
 
-                    HCSyncStatus(pending: coach.cloudPendingCount,
-                                 saving: coach.savingPlan,
-                                 connected: coach.signedIn)
                     Spacer(minLength: 25)
                 }
                 .padding(.horizontal, 18)
@@ -2458,7 +2455,10 @@ private struct PremiumCoachConversation: View {
                 }
             } catch {
                 await MainActor.run {
-                    // Keep the failed prompt visible for the athlete to retry.
+                    // Restore the draft without keeping a duplicate failed turn.
+                    if turns.last?.role == "user" {
+                        turns.removeLast()
+                    }
                     question = questionText
                     errorMessage = error.localizedDescription
                     isSending = false
