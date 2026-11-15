@@ -363,6 +363,13 @@ private struct WatchGuidedSession: View {
                             .foregroundStyle(WTheme.muted)
                     }
                 }
+                if store.liftClock?.isPaused == true {
+                    WPrimary(title: "RESUME WORKOUT", symbol: "play.fill") {
+                        store.resumeLifting()
+                        health.resume()
+                        wHaptic(.start)
+                    }
+                }
                 if store.guidedAllFinished {
                     finishedSection
                 } else if let current {
@@ -421,6 +428,13 @@ private struct WatchGuidedSession: View {
                     WPrimary(title: "FINISH WORKOUT", symbol: "flag.checkered",
                              color: WTheme.amber, action: onFinish)
                 }
+                NavigationLink {
+                    WatchSessionOptions(onFinish: onFinish)
+                } label: {
+                    Label("PAUSE / FINISH OPTIONS", systemImage: "slider.horizontal.3")
+                        .font(WTheme.label(11))
+                }
+                .tint(WTheme.muted)
                 Text(store.status)
                     .font(.system(size: 10))
                     .foregroundStyle(WTheme.muted)
@@ -458,29 +472,6 @@ private struct WatchGuidedSession: View {
                     }
                 }
                 .background(WTheme.bg)
-            }
-        }
-        .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                Menu {
-                    if store.liftClock?.isPaused == true {
-                        Button("Resume workout", systemImage: "play.fill") {
-                            store.resumeLifting()
-                            health.resume()
-                        }
-                    } else {
-                        Button("Pause workout", systemImage: "pause.fill") {
-                            store.pauseLifting()
-                            health.pause()
-                        }
-                    }
-                    Button("Finish workout", systemImage: "flag.checkered",
-                           action: onFinish)
-                        .disabled(store.liftClock?.setStartedAt != nil)
-                } label: {
-                    Image(systemName: "ellipsis.circle")
-                        .foregroundStyle(WTheme.lime)
-                }
             }
         }
         .task(id: nextSetToken) {
@@ -581,6 +572,42 @@ private struct WatchGuidedSession: View {
         }
         reps = previous?.reps ?? next.repMin
         rir = Int((previous?.rir ?? 2).rounded())
+    }
+}
+
+private struct WatchSessionOptions: View {
+    @EnvironmentObject private var store: WatchWorkoutStore
+    @EnvironmentObject private var health: WatchHealthSession
+    @Environment(\.dismiss) private var dismiss
+    let onFinish: () -> Void
+
+    var body: some View {
+        List {
+            Text("The session timer continues until you pause or finish.")
+                .font(.system(size: 12)).foregroundStyle(WTheme.muted)
+            if store.liftClock?.isPaused == true {
+                WPrimary(title: "RESUME WORKOUT", symbol: "play.fill") {
+                    store.resumeLifting()
+                    health.resume()
+                    dismiss()
+                }
+            } else {
+                WSecondary(title: "PAUSE WORKOUT", symbol: "pause.fill") {
+                    store.pauseLifting()
+                    health.pause()
+                    dismiss()
+                }
+                .disabled(store.liftClock?.setStartedAt != nil)
+            }
+            WPrimary(title: "FINISH WORKOUT", symbol: "flag.checkered",
+                     color: WTheme.amber) {
+                dismiss()
+                onFinish()
+            }
+            .disabled(store.liftClock?.setStartedAt != nil)
+        }
+        .listStyle(.plain)
+        .navigationTitle("Workout options")
     }
 }
 
