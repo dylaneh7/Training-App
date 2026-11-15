@@ -202,11 +202,12 @@ private struct StrengthHome: View {
                     suggestedWeightLb:nil,restSeconds:120
                 )
                 let suggestion = coach.suggestion(for:draft,on:plan.date,aggressive:aggressive)
-                let added = HCExercise(
+                var added = HCExercise(
                     id:draft.id,name:item.name,originalName:item.name,
                     exerciseIndex:index,prescribedSets:3,repMin:8,repMax:12,
                     suggestedWeightLb:suggestion.weightLb,restSeconds:120
                 )
+                added.instructions = item.instructions
                 saveSession(title:plan.title,exercises:plan.exercises+[added])
             }
         }
@@ -253,6 +254,7 @@ private struct StrengthExerciseDetails: View {
     @State private var maximum = 12
     @State private var rest = 120
     @State private var weightText = ""
+    @State private var instructionText = ""
     @State private var newWeight = ""
     @State private var newReps = 8
     @State private var newRIR = 2
@@ -281,12 +283,10 @@ private struct StrengthExerciseDetails: View {
                     if let library {
                         LabeledContent("Muscles", value:library.group)
                         LabeledContent("Equipment", value:library.equipment)
-                        Text(library.instructions)
-                            .font(.subheadline).foregroundStyle(.secondary)
-                    } else {
-                        Text("Maintain controlled technique and a comfortable range of motion.")
-                            .foregroundStyle(.secondary)
                     }
+                    Text(exercise.instructions ?? library?.instructions ??
+                         "Maintain controlled technique and a comfortable range of motion.")
+                        .font(.subheadline).foregroundStyle(.secondary)
                     Button("Swap Movement") { showSwap = true }
                 }
 
@@ -315,7 +315,9 @@ private struct StrengthExerciseDetails: View {
                     Stepper("Rest: \(rest) seconds",value:$rest,in:15...360,step:15)
                     TextField("Suggested weight (lb; per dumbbell for DB lifts)",text:$weightText)
                         .keyboardType(.decimalPad)
-                    Button("Save Set Targets") { saveTargets() }
+                    Text("Technique instructions").font(.caption).foregroundStyle(.secondary)
+                    TextEditor(text:$instructionText).frame(minHeight:100)
+                    Button("Save Set Targets and Instructions") { saveTargets() }
                         .buttonStyle(.borderedProminent)
                 }
 
@@ -396,6 +398,9 @@ private struct StrengthExerciseDetails: View {
         sets=e.prescribedSets;minimum=e.repMin;maximum=e.repMax
         rest=e.restSeconds
         weightText=e.suggestedWeightLb.map{$0.formatted()} ?? ""
+        instructionText=e.instructions ?? HCExerciseLibrary.all.first {
+            HCProgramCatalog.normalized($0.name)==HCProgramCatalog.normalized(e.name)
+        }?.instructions ?? ""
         newWeight=weightText
         newReps=e.repMin
     }
@@ -411,10 +416,12 @@ private struct StrengthExerciseDetails: View {
 
     private func saveTargets() {
         guard let e=exercise else{return}
-        update(HCExercise(id:e.id,name:e.name,originalName:e.originalName,
+        var updated=HCExercise(id:e.id,name:e.name,originalName:e.originalName,
             exerciseIndex:e.exerciseIndex,prescribedSets:sets,
             repMin:minimum,repMax:max(maximum,minimum),
-            suggestedWeightLb:Double(weightText),restSeconds:rest))
+            suggestedWeightLb:Double(weightText),restSeconds:rest)
+        updated.instructions=instructionText.isEmpty ? nil : instructionText
+        update(updated)
     }
 
     private func swapTo(_ item: HCLibraryExercise) {
@@ -423,10 +430,12 @@ private struct StrengthExerciseDetails: View {
             exerciseIndex:e.exerciseIndex,prescribedSets:sets,
             repMin:minimum,repMax:maximum,suggestedWeightLb:nil,restSeconds:rest)
         let suggestion=coach.suggestion(for:prototype,on:plan.date,aggressive:aggressive)
-        update(HCExercise(id:e.id,name:item.name,originalName:item.name,
+        var swapped=HCExercise(id:e.id,name:item.name,originalName:item.name,
             exerciseIndex:e.exerciseIndex,prescribedSets:sets,
             repMin:minimum,repMax:maximum,
-            suggestedWeightLb:suggestion.weightLb,restSeconds:rest))
+            suggestedWeightLb:suggestion.weightLb,restSeconds:rest)
+        swapped.instructions=item.instructions
+        update(swapped)
         dismiss()
     }
 }
@@ -480,6 +489,10 @@ private struct ExerciseLibraryPicker: View {
     let onSelect: (HCLibraryExercise) -> Void
     @State private var search = ""
     @State private var category = "All"
+    @State private var showingCustom = false
+    @State private var customName = ""
+    @State private var customInstructions = ""
+    @State private var customGroup = "Other"
 
     private var results: [HCLibraryExercise] {
         HCExerciseLibrary.all.filter { e in
@@ -495,6 +508,11 @@ private struct ExerciseLibraryPicker: View {
             List {
                 Picker("Muscle group",selection:$category) {
                     ForEach(["All","Chest","Back","Shoulders","Arms","Legs","Traps","Core"],id:\.self) { Text($0) }
+                }
+                Button {
+                    showingCustom = true
+                } label: {
+                    Label("Create Custom Exercise",systemImage:"plus")
                 }
                 ForEach(results) { item in
                     VStack(alignment:.leading,spacing:7) {
@@ -516,6 +534,34 @@ private struct ExerciseLibraryPicker: View {
             }
             .searchable(text:$search,prompt:"Search 50 exercises")
             .navigationTitle("Exercise Library")
+            .sheet(isPresented:$showingCustom) {
+                NavigationStack {
+                    Form {
+                        TextField("Exercise name",text:$customName)
+                        TextField("Muscle group",text:$customGroup)
+                        Section("How to perform it") {
+                            TextEditor(text:$customInstructions).frame(minHeight:130)
+                        }
+                    }
+                    .navigationTitle("New Exercise")
+                    .toolbar {
+                        ToolbarItem(placement:.cancellationAction) {
+                            Button("Cancel") {showingCustom=false}
+                        }
+                        ToolbarItem(placement:.confirmationAction) {
+                            Button("Add") {
+                                let name=customName.trimmingCharacters(in:.whitespacesAndNewlines)
+                                guard !name.isEmpty else{return}
+                                onSelect(HCLibraryExercise(
+                                    name:name,group:customGroup,
+                                    equipment:"Custom",instructions:customInstructions))
+                                showingCustom=false
+                                dismiss()
+                            }
+                        }
+                    }
+                }
+            }
             .toolbar {
                 ToolbarItem(placement:.cancellationAction) {
                     Button("Close") { dismiss() }
