@@ -250,7 +250,12 @@ final class HCTredictImporter: ObservableObject {
                   let timestamp = row["date"] as? String else { continue }
             used.insert(sourceID)
             let extended = row["extendedSummary"] as? [String: Any] ?? [:]
-            let summary = row["summary"] as? [String: Any] ?? extended
+            // Extended summaries contain strength, running and sensor
+            // metrics absent from shorter list responses. Favor explicitly
+            // recorded values when both representations are present.
+            let summary = extended.merging(row["summary"] as? [String: Any] ?? [:]) {
+                _, recorded in recorded
+            }
             let sport = (row["sportType"] as? String ?? "other").lowercased()
             let subSport = (row["subSportType"] as? String ?? "").lowercased()
             let title = row["title"] as? String ?? sport.capitalized
@@ -277,6 +282,17 @@ final class HCTredictImporter: ObservableObject {
             a.enjoyment = number(row["enjoyment"])
             a.attribution = originalSource
             a.externalID = sourceID
+            a.powerWatts = number(summary["power"])
+            a.cadenceSPM = number(summary["cadence"])
+            a.ascentMeters = number((summary["altitude"] as? [String: Any])?["ascent"])
+            a.strengthSetCount = number(summary["exerciseSetCount"]).map(Int.init)
+            a.strengthRepetitions = number(summary["repetitions"]).map(Int.init)
+            a.tonnageKilograms = number(summary["volume"])
+            a.maxSetWeightKilograms = number(summary["weightMax"])
+            a.activeSetSeconds = number(summary["durationSets"])
+            a.restSeconds = number(summary["durationRest"])
+            a.runningEffectiveness = number(summary["runningEffectiveness"])
+            a.vo2Max = number(summary["vo2max"])
             activities.append(a)
             if sport == "running" {
                 var r = HCProgressRun(id: "tredict:\(sourceID)", date: day,
@@ -286,6 +302,9 @@ final class HCTredictImporter: ObservableObject {
                                       averageBPM: avgHR, splits: [])
                 r.maxBPM = number(summary["heartrateMax"])
                 r.activeCalories = number(summary["calories"])
+                r.averagePowerWatts = number(summary["power"])
+                r.averageCadenceSPM = number(summary["cadence"])
+                r.elevationGainMeters = number((summary["altitude"] as? [String: Any])?["ascent"])
                 runs.append(r)
             }
         }
