@@ -272,7 +272,7 @@ actor HCCloudClient {
                   let reps = numeric(x["reps"]), reps > 0,
                   let date = x["workout_date"] as? String else { return nil }
             return .init(exercise:name,weightLb:w,reps:Int(reps),
-                         rir:numeric(x["rir"]),date:date)
+                         rir:numeric(x["rir"]),date:date,source:"IMUN / Watch")
         }
     }
 
