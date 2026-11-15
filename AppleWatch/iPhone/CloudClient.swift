@@ -86,6 +86,22 @@ actor HCCloudClient {
 
     /// Authenticated call to a Supabase Edge Function. No AI provider key is
     /// present in the app. Context is supplied by the user with clear consent.
+    func checkIMUNCoachAvailability() async throws -> String {
+        let user = try await authorizedToken()
+        let data = try await send(path: "/functions/v1/imun-ai-coach",
+                                  bearer: user.access)
+        guard let info = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let ready = info["ready"] as? Bool else {
+            throw HCCloudError.malformedResponse
+        }
+        if ready {
+            return "Secure AI service ready"
+        }
+        throw HCCloudError.server(
+            (info["message"] as? String) ?? "AI service needs server configuration"
+        )
+    }
+
     func askIMUNCoach(question: String, context: String,
                       shareRecovery: Bool) async throws -> String {
         let authenticated = try await authorizedToken()
