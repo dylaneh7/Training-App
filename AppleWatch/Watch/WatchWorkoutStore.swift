@@ -33,6 +33,7 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
     @Published private(set) var hasScheduledLift = false
     @Published private(set) var runPlan: HCRunPlan?
     @Published private(set) var runHistory: [HCProgressRun] = []
+    @Published private(set) var recoverySummary: HCRecoveryDatum?
     @Published private(set) var sets: [HCLoggedSet] = []
     @Published private(set) var completedRuns: [HCRunFinished] = []
     @Published private(set) var liftClock: HCTrainingClock?
@@ -483,6 +484,10 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
         if let data = context[HCPayload.schedule] as? Data,
            let snapshot = try? decoder.decode(HCWatchSchedule.self, from: data) {
             DispatchQueue.main.async { self.applySchedule(snapshot) }
+        }
+        if let data = context["hcRecoverySnapshot"] as? Data,
+           let reading = try? decoder.decode(HCRecoveryDatum.self, from: data) {
+            DispatchQueue.main.async { self.recoverySummary = reading }
         }
         if let data = context[HCPayload.runHistory] as? Data,
            let history = try? decoder.decode([HCProgressRun].self, from: data) {
