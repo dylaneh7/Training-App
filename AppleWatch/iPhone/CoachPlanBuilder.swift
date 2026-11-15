@@ -47,13 +47,17 @@ enum HCPlanBuilder {
 
     static func workout(for date: Date, planner: [String: Any], history: [String: Any]) -> HCWorkout? {
         let iso = dateString(date)
-        guard let key = sessionKey(for: date) else { return nil }
         let items = planner["items"] as? [[String: Any]] ?? []
         let planned = items.first {
             ($0["date"] as? String) == iso
                 && ($0["category"] as? String) == "workout"
                 && ($0["type"] as? String)?.lowercased() == "lift"
         }
+        // Rescheduling preserves the original training template even if the
+        // new date is normally a rest day or a different training day.
+        let originalDay = (planned?["imunOriginalDate"] as? String).flatMap(startOfDate)
+        guard let key = originalDay.flatMap(sessionKey(for:)) ?? sessionKey(for: date)
+        else { return nil }
         // Only the user-requested one-off Saturday workout exists without a
         // Command Center Lift entry. Other missing days are genuine rest days.
         if planned == nil && !key.hasSuffix("SatUpper") { return nil }
@@ -172,6 +176,26 @@ enum HCPlanBuilder {
             }
         }
         return result
+    }
+
+    /// Build the upcoming workout list from real planner items only.
+    static func plannedSessions(from planner: [String: Any]) -> [HCPlannedSession] {
+        let items = planner["items"] as? [[String: Any]] ?? []
+        return items.compactMap { row in
+            guard row["category"] as? String == "workout",
+                  let id = row["id"] as? String, UUID(uuidString: id) != nil,
+                  let date = row["date"] as? String, startOfDate(date) != nil
+            else { return nil }
+            return HCPlannedSession(
+                id: id, date: date,
+                title: row["title"] as? String ?? "Workout",
+                kind: (row["type"] as? String ?? "Workout").lowercased(),
+                notes: row["notes"] as? String ?? "",
+                completed: row["completed"] as? Bool ?? false,
+                originalDate: row["imunOriginalDate"] as? String)
+        }.sorted {
+            $0.date == $1.date ? $0.title < $1.title : $0.date < $1.date
+        }
     }
 
     static func run(for date: Date, planner: [String: Any]) -> HCRunPlan? {
