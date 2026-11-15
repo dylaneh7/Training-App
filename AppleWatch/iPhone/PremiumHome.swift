@@ -1103,7 +1103,20 @@ private struct PremiumCoachPage: View {
         lines.append("## Running")
         for run in coach.runHistory.prefix(100) {
             let distance = run.distanceMeters.map { String(format: "%.2f mi", $0 / 1609.344) } ?? "—"
-            lines.append("\(run.date): \(run.title) · \(distance) · \(run.source)")
+            var details = ["\(run.date): \(run.title)", distance, "source: \(run.source)"]
+            if let elapsed = run.durationSeconds { details.append("time: \(hcDuration(elapsed))") }
+            if let avgHR = run.averageBPM { details.append("avg HR: \(Int(avgHR)) bpm") }
+            if let peak = run.maxBPM { details.append("max HR: \(Int(peak)) bpm") }
+            if let kcal = run.activeCalories { details.append("active energy: \(Int(kcal)) kcal") }
+            if let power = run.averagePowerWatts { details.append("running power: \(Int(power)) W") }
+            if let cadence = run.averageCadenceSPM { details.append("cadence: \(Int(cadence)) spm") }
+            if let elevation = run.elevationGainMeters { details.append("ascent: \(Int(elevation)) m") }
+            if !run.splits.isEmpty {
+                details.append("actual lap events: " + run.splits.map {
+                    "lap \($0.index) \(hcDuration($0.elapsedSeconds))"
+                }.joined(separator: ", "))
+            }
+            lines.append(details.joined(separator: " · "))
         }
         if includeRecovery {
             lines.append("## Recovery")
