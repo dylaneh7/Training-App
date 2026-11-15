@@ -70,14 +70,14 @@ private struct PremiumHeader: View {
             HStack {
                 Text(eyebrow.uppercased())
                     .font(HCDesign.label())
-                    .tracking(2.3)
+                    .tracking(1.1)
                     .foregroundStyle(HCDesign.aqua)
                 Spacer()
                 if let badge { HCAccentTag(title: badge) }
             }
             Text(title)
-                .font(HCDesign.display(34))
-                .tracking(-1.5)
+                .font(HCDesign.display(32))
+                .tracking(-0.5)
                 .minimumScaleFactor(0.7)
                 .lineLimit(2)
                 .foregroundStyle(HCDesign.ink)
