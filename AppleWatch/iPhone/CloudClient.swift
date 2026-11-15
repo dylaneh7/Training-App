@@ -183,8 +183,9 @@ actor HCCloudClient {
     func saveWorkout(_ workout: HCWorkout) async throws {
         let authenticated = try await authorizedToken()
         let bytes = try JSONEncoder().encode(workout)
-        guard let plan = try JSONSerialization.jsonObject(with: bytes) as? [String: Any]
+        guard var plan = try JSONSerialization.jsonObject(with: bytes) as? [String: Any]
         else { throw HCCloudError.malformedResponse }
+        plan["lastEditedBy"] = "iPhone"
         _ = try await send(path: "/rest/v1/health_coach_native_plans",
                            query: [URLQueryItem(name: "on_conflict", value: "user_id,workout_date")],
                            method: "POST",
