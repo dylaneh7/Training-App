@@ -1208,8 +1208,9 @@ private struct PremiumRecoveryPage: View {
                         }
                     }
                 }
-                HCSectionTitle(title: "Existing Tredict recovery")
-                if let result = coach.recoveryHistory.first {
+                HCSectionTitle(title: "Tredict / Garmin recovery history",
+                               detail: "\(coach.recoveryHistory.count) days")
+                ForEach(coach.recoveryHistory, id: \.date) { result in
                     HCCard {
                         VStack(alignment: .leading, spacing: 12) {
                             Text(result.date + " · " + result.source)
@@ -1230,9 +1231,10 @@ private struct PremiumRecoveryPage: View {
                             }
                         }
                     }
-                } else {
+                }
+                if coach.recoveryHistory.isEmpty {
                     HCCard {
-                        Text("Tredict history will appear when connected and synced.")
+                        Text("Tredict recovery will appear when the connected service has synced.")
                             .foregroundStyle(HCDesign.secondary)
                     }
                 }
@@ -1263,7 +1265,7 @@ private struct PremiumCoachPage: View {
     @AppStorage("hcWatchHaptics") private var watchHaptics = true
 
     private var export: String {
-        var lines = ["# Health Coach Training Export",
+        var lines = ["# IMUN Training Export",
                      "Aggressive progression: \(aggressive)",
                      "## Coach notes", notes, "## Strength"]
         for s in coach.performanceHistory.sorted(by: { $0.date > $1.date }).prefix(250) {
@@ -1299,9 +1301,9 @@ private struct PremiumCoachPage: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 19) {
-                PremiumHeader(eyebrow: "COACH / CONTROL CENTER",
-                              title: "Your game plan.",
-                              subtitle: "Preferences, feedback, exports and connections.")
+                PremiumHeader(eyebrow: "IMUN / SETTINGS",
+                              title: "Train with purpose.",
+                              subtitle: "Your training, your settings, your direction.")
                 HCCard(accent: HCDesign.electric) {
                     VStack(alignment: .leading, spacing: 11) {
                         HCAccentTag(title: "TRAINING INTELLIGENCE")
@@ -1316,6 +1318,19 @@ private struct PremiumCoachPage: View {
                         .tint(HCDesign.electric)
                         Text("Movement changes use conservative estimates, confidence labels, and your subsequent actual performance.")
                             .font(.caption2).foregroundStyle(HCDesign.secondary)
+                    }
+                }
+                HCCard {
+                    VStack(alignment: .leading, spacing: 7) {
+                        Text("SO RUN, THAT YE MAY OBTAIN.")
+                            .font(.system(size: 17, weight: .semibold, design: .serif))
+                            .foregroundStyle(HCDesign.ink)
+                        Text("1 Corinthians 9:24–27")
+                            .font(HCDesign.label(11))
+                            .foregroundStyle(HCDesign.electric)
+                        Text("Discipline in training. Purpose in every effort.")
+                            .font(.caption)
+                            .foregroundStyle(HCDesign.secondary)
                     }
                 }
                 HCSectionTitle(title: "Appearance", detail: "Pick your accent")
