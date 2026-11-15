@@ -215,6 +215,49 @@ enum HCPlanBuilder {
         }
     }
 
+    /// Upcoming real calendar items plus clearly labelled strength templates
+    /// from the established Health Coach rotation. Unsaved templates get a
+    /// synthetic ID and only become real planner events after the user moves one.
+    static func upcomingWithRotation(from planner: [String: Any],
+                                     starting today: Date = Date(),
+                                     daysAhead: Int = 30) -> [HCPlannedSession] {
+        let events = plannedSessions(from: planner)
+        var result = events
+        let dateItems = planner["items"] as? [[String: Any]] ?? []
+        for offset in 0..<max(0, daysAhead) {
+            guard let day = Calendar.current.date(byAdding: .day, value: offset,
+                                                    to: Calendar.current.startOfDay(for: today)),
+                  let session = sessionKey(for: day),
+                  !HCProgramCatalog.templates(for: session).isEmpty else { continue }
+            let iso = dateString(day)
+            let plannedHere = events.contains { $0.date == iso && $0.kind == "lift" }
+            let movedAway = dateItems.contains {
+                ($0["category"] as? String) == "workout"
+                    && ($0["type"] as? String)?.lowercased() == "lift"
+                    && ($0["imunOriginalDate"] as? String) == iso
+                    && ($0["date"] as? String) != iso
+            }
+            if plannedHere || movedAway { continue }
+            let kind = String(session.split(separator: "-").last ?? "")
+            let name: String
+            switch kind {
+            case "Mon": name = "Push — Strength"
+            case "Tue": name = "Pull — Strength"
+            case "Wed", "UpperThu": name = "Upper Support"
+            case "Thu", "LegsFri": name = "Legs — Strength"
+            case "SatUpper": name = "Full Upper — Return to Training"
+            default: name = "Strength"
+            }
+            result.append(HCPlannedSession(id: "rotation-\(iso)", date: iso,
+                                           title: name, kind: "lift-template",
+                                           notes: "Saved Health Coach strength rotation",
+                                           completed: false, originalDate: iso))
+        }
+        return result.sorted {
+            $0.date == $1.date ? $0.title < $1.title : $0.date < $1.date
+        }
+    }
+
     static func run(for date: Date, planner: [String: Any]) -> HCRunPlan? {
         let iso = dateString(date)
         let rows = planner["items"] as? [[String: Any]] ?? []
