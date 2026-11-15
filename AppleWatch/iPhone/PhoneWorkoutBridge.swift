@@ -359,14 +359,16 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
         }
         trainingActivities = unique
 
-        // Avoid merging dissimilar raw RMSSD and SDNN measurements. Tredict
-        // recovery entries are preferred on duplicate dates when connected.
-        var days = Set<String>()
+        // Retain independent sources on the same date. The Tredict Personal
+        // API and Command Center can provide different fields or provenance;
+        // an identical calendar day does not make their readings equivalent.
+        var measurements = Set<String>()
         var combined: [HCRecoveryDatum] = []
-        for measurement in (tredictSnapshot.recovery + cloudRecoveryHistory)
+        for reading in (tredictSnapshot.recovery + cloudRecoveryHistory)
             .sorted(by: { $0.date > $1.date }) {
-            if days.insert(measurement.date).inserted {
-                combined.append(measurement)
+            let key = reading.date + ":" + reading.source
+            if measurements.insert(key).inserted {
+                combined.append(reading)
             }
         }
         recoveryHistory = combined
