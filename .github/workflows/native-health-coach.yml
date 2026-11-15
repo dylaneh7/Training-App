@@ -36,6 +36,14 @@ jobs:
             -destination 'generic/platform=iOS Simulator' \
             CODE_SIGNING_ALLOWED=NO \
             | tee /tmp/healthcoach-build.log
+      - name: Test strength progression conversions
+        run: |
+          swiftc \
+            AppleWatch/Shared/WorkoutModels.swift \
+            AppleWatch/Shared/ProgramCatalog.swift \
+            AppleWatch/Tests/main.swift \
+            -o /tmp/health-coach-progression-tests
+          /tmp/health-coach-progression-tests
       - name: Build Apple Watch app
         run: |
           set -o pipefail
