@@ -9,6 +9,7 @@ struct PremiumHomeView: View {
     @State private var selectedDate = Date()
     @StateObject private var appleHealth = HCAppleHealthReader()
     @StateObject private var runImporter = HCRunHealthImporter()
+    @AppStorage("hcAccentStyle") private var accentStyle = "crimson"
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
@@ -34,6 +35,10 @@ struct PremiumHomeView: View {
             if phase == .active { runImporter.startIfAuthorized() }
         }
         .onChange(of: selectedDate) { _, value in coach.refresh(date: value) }
+        .onChange(of: accentStyle) { _, _ in
+            configureTabAppearance()
+            coach.sendToWatch()
+        }
         .onAppear {
             if coach.signedIn && coach.workout == nil { coach.refresh(date: selectedDate) }
             configureTabAppearance()
@@ -1092,6 +1097,10 @@ private struct PremiumCoachPage: View {
     @AppStorage("hcAggressiveProgression") private var aggressive = true
     @AppStorage("hcCoachingNotes") private var notes = ""
     @AppStorage("hcIncludeRecoveryExport") private var includeRecovery = false
+    @AppStorage("hcAccentStyle") private var accentStyle = "crimson"
+    @AppStorage("hcWeightIncrement") private var weightIncrement = 5.0
+    @AppStorage("hcRestOverrideSeconds") private var restOverride = 0
+    @AppStorage("hcWatchHaptics") private var watchHaptics = true
 
     private var export: String {
         var lines = ["# Health Coach Training Export",
@@ -1149,6 +1158,60 @@ private struct PremiumCoachPage: View {
                             .font(.caption2).foregroundStyle(HCDesign.secondary)
                     }
                 }
+                HCSectionTitle(title: "Appearance", detail: "Pick your accent")
+                HCCard {
+                    VStack(alignment: .leading, spacing: 14) {
+                        HStack(spacing: 10) {
+                            Image(systemName: "paintpalette.fill")
+                                .font(.title2)
+                                .foregroundStyle(HCDesign.electric)
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text("YOUR LOOK").font(HCDesign.label(11)).tracking(1)
+                                Text("Crimson + White by default")
+                                    .font(.caption).foregroundStyle(HCDesign.secondary)
+                            }
+                        }
+                        HStack(spacing: 9) {
+                            accentTile(id: "crimson", name: "Crimson",
+                                       tint: Color(red: 0.83, green: 0.20, blue: 0.31))
+                            accentTile(id: "white", name: "White", tint: .white)
+                            accentTile(id: "lime", name: "Lime",
+                                       tint: Color(red: 0.76, green: 0.98, blue: 0.43))
+                            accentTile(id: "aqua", name: "Aqua",
+                                       tint: Color(red: 0.41, green: 0.85, blue: 0.82))
+                        }
+                        Text("The dark background and clear white typography stay consistent. Accent choices sync to your Apple Watch.")
+                            .font(.caption2).foregroundStyle(HCDesign.secondary)
+                    }
+                }
+                HCSectionTitle(title: "Workout controls")
+                HCCard {
+                    VStack(alignment: .leading, spacing: 15) {
+                        Picker("Weight step", selection: $weightIncrement) {
+                            Text("2.5 lb").tag(2.5)
+                            Text("5 lb").tag(5.0)
+                            Text("10 lb").tag(10.0)
+                        }
+                        .tint(HCDesign.electric)
+                        Divider().overlay(HCDesign.outline)
+                        Picker("Rest after a set", selection: $restOverride) {
+                            Text("Use workout plan").tag(0)
+                            Text("60 sec").tag(60)
+                            Text("90 sec").tag(90)
+                            Text("2 min").tag(120)
+                            Text("3 min").tag(180)
+                        }
+                        .tint(HCDesign.electric)
+                        Divider().overlay(HCDesign.outline)
+                        Toggle("Haptic alerts on the Watch", isOn: $watchHaptics)
+                            .tint(HCDesign.electric)
+                        Text("Changes are saved automatically and sent to your Watch when paired.")
+                            .font(.caption2).foregroundStyle(HCDesign.secondary)
+                    }
+                }
+                .onChange(of: weightIncrement) { _, _ in coach.sendToWatch() }
+                .onChange(of: restOverride) { _, _ in coach.sendToWatch() }
+                .onChange(of: watchHaptics) { _, _ in coach.sendToWatch() }
                 HCSectionTitle(title: "Your coaching notes")
                 HCCard {
                     VStack(alignment: .leading, spacing: 12) {
@@ -1214,4 +1277,39 @@ private struct PremiumCoachPage: View {
         .hcPage()
         .navigationBarTitleDisplayMode(.inline)
     }
+    @ViewBuilder
+    private func accentTile(id: String, name: String, tint: Color) -> some View {
+        Button {
+            accentStyle = id
+            coach.sendToWatch()
+        } label: {
+            VStack(spacing: 7) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 13)
+                        .fill(HCDesign.raised)
+                    Circle().fill(tint)
+                        .frame(width: 23, height: 23)
+                    if accentStyle == id {
+                        Image(systemName: "checkmark")
+                            .font(.system(size: 12, weight: .heavy))
+                            .foregroundStyle(id == "crimson" ? .white : HCDesign.canvas)
+                    }
+                }
+                .frame(height: 52)
+                .overlay {
+                    RoundedRectangle(cornerRadius: 13)
+                        .strokeBorder(accentStyle == id ? tint : HCDesign.outline,
+                                      lineWidth: accentStyle == id ? 2 : 1)
+                }
+                Text(name)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(HCDesign.ink)
+            }
+            .frame(maxWidth: .infinity)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(name + " accent color")
+        .accessibilityAddTraits(accentStyle == id ? [.isSelected] : [])
+    }
+
 }
