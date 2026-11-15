@@ -137,9 +137,13 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
             do {
                 let snapshot = try await cloud.fetchPlannerAndHistory()
                 let dateText = HCPlanBuilder.dateString(date)
-                let watchHistory = (try? await cloud.fetchWatchPerformance(before:dateText)) ?? []
-                let history = HCPlanBuilder.performanceHistory(from:snapshot.history,before:date)
-                    + watchHistory
+                // Progress always includes the entire recorded history, even
+                // when the user browses an earlier date. Suggestions are date-
+                // filtered separately in suggestion(for:on:).
+                let futureBoundary = HCPlanBuilder.startOfDate("2099-01-01") ?? Date()
+                let watchHistory = (try? await cloud.fetchWatchPerformance(before:"2099-01-01")) ?? []
+                let history = HCPlanBuilder.performanceHistory(
+                    from:snapshot.history,before:futureBoundary) + watchHistory
                 let saved = try? await cloud.fetchPublishedPlan(date:dateText)
                 let baseline = saved ?? HCPlanBuilder.workout(for:date,planner:snapshot.planner,
                                                               history:snapshot.history)
