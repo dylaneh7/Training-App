@@ -7,6 +7,7 @@
   const storageKey='hybrid-coach-command-center-auth';
   const offset={Mon:0,Tue:1,Wed:2,Thu:3,Fri:4,Sat:5,Sun:6,RestWed:2,UpperThu:3,LegsFri:4,SatUpper:5};
   let client=null,timer=null,busy=false,lastSuccess='',lastAttempt='';
+  const explicitlyChangedDays=new Set();
   const clean=x=>String(x||'').trim();
   function isoDate(){
     const week=Number(document.getElementById('week')?.value||0);
@@ -84,6 +85,15 @@
       const {data:{session},error:authError}=await client.auth.getSession();
       if(authError)throw authError;
       if(!session?.user?.id){lastAttempt='';return;}
+      const {data:existing,error:readError}=await client.from('health_coach_native_plans')
+        .select('plan').eq('user_id',session.user.id).eq('workout_date',plan.date)
+        .maybeSingle();
+      if(readError)throw readError;
+      if(existing?.plan?.lastEditedBy==='iPhone'&&!explicitlyChangedDays.has(plan.date)){
+        lastSuccess=signature;
+        return;
+      }
+      plan.lastEditedBy='Web';
       const {error}=await client.from('health_coach_native_plans').upsert({
         user_id:session.user.id,workout_date:plan.date,plan,updated_at:new Date().toISOString()
       },{onConflict:'user_id,workout_date'});
@@ -97,12 +107,15 @@
   function schedule(ms=1100){clearTimeout(timer);timer=setTimeout(publish,ms)}
   function start(){
     document.addEventListener('change',e=>{
+      if(e.isTrusted&&e.target?.closest?.('#exercises'))explicitlyChangedDays.add(isoDate());
       if(e.target?.closest?.('#week,#day,#exercises'))schedule(1300);
     },true);
     document.addEventListener('input',e=>{
+      if(e.isTrusted&&e.target?.closest?.('#exercises'))explicitlyChangedDays.add(isoDate());
       if(e.target?.closest?.('#exercises'))schedule(1800);
     },true);
     document.addEventListener('click',e=>{
+      if(e.isTrusted&&e.target?.closest?.('#exercises button,#hcEditExercises,.hc-edit-btn'))explicitlyChangedDays.add(isoDate());
       if(e.target?.closest?.('.weekBtn,.tab,#hcBackToday,#hcOverviewToday,#hcOpenNextWorkout'))schedule(2000);
     },true);
     const root=document.getElementById('exercises')?.parentElement||document.getElementById('workout');
