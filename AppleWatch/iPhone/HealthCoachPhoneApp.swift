@@ -6,7 +6,7 @@ struct HealthCoachPhoneApp: App {
 
     var body: some Scene {
         WindowGroup {
-            PhoneContentView()
+            PremiumHomeView()
                 .environmentObject(bridge)
         }
     }
