@@ -251,8 +251,8 @@
 				000000000000000000000023,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
-			dstPath = "$(CONTENTS_FOLDER_PATH)/Watch";
-			dstSubfolderSpec = 16;
+			dstPath = "";
+			dstSubfolderSpec = 13;
 			name = "Embed Watch Content";
 		};
 		000000000000000000000028 = {
