@@ -198,7 +198,8 @@ private struct PremiumStrengthPage: View {
                                 }
                             }
                             if let entry = coach.plannedSessions.first(where: {
-                                $0.date == HCPlanBuilder.dateString(date) && $0.kind == "lift"
+                                $0.date == HCPlanBuilder.dateString(date) &&
+                                     ($0.kind == "lift" || $0.kind == "lift-template")
                             }) {
                                 HCOutlineButton(title: "Move this workout", icon: "calendar.badge.clock") {
                                     movingSession = entry
@@ -922,7 +923,8 @@ private struct IMUNMoveWorkoutSheet: View {
             Form {
                 Section("Workout") {
                     Text(entry.title).font(.headline)
-                    LabeledContent("Type", value: entry.kind.capitalized)
+                    LabeledContent("Type", value: entry.kind == "lift-template" ?
+                                   "Strength rotation" : entry.kind.capitalized)
                     LabeledContent("Current date", value: entry.date)
                 }
                 Section("Reschedule") {
@@ -1066,7 +1068,7 @@ private struct PremiumProgressPage: View {
                                         .font(HCDesign.label(11))
                                         .foregroundStyle(HCDesign.electric)
                                     Spacer()
-                                    Text(entry.kind.uppercased())
+                                    Text(entry.kind == "lift-template" ? "STRENGTH · ROTATION" : entry.kind.uppercased())
                                         .font(HCDesign.label(10))
                                         .foregroundStyle(HCDesign.secondary)
                                 }
