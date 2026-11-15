@@ -290,7 +290,15 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
             var context:[String:Any] = [:]
             if let workout {context[HCPayload.workout] = try encoder.encode(workout)}
             if let runPlan {context[HCPayload.runPlan] = try encoder.encode(runPlan)}
-            context[HCPayload.runHistory] = try encoder.encode(Array(runHistory.prefix(12)))
+            // Keep GPS coordinates and high-volume HR traces on the iPhone.
+            // The Watch receives only compact source-labeled summaries.
+            let watchRuns = runHistory.prefix(12).map { source -> HCProgressRun in
+                var summary = source
+                summary.heartRateTrace = []
+                summary.routePoints = []
+                return summary
+            }
+            context[HCPayload.runHistory] = try encoder.encode(watchRuns)
             if !context.isEmpty {
                 try connection.updateApplicationContext(context)
                 status = "Workout and run sent or queued for watch."
