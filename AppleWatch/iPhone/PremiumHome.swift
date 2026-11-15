@@ -1237,7 +1237,7 @@ private struct PremiumCoachPage: View {
                                 Image(systemName: "arrow.up.right")
                             }
                             .font(.system(size: 14, weight: .bold, design: .rounded))
-                            .foregroundStyle(HCDesign.canvas)
+                            .foregroundStyle(HCDesign.onAccent)
                             .padding(16)
                             .background(HCDesign.electric, in: RoundedRectangle(cornerRadius: 14))
                         }
