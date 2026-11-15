@@ -69,6 +69,7 @@
     setTimeout(()=>loadScript('./recovery-auto.js?v=2','data-hybrid-recovery-auto'),1300);
     setTimeout(()=>loadScript('./native-plan-publisher.js?v=2','data-hc-native-plan-publisher'),2100);
     setTimeout(()=>loadScript('./watch-set-bridge.js?v=1','data-hc-watch-set-bridge'),2300);
+    setTimeout(()=>loadScript('./daily-activity-log.js?v=1','data-hc-daily-activity'),2500);
   }
 
   document.addEventListener('change',e=>{
