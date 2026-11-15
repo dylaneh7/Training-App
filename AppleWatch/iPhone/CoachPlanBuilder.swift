@@ -129,6 +129,76 @@ enum HCPlanBuilder {
 
     static func identity(for movement: String) -> String { HCProgramCatalog.identity(for: movement) }
 
+    static func performanceHistory(from state: [String: Any], before date: Date) -> [HCPerformanceSet] {
+        let days = state["days"] as? [String: [String: Any]] ?? [:]
+        let extras = ((state["exerciseExtras"] as? [String: Any])?["days"] as? [String: [String: Any]]) ?? [:]
+        let layouts = ((state["exerciseLayout"] as? [String: Any])?["days"] as? [String: [String: Any]]) ?? [:]
+        let beforeISO = dateString(date)
+        var result: [HCPerformanceSet] = []
+
+        for (session, data) in days {
+            let parts = session.split(separator: "-")
+            guard parts.count == 2, let week = Int(parts[0]),
+                  let calendarDate = dateFor(week: week, day: String(parts[1])),
+                  calendarDate < beforeISO else { continue }
+            let choices = data["choice"] as? [String: String] ?? [:]
+            let templates = HCProgramCatalog.templates(for: session)
+            let saved = data["sets"] as? [String: [String: Any]] ?? [:]
+            for (i, t) in templates.enumerated() {
+                let name = choices[String(i)] ?? t.name
+                for (key, values) in saved where key.hasPrefix("\(i)-") {
+                    guard let w = number(values["w"]), w > 0,
+                          let r = number(values["r"]), r >= 1, r <= 20 else { continue }
+                    let rir = number(values["rir"])
+                    result.append(.init(exercise: name, weightLb: w, reps: Int(r),
+                                        rir: (rir != nil && rir! >= 0 && rir! <= 6) ? rir : nil,
+                                        date: calendarDate))
+                }
+            }
+            let day = String(parts[1])
+            let mapped = day == "UpperThu" ? "Wed" : day == "LegsFri" ? "Thu" : day
+            let defs = layouts[mapped]?["custom"] as? [[String: Any]] ?? []
+            for (customID, value) in (extras[session] ?? [:]) {
+                guard let def = defs.first(where: { ($0["id"] as? String) == customID }),
+                      let name = def["name"] as? String,
+                      let rows = (value as? [String: Any])?["sets"] as? [String: [String: Any]]
+                else { continue }
+                for (_, set) in rows {
+                    guard let w = number(set["w"]), w > 0,
+                          let r = number(set["r"]), r >= 1, r <= 20 else { continue }
+                    result.append(.init(exercise: name, weightLb: w, reps: Int(r),
+                                        rir: number(set["rir"]), date: calendarDate))
+                }
+            }
+        }
+        return result
+    }
+
+    static func run(for date: Date, planner: [String: Any]) -> HCRunPlan? {
+        let iso = dateString(date)
+        let rows = planner["items"] as? [[String: Any]] ?? []
+        guard let item = rows.first(where: {
+            ($0["date"] as? String) == iso &&
+            ($0["category"] as? String) == "workout" &&
+            ($0["type"] as? String)?.lowercased() == "run"
+        }) else { return nil }
+        let title = item["title"] as? String ?? "Run"
+        let notes = item["notes"] as? String ?? ""
+        let expression = try? NSRegularExpression(pattern: #"(\d+(?:\.\d+)?)\s*(miles?|mi|km)\b"#,
+                                                   options: .caseInsensitive)
+        var distance: Double? = nil
+        if let match = expression?.firstMatch(in: title + " " + notes,
+                                              range: NSRange((title + " " + notes).startIndex...,
+                                                             in: title + " " + notes)),
+           let range = Range(match.range(at: 1), in: title + " " + notes) {
+            distance = Double(String((title + " " + notes)[range]))
+            if (title + " " + notes).lowercased().contains(" km") { distance = distance.map { $0 / 1.609344 } }
+        }
+        return HCRunPlan(id:item["id"] as? String ?? iso + "-run",
+                         date:iso, title:title, notes:notes,
+                         targetDistanceMiles:distance, isCompleted:item["completed"] as? Bool ?? false)
+    }
+
     private static func number(_ value: Any?) -> Double? {
         if let value = value as? NSNumber { return value.doubleValue }
         if let value = value as? String { return Double(value) }
