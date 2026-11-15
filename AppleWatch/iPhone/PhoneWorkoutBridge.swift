@@ -38,6 +38,10 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
     private var uploadedIDs: Set<UUID> = []
     private var syncingQueue = false
     private var pendingEditedWorkout: HCWorkout?
+    // A plan is authoritative only after today's Command Center refresh succeeds.
+    private var confirmedScheduleDate: String?
+    private var refreshGeneration = 0
+    private var scheduleRefreshing = false
 
     private var directory: URL {
         FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
@@ -157,6 +161,10 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
     func logout() {
         Task { await cloud.signOut() }
         signedIn = false
+        confirmedScheduleDate = nil
+        workout = nil
+        runPlan = nil
+        sendToWatch() // Prevent a different account's cached plan persisting on Watch.
         status = "Signed out. Local workouts and sets are preserved."
     }
 
@@ -189,12 +197,14 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
 
     func refresh(date: Date) {
         guard signedIn else { status = "Sign in to load your plan."; return }
+        let dateText = HCPlanBuilder.dateString(date)
+        refreshGeneration += 1
+        let generation = refreshGeneration
         loading = true
         status = "Refreshing workouts and training history…"
         Task {
             do {
                 let snapshot = try await cloud.fetchPlannerAndHistory()
-                let dateText = HCPlanBuilder.dateString(date)
                 // Progress always includes the entire recorded history, even
                 // when the user browses an earlier date. Suggestions are date-
                 // filtered separately in suggestion(for:on:).
@@ -215,6 +225,14 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
                 let activities = (try? await cloud.fetchActivityHistory()) ?? []
 
                 DispatchQueue.main.async {
+                    // Ignore stale/out-of-order responses and midnight rollovers.
+                    guard generation == self.refreshGeneration else { return }
+                    guard dateText == HCPlanBuilder.dateString(Date()) else {
+                        self.loading = false
+                        self.refresh(date: Date())
+                        return
+                    }
+                    self.confirmedScheduleDate = dateText
                     self.workout = active
                     self.runPlan = run
                     self.plannedSessions = HCPlanBuilder.upcomingWithRotation(from: snapshot.planner)
@@ -242,9 +260,46 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
                 }
             } catch {
                 DispatchQueue.main.async {
+                    guard generation == self.refreshGeneration else { return }
                     self.loading = false
                     self.status = "Unable to refresh: \(error.localizedDescription)"
                     self.retryPendingCloudSets()
+                }
+            }
+        }
+    }
+
+    /// Lightweight calendar check for interactive Watch refresh and foreground
+    /// polling. Unlike full refresh, this does not re-download all historical
+    /// runs, recovery and recorded sets every minute.
+    func refreshTodaySchedule() {
+        guard signedIn, !loading, !scheduleRefreshing else { return }
+        scheduleRefreshing = true
+        let day = HCPlanBuilder.dateString(Date())
+        Task {
+            do {
+                let snapshot = try await cloud.fetchPlannerAndHistory()
+                let published = try? await cloud.fetchPublishedPlan(date: day)
+                DispatchQueue.main.async {
+                    self.scheduleRefreshing = false
+                    guard day == HCPlanBuilder.dateString(Date()), !self.loading else { return }
+                    let baseline = published ?? HCPlanBuilder.workout(
+                        for: Date(), planner: snapshot.planner, history: snapshot.history)
+                    self.workout = self.pendingEditedWorkout?.date == day
+                        ? self.pendingEditedWorkout
+                        : baseline.map { self.smartTargets($0,
+                                                history: self.performanceHistory,
+                                                preserveExisting: published != nil) }
+                    self.runPlan = HCPlanBuilder.run(for: Date(), planner: snapshot.planner)
+                    self.plannedSessions = HCPlanBuilder.upcomingWithRotation(from: snapshot.planner)
+                    self.save(self.plannedSessions, name: "imun-planned-workouts.json")
+                    self.confirmedScheduleDate = day
+                    self.sendToWatch()
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    self.scheduleRefreshing = false
+                    self.status = "Calendar refresh failed; last confirmed plan preserved."
                 }
             }
         }
@@ -296,6 +351,7 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
 
     func saveEditedWorkout(_ plan: HCWorkout) {
         workout = plan
+        if plan.date == HCPlanBuilder.dateString(Date()) { confirmedScheduleDate = plan.date }
         pendingEditedWorkout = plan
         save(plan,name:"pending-edited-workout.json")
         status = "Workout saved locally; syncing to watch and cloud…"
@@ -420,37 +476,44 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
         }
     }
 
+    /// Only one dated snapshot describes today's plan for BOTH devices.
+    /// Never send a previously selected day's workout as today's Watch plan.
+    private func watchContext() throws -> [String: Any] {
+        let today = HCPlanBuilder.dateString(Date())
+        let state = !signedIn ? "signedOut" :
+            confirmedScheduleDate == today ? "ready" : "loading"
+        let snapshot = HCWatchSchedule(
+            date: today,
+            workout: state == "ready" && workout?.date == today ? workout : nil,
+            runPlan: state == "ready" && runPlan?.date == today ? runPlan : nil,
+            generatedAt: Date(),
+            state: state
+        )
+        var context: [String: Any] = [HCPayload.schedule: try encoder.encode(snapshot)]
+        let prefs = UserDefaults.standard
+        context[HCPayload.accentStyle] = prefs.string(forKey:"hcAccentStyle") ?? "crimson"
+        context[HCPayload.weightIncrement] = prefs.object(forKey:"hcWeightIncrement") as? Double ?? 5.0
+        context[HCPayload.restOverride] = prefs.integer(forKey:"hcRestOverrideSeconds")
+        context[HCPayload.watchHaptics] = prefs.object(forKey:"hcWatchHaptics") as? Bool ?? true
+        // Only compact summaries go to Watch; raw HR traces and GPS stay on phone.
+        let summaries = runHistory.prefix(12).map { source -> HCProgressRun in
+            var result = source
+            result.heartRateTrace = []
+            result.routePoints = []
+            return result
+        }
+        context[HCPayload.runHistory] = try encoder.encode(summaries)
+        return context
+    }
+
     func sendToWatch() {
         guard WCSession.isSupported() else { return }
         let connection = WCSession.default
         guard connection.activationState == .activated,
-              connection.isPaired, connection.isWatchAppInstalled else {
-            status = "Install the Health Coach watch companion, then send again."
-            return
-        }
+              connection.isPaired, connection.isWatchAppInstalled else { return }
         do {
-            var context:[String:Any] = [:]
-            if let workout {context[HCPayload.workout] = try encoder.encode(workout)}
-            if let runPlan {context[HCPayload.runPlan] = try encoder.encode(runPlan)}
-            // Preferences are lightweight and shared when the current plan is sent.
-            let prefs = UserDefaults.standard
-            context[HCPayload.accentStyle] = prefs.string(forKey: "hcAccentStyle") ?? "crimson"
-            context[HCPayload.weightIncrement] = prefs.object(forKey: "hcWeightIncrement") as? Double ?? 5.0
-            context[HCPayload.restOverride] = prefs.integer(forKey: "hcRestOverrideSeconds")
-            context[HCPayload.watchHaptics] = prefs.object(forKey: "hcWatchHaptics") as? Bool ?? true
-            // Keep GPS coordinates and high-volume HR traces on the iPhone.
-            // The Watch receives only compact source-labeled summaries.
-            let watchRuns = runHistory.prefix(12).map { source -> HCProgressRun in
-                var summary = source
-                summary.heartRateTrace = []
-                summary.routePoints = []
-                return summary
-            }
-            context[HCPayload.runHistory] = try encoder.encode(watchRuns)
-            if !context.isEmpty {
-                try connection.updateApplicationContext(context)
-                status = "Workout and run sent or queued for watch."
-            }
+            try connection.updateApplicationContext(watchContext())
+            status = "Today's iPhone schedule sent to Watch."
         } catch {
             status = "Watch transfer failed: \(error.localizedDescription)"
         }
@@ -608,6 +671,46 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
                 self.status = "Watch not ready: \(error.localizedDescription)"
             }
         }
+    }
+
+    func session(_ session: WCSession, didReceiveMessage message: [String: Any],
+                 replyHandler: @escaping ([String: Any]) -> Void) {
+        guard let kind = message[HCPayload.kind] as? String else {
+            replyHandler([:]); return
+        }
+        if kind == HCPayload.requestSchedule {
+            DispatchQueue.main.async {
+                // A quick reply repairs the Watch UI; the cloud refresh that follows
+                // sends a new application context if the schedule changed elsewhere.
+                replyHandler((try? self.watchContext()) ?? [:])
+                if self.signedIn && !self.loading { self.refreshTodaySchedule() }
+            }
+            return
+        }
+        // Interactive WatchConnectivity immediately mirrors recorded sets/runs
+        // when reachable. transferUserInfo still backs up every item for offline use.
+        if let payload = message[HCPayload.data] as? Data {
+            switch kind {
+            case HCPayload.loggedSet:
+                if let item = try? decoder.decode(HCLoggedSet.self, from: payload) {
+                    DispatchQueue.main.async {
+                        self.acceptSet(item)
+                        replyHandler(["saved": true])
+                    }
+                    return
+                }
+            case HCPayload.completedRun:
+                if let item = try? decoder.decode(HCRunFinished.self, from: payload) {
+                    DispatchQueue.main.async {
+                        self.acceptRun(item)
+                        replyHandler(["saved": true])
+                    }
+                    return
+                }
+            default: break
+            }
+        }
+        replyHandler(["saved": false])
     }
 
     func sessionDidBecomeInactive(_ session: WCSession) {}
