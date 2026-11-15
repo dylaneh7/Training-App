@@ -186,6 +186,30 @@ private struct WQuickEditor: View {
     }
 }
 
+private struct WProgressHalo: View {
+    let completed: Int
+    let planned: Int
+    var body: some View {
+        ZStack {
+            Circle().stroke(WTheme.panel, lineWidth: 8)
+            Circle()
+                .trim(from: 0, to: planned > 0 ?
+                      min(1, Double(completed) / Double(planned)) : 0)
+                .stroke(WTheme.lime, style: StrokeStyle(lineWidth: 8, lineCap: .round))
+                .rotationEffect(.degrees(-90))
+            VStack(spacing: 1) {
+                Text(planned > 0 ? "\(min(completed, planned))" : "—")
+                    .font(WTheme.metric(22))
+                    .foregroundStyle(.white)
+                Text(planned > 0 ? "OF \(planned)" : "SETS")
+                    .font(WTheme.label(8)).foregroundStyle(WTheme.muted)
+            }
+        }
+        .frame(width: 78, height: 78)
+        .accessibilityLabel("\(completed) of \(planned) planned strength sets completed")
+    }
+}
+
 /// A List-based navigation hub fixes the page-gesture / scrolling conflict on
 /// watchOS. Large Strength and Run targets are immediately reachable.
 struct WatchWorkoutView: View {
@@ -197,15 +221,34 @@ struct WatchWorkoutView: View {
         NavigationStack {
             List {
                 Section {
-                    VStack(alignment: .leading, spacing: 5) {
-                        Text("imun")
-                            .font(WTheme.label(10))
-                            .tracking(2)
-                            .foregroundStyle(WTheme.aqua)
-                        Text("TRAIN WITH PURPOSE")
-                            .font(.system(size: 18, weight: .heavy, design: .rounded))
+                    HStack(alignment: .center, spacing: 13) {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("I M U N")
+                                .font(WTheme.label(10))
+                                .tracking(3)
+                                .foregroundStyle(WTheme.aqua)
+                            Text("Make it\ncount.")
+                                .font(.system(size: 22, weight: .heavy, design: .rounded))
+                                .tracking(-0.6)
+                                .foregroundStyle(.white)
+                            Text(Date().formatted(.dateTime.weekday(.abbreviated).day()))
+                                .font(WTheme.label(10)).foregroundStyle(WTheme.muted)
+                        }
+                        Spacer(minLength: 0)
+                        WProgressHalo(
+                            completed: store.sets.filter {
+                                $0.workoutID == store.workout.id
+                            }.count,
+                            planned: store.hasScheduledLift ?
+                                store.workout.prescribedSetCount : 0)
                     }
-                    .listRowBackground(WTheme.bg)
+                    .padding(.vertical, 9)
+                    .listRowBackground {
+                        RoundedRectangle(cornerRadius: 18)
+                            .fill(LinearGradient(colors:
+                                [WTheme.lime.opacity(0.27), WTheme.panel],
+                                startPoint: .topLeading, endPoint: .bottomTrailing))
+                    }
 
                     NavigationLink {
                         WatchStrengthScreen()
@@ -237,6 +280,33 @@ struct WatchWorkoutView: View {
                         }
                         Button("Refresh from iPhone") { store.requestCurrentSchedule() }
                             .font(.system(size: 11))
+                    }
+                }
+                if let recovery = store.recoverySummary {
+                    Section("RECOVERY SIGNALS") {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text(recovery.source + " · " + recovery.date)
+                                .font(WTheme.label(10)).foregroundStyle(WTheme.muted)
+                            HStack(spacing: 14) {
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text("HRV · RMSSD")
+                                        .font(WTheme.label(9)).foregroundStyle(WTheme.muted)
+                                    Text(recovery.hrvMS.map { String(format: "%.0f", $0) } ?? "—")
+                                        .font(WTheme.metric(23)).foregroundStyle(WTheme.aqua)
+                                }
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text("SLEEP")
+                                        .font(WTheme.label(9)).foregroundStyle(WTheme.muted)
+                                    Text(recovery.sleepSeconds.map {
+                                        String(format: "%.1fh", $0 / 3600)
+                                    } ?? "—")
+                                        .font(WTheme.metric(23)).foregroundStyle(.white)
+                                }
+                            }
+                            Text("See personal baselines and alerts on iPhone.")
+                                .font(.system(size: 10)).foregroundStyle(WTheme.muted)
+                        }
+                        .listRowBackground(WTheme.panel)
                     }
                 }
                 Section("PREFERENCES") {
