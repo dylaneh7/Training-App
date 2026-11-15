@@ -5,7 +5,17 @@ private enum WTheme {
     static let bg = Color(red: 0.025, green: 0.047, blue: 0.065)
     static let panel = Color(red: 0.085, green: 0.115, blue: 0.145)
     static let muted = Color(red: 0.61, green: 0.70, blue: 0.73)
-    static let lime = Color(red: 0.76, green: 0.98, blue: 0.43)
+    static var lime: Color {
+        switch UserDefaults.standard.string(forKey: "hcAccentStyle") ?? "crimson" {
+        case "lime": return Color(red: 0.76, green: 0.98, blue: 0.43)
+        case "aqua": return Color(red: 0.41, green: 0.85, blue: 0.82)
+        case "white": return .white
+        default: return Color(red: 0.83, green: 0.20, blue: 0.31)
+        }
+    }
+    static var onAccent: Color {
+        (UserDefaults.standard.string(forKey: "hcAccentStyle") ?? "crimson") == "crimson" ? .white : bg
+    }
     static let aqua = Color(red: 0.41, green: 0.85, blue: 0.82)
     static let amber = Color(red: 1.0, green: 0.7, blue: 0.35)
 
@@ -34,7 +44,7 @@ private struct WPrimary: View {
                 .font(.system(size: 16, weight: .bold, design: .rounded))
                 .lineLimit(2)
                 .multilineTextAlignment(.center)
-                .foregroundStyle(WTheme.bg)
+                .foregroundStyle(color == WTheme.lime ? WTheme.onAccent : WTheme.bg)
                 .frame(maxWidth: .infinity, minHeight: 65)
                 .padding(.horizontal, 4)
                 .background(color, in: RoundedRectangle(cornerRadius: 15))
@@ -122,6 +132,7 @@ private struct WStepper: View {
 /// watchOS. Large Strength and Run targets are immediately reachable.
 struct WatchWorkoutView: View {
     @EnvironmentObject private var store: WatchWorkoutStore
+    @AppStorage("hcAccentStyle") private var accent = "crimson"
 
     var body: some View {
         NavigationStack {
@@ -153,6 +164,14 @@ struct WatchWorkoutView: View {
                     }
                     .listRowBackground(WTheme.panel)
                 }
+                Section("PREFERENCES") {
+                    NavigationLink {
+                        WatchPreferences()
+                    } label: {
+                        Label("APPEARANCE & CONTROLS", systemImage: "slider.horizontal.3")
+                            .font(.system(size: 12, weight: .bold))
+                    }
+                }
                 Section("YOUR TRAINING") {
                     if let latest = store.runHistory.first {
                         NavigationLink {
@@ -183,6 +202,7 @@ struct WatchWorkoutView: View {
         }
         .tint(WTheme.lime)
         .preferredColorScheme(.dark)
+        .id(accent)
     }
 }
 
@@ -213,243 +233,416 @@ private struct WDestination: View {
     }
 }
 
-// MARK: - Strength
+// MARK: - Guided Strength: one obvious action and automatic set progression
+
+private func wHaptic(_ type: WKHapticType) {
+    if UserDefaults.standard.object(forKey: "hcWatchHaptics") as? Bool ?? true {
+        WKInterfaceDevice.current().play(type)
+    }
+}
 
 private struct WatchStrengthScreen: View {
     @EnvironmentObject private var store: WatchWorkoutStore
     @EnvironmentObject private var health: WatchHealthSession
     @State private var confirmFinish = false
 
-    private var completed: Int {
-        store.workout.exercises.reduce(0) { $0 + store.completedSets(for: $1).count }
-    }
-
     var body: some View {
-        List {
-            Section {
-                VStack(alignment: .leading, spacing: 7) {
-                    Text(store.workout.title)
-                        .font(.system(size: 19, weight: .heavy, design: .rounded))
-                    Text("\(store.workout.exercises.count) MOVEMENTS")
-                        .font(WTheme.label(10)).foregroundStyle(WTheme.muted)
-                }
-                .listRowBackground(WTheme.bg)
-
-                TimelineView(.periodic(from: .now, by: 1)) { time in
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("WORKOUT TIME")
-                            .font(WTheme.label(10)).foregroundStyle(WTheme.muted)
-                        Text(wClock(store.liftClock?.duration(at: time.date) ?? 0))
-                            .font(WTheme.metric(37))
-                            .foregroundStyle(WTheme.lime)
-                        Text("\(completed) / \(store.workout.prescribedSetCount) SETS")
-                            .font(WTheme.label(10))
-                            .foregroundStyle(WTheme.muted)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                .listRowBackground(WTheme.panel)
-
-                if store.liftClock?.isActive == true {
-                    if store.liftClock?.isPaused == true {
-                        WPrimary(title: "RESUME WORKOUT", symbol: "play.fill") {
-                            store.resumeLifting()
-                            health.resume()
-                        }
-                    } else {
-                        WSecondary(title: "PAUSE WORKOUT", symbol: "pause.fill") {
-                            store.pauseLifting()
-                            health.pause()
-                        }
-                    }
-                    WPrimary(title: "FINISH WORKOUT", symbol: "flag.checkered",
-                             color: WTheme.amber) {
-                        confirmFinish = true
-                    }
-                    .disabled(store.liftClock?.setStartedAt != nil)
-                } else {
-                    WPrimary(title: "START WORKOUT", symbol: "play.fill") {
-                        store.startLifting()
-                        health.start(kind: .strength)
-                        WKInterfaceDevice.current().play(.start)
-                    }
-                }
-            }
-
-            Section("EXERCISES · TAP TO LOG") {
-                ForEach(store.workout.exercises.indices, id: \.self) { index in
-                    let exercise = store.workout.exercises[index]
-                    NavigationLink {
-                        WatchSetScreen(exercise: exercise)
-                    } label: {
-                        VStack(alignment: .leading, spacing: 5) {
-                            HStack {
-                                Text(String(format: "%02d", index + 1))
-                                    .font(WTheme.metric(17))
-                                    .foregroundStyle(WTheme.lime)
-                                Text(exercise.name)
-                                    .font(.system(size: 14, weight: .semibold, design: .rounded))
-                                    .lineLimit(2)
-                            }
-                            Text("\(store.completedSets(for: exercise).count) / \(exercise.prescribedSets) sets · \(exercise.repDescription) reps")
-                                .font(.system(size: 11))
-                                .foregroundStyle(WTheme.muted)
-                        }
-                        .frame(minHeight: 48)
-                    }
-                    .listRowBackground(WTheme.panel)
-                }
-                if store.workout.exercises.isEmpty {
-                    Text("No exercises scheduled. Build a workout on iPhone.")
-                        .foregroundStyle(WTheme.muted)
-                }
-            }
-            Section {
-                Text(store.workout.isPreview ?
-                     "Preview workout · sync your actual plan from iPhone." : store.status)
-                    .font(.system(size: 10))
-                    .foregroundStyle(WTheme.muted)
+        Group {
+            if store.liftClock?.isActive == true {
+                WatchGuidedSession(onFinish: { confirmFinish = true })
+            } else {
+                WatchStrengthReady()
             }
         }
-        .listStyle(.plain)
-        .scrollIndicators(.hidden)
         .background(WTheme.bg.ignoresSafeArea())
         .navigationTitle("Strength")
-        .confirmationDialog("Finish strength workout?", isPresented: $confirmFinish) {
+        .confirmationDialog("Finish this strength workout?", isPresented: $confirmFinish) {
             Button("Finish & Save") {
                 store.endLifting()
                 if health.kind == .strength { health.finish() }
-                WKInterfaceDevice.current().play(.success)
+                wHaptic(.success)
             }
+            Button("Continue workout", role: .cancel) {}
+        } message: {
+            Text("Your completed sets stay saved on the watch and sync to iPhone.")
         }
     }
 }
 
-private struct WatchSetScreen: View {
+private struct WatchStrengthReady: View {
     @EnvironmentObject private var store: WatchWorkoutStore
-    let exercise: HCExercise
-    @State private var hasWeight = false
+    @EnvironmentObject private var health: WatchHealthSession
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 12) {
+                Text("TODAY'S LIFT")
+                    .font(WTheme.label()).tracking(1.5)
+                    .foregroundStyle(WTheme.aqua)
+                Text(store.workout.title)
+                    .font(.system(size: 22, weight: .heavy, design: .rounded))
+                    .fixedSize(horizontal: false, vertical: true)
+                Text("\(store.workout.exercises.count) movements · \(store.workout.prescribedSetCount) sets")
+                    .font(.system(size: 12)).foregroundStyle(WTheme.muted)
+                if let first = store.guidedExercise ?? store.workout.exercises.first {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("FIRST UP").font(WTheme.label(10)).foregroundStyle(WTheme.aqua)
+                        Text(first.name)
+                            .font(.system(size: 18, weight: .heavy, design: .rounded))
+                        Text("\(first.prescribedSets) × \(first.repDescription) reps")
+                            .font(.system(size: 12)).foregroundStyle(WTheme.muted)
+                    }
+                    .padding(13)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(WTheme.panel, in: RoundedRectangle(cornerRadius: 14))
+                }
+                if store.workout.exercises.isEmpty {
+                    Text("No exercises are scheduled. Build a strength plan on iPhone, then sync.")
+                        .font(.system(size: 12)).foregroundStyle(WTheme.muted)
+                }
+                WPrimary(title: "START WORKOUT", symbol: "play.fill") {
+                    store.startLifting()
+                    if store.liftClock?.isActive == true {
+                        health.start(kind: .strength)
+                        wHaptic(.start)
+                    }
+                }
+                .disabled(store.workout.exercises.isEmpty || store.runClock?.isActive == true)
+                Text(store.workout.isPreview
+                     ? "Preview plan · Sync from the iPhone for your real workout."
+                     : "Start once, then follow each set. You can change exercises anytime.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(WTheme.muted)
+            }
+            .padding(8)
+        }
+        .scrollIndicators(.hidden)
+    }
+}
+
+private struct WatchGuidedSession: View {
+    @EnvironmentObject private var store: WatchWorkoutStore
+    @EnvironmentObject private var health: WatchHealthSession
+    @AppStorage("hcWeightIncrement") private var increment = 5.0
     @State private var weight = 0.0
+    @State private var includeWeight = true
     @State private var reps = 8
     @State private var rir = 2
+    @State private var readyHapticSent = false
+    let onFinish: () -> Void
 
-    private var completed: [HCLoggedSet] { store.completedSets(for: exercise) }
+    private var current: HCExercise? { store.guidedExercise }
+    private var setCount: Int {
+        guard let current else { return 0 }
+        return store.completedSets(for: current).count
+    }
     private var active: Bool {
-        store.liftClock?.setExerciseID == exercise.id &&
-        store.liftClock?.setStartedAt != nil
+        guard let current else { return false }
+        return store.liftClock?.setExerciseID == current.id &&
+               store.liftClock?.setStartedAt != nil
+    }
+    private var activeOther: Bool {
+        store.liftClock?.setStartedAt != nil && !active
+    }
+    private var restEnd: Date? { store.liftClock?.restEndsAt }
+    private var nextSetToken: String {
+        (current?.id ?? "none") + "-" + String(setCount)
     }
 
     var body: some View {
-        List {
-            Section {
-                Text(exercise.name)
-                    .font(.system(size: 18, weight: .heavy, design: .rounded))
-                    .listRowBackground(WTheme.bg)
-                Text("\(exercise.prescribedSets) SETS · \(exercise.repDescription) REPS")
-                    .font(WTheme.label(10)).foregroundStyle(WTheme.aqua)
-                    .listRowBackground(WTheme.bg)
-                if let suggested = exercise.suggestedWeightLb {
-                    Text("COACH TARGET · \(suggested.formatted()) LB")
-                        .font(WTheme.label(11)).foregroundStyle(WTheme.lime)
-                }
-            }
-
-            Section("ADJUST YOUR SET") {
-                Toggle("Track weight", isOn: $hasWeight)
-                    .tint(WTheme.lime)
-                    .font(.system(size: 12, weight: .semibold))
-                if hasWeight {
-                    WStepper(title: "Weight · lb", value: weight.formatted(),
-                             minus: { weight = max(0, weight - 5) },
-                             plus: { weight = min(1500, weight + 5) })
-                }
-                WStepper(title: "Reps", value: "\(reps)",
-                         minus: { reps = max(1, reps - 1) },
-                         plus: { reps = min(60, reps + 1) })
-                WStepper(title: "RIR", value: "\(rir)",
-                         minus: { rir = max(0, rir - 1) },
-                         plus: { rir = min(6, rir + 1) })
-            }
-
-            Section("SET TIMER") {
-                if store.liftClock?.isActive != true {
-                    WPrimary(title: "START WORKOUT", symbol: "play.fill") {
-                        store.startLifting()
+        ScrollView {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(spacing: 8) {
+                    Text("GUIDED LIFT")
+                        .font(WTheme.label(10)).tracking(1.3)
+                        .foregroundStyle(WTheme.aqua)
+                    Spacer()
+                    TimelineView(.periodic(from: .now, by: 1)) { time in
+                        Text(wClock(store.liftClock?.duration(at: time.date) ?? 0))
+                            .font(WTheme.metric(16))
+                            .foregroundStyle(WTheme.muted)
                     }
-                } else if store.liftClock?.isPaused == true {
-                    Text("Resume your workout before recording sets.")
-                        .font(.caption2).foregroundStyle(WTheme.muted)
-                } else if active {
-                    TimelineView(.periodic(from: .now, by: 1)) { now in
-                        VStack(alignment: .leading, spacing: 7) {
-                            Text("SET IN PROGRESS")
-                                .font(WTheme.label(10))
-                                .foregroundStyle(WTheme.amber)
-                            Text(wClock(now.date.timeIntervalSince(
-                                store.liftClock?.setStartedAt ?? now.date)))
-                                .font(WTheme.metric(38))
+                }
+                if store.guidedAllFinished {
+                    finishedSection
+                } else if let current {
+                    Text(current.name)
+                        .font(.system(size: 21, weight: .heavy, design: .rounded))
+                        .fixedSize(horizontal: false, vertical: true)
+                        .foregroundStyle(.white)
+                    HStack {
+                        Text("SET \(setCount + 1) OF \(current.prescribedSets)")
+                            .foregroundStyle(WTheme.lime)
+                        Spacer()
+                        Text("\(store.guidedCompletedSets) / \(store.workout.prescribedSetCount) DONE")
+                            .foregroundStyle(WTheme.muted)
+                    }
+                    .font(WTheme.label(10))
+                    if let end = restEnd, !active {
+                        TimelineView(.periodic(from: .now, by: 1)) { time in
+                            let remaining = max(0, end.timeIntervalSince(time.date))
+                            if remaining > 0 {
+                                restPanel(remaining: remaining)
+                            } else {
+                                setPanel(current)
+                            }
+                            Color.clear.frame(height: 1)
+                                .onChange(of: remaining <= 0) { _, finished in
+                                    if finished && !readyHapticSent {
+                                        readyHapticSent = true
+                                        wHaptic(.notification)
+                                    }
+                                }
+                        }
+                    } else {
+                        setPanel(current)
+                    }
+                    if let last = store.completedSets(for: current).last {
+                        HStack(spacing: 6) {
+                            Image(systemName: "checkmark.circle.fill")
+                                .foregroundStyle(WTheme.lime)
+                            Text("LAST: \(last.weightLb?.formatted() ?? "BW") × \(last.reps) · RIR \(Int(last.rir ?? 0))")
+                                .font(.system(size: 11, weight: .medium))
+                                .foregroundStyle(WTheme.muted)
                         }
                     }
-                    WPrimary(title: "STOP & SAVE", symbol: "checkmark.circle.fill",
-                             color: WTheme.amber) {
-                        let saved = store.stopSet(for: exercise,
-                                                  weightLb: hasWeight ? weight : nil,
-                                                  reps: reps, rir: Double(rir))
-                        if saved { WKInterfaceDevice.current().play(.success) }
+                    NavigationLink {
+                        WatchMovementPicker()
+                    } label: {
+                        Label("SWITCH EXERCISE", systemImage: "arrow.left.arrow.right")
+                            .font(.system(size: 12, weight: .bold))
                     }
-                    WSecondary(title: "CANCEL SET", symbol: "xmark") { store.cancelSet() }
-                } else if store.liftClock?.setStartedAt != nil {
-                    Text("Finish the other active exercise set.")
-                        .font(.caption2).foregroundStyle(WTheme.muted)
+                    .buttonStyle(.bordered)
+                    .tint(WTheme.panel)
+                    .disabled(active)
                 } else {
-                    WPrimary(title: "START SET \(completed.count + 1)", symbol: "play.fill") {
-                        store.startSet(for: exercise)
-                        WKInterfaceDevice.current().play(.start)
-                    }
+                    Text("No remaining sets. You can finish the workout.")
+                        .foregroundStyle(WTheme.muted)
+                    WPrimary(title: "FINISH WORKOUT", symbol: "flag.checkered",
+                             color: WTheme.amber, action: onFinish)
                 }
-                if let until = store.liftClock?.restEndsAt {
-                    TimelineView(.periodic(from: .now, by: 1)) { now in
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("REST REMAINING")
-                                .font(WTheme.label(10)).foregroundStyle(WTheme.aqua)
-                            Text(wClock(max(0, until.timeIntervalSince(now.date))))
-                                .font(WTheme.metric(35))
-                            WSecondary(title: "SKIP REST", symbol: "forward.end.fill") {
-                                store.skipRest()
+                Text(store.status)
+                    .font(.system(size: 10))
+                    .foregroundStyle(WTheme.muted)
+                    .lineLimit(2)
+            }
+            .padding(.horizontal, 8)
+            .padding(.bottom, 10)
+        }
+        .scrollIndicators(.hidden)
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            if !store.guidedAllFinished && store.liftClock?.isPaused != true {
+                TimelineView(.periodic(from: .now, by: 1)) { time in
+                    let resting = restEnd.map { $0 > time.date } ?? false
+                    if !resting, let current {
+                        WPrimary(title: active ? "END SET · SAVE" : "START SET \(setCount + 1)",
+                                 symbol: active ? "checkmark.circle.fill" : "play.fill",
+                                 color: active ? WTheme.amber : WTheme.lime) {
+                            if active {
+                                let saved = store.stopSet(for: current,
+                                                          weightLb: includeWeight ? weight : nil,
+                                                          reps: reps, rir: Double(rir))
+                                if saved {
+                                    readyHapticSent = false
+                                    wHaptic(.success)
+                                }
+                            } else if !activeOther {
+                                store.startSet(for: current)
+                                wHaptic(.start)
                             }
                         }
+                        .disabled(activeOther)
+                        .padding(.horizontal, 7)
+                        .padding(.top, 5)
+                        .padding(.bottom, 2)
+                    }
+                }
+                .background(WTheme.bg)
+            }
+        }
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Menu {
+                    if store.liftClock?.isPaused == true {
+                        Button("Resume workout", systemImage: "play.fill") {
+                            store.resumeLifting()
+                            health.resume()
+                        }
+                    } else {
+                        Button("Pause workout", systemImage: "pause.fill") {
+                            store.pauseLifting()
+                            health.pause()
+                        }
+                    }
+                    Button("Finish workout", systemImage: "flag.checkered",
+                           action: onFinish)
+                        .disabled(store.liftClock?.setStartedAt != nil)
+                } label: {
+                    Image(systemName: "ellipsis.circle")
+                        .foregroundStyle(WTheme.lime)
+                }
+            }
+        }
+        .task(id: nextSetToken) {
+            loadNextTargets()
+        }
+    }
+
+    @ViewBuilder
+    private func setPanel(_ exercise: HCExercise) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if let suggested = exercise.suggestedWeightLb {
+                Text("SUGGESTED · \(suggested.formatted()) LB")
+                    .font(WTheme.label(10))
+                    .foregroundStyle(WTheme.aqua)
+            }
+            if active {
+                TimelineView(.periodic(from: .now, by: 1)) { now in
+                    HStack {
+                        Text("SET IN PROGRESS")
+                            .font(WTheme.label(9)).foregroundStyle(WTheme.amber)
+                        Spacer()
+                        Text(wClock(now.date.timeIntervalSince(
+                            store.liftClock?.setStartedAt ?? now.date)))
+                            .font(WTheme.metric(23))
+                            .foregroundStyle(WTheme.amber)
                     }
                 }
             }
+            HStack(spacing: 5) {
+                Text("LOAD")
+                    .font(WTheme.label(10)).foregroundStyle(WTheme.muted)
+                Spacer()
+                Toggle("WEIGHT", isOn: $includeWeight)
+                    .labelsHidden()
+                    .tint(WTheme.lime)
+            }
+            if includeWeight {
+                WStepper(title: "WEIGHT · LB", value: weight.formatted(),
+                         minus: { weight = max(0, weight - increment) },
+                         plus: { weight = min(1500, weight + increment) })
+            }
+            WStepper(title: "REPS", value: "\(reps)",
+                     minus: { reps = max(1, reps - 1) },
+                     plus: { reps = min(100, reps + 1) })
+            WStepper(title: "RIR", value: "\(rir)",
+                     minus: { rir = max(0, rir - 1) },
+                     plus: { rir = min(10, rir + 1) })
+        }
+        .padding(10)
+        .background(WTheme.panel.opacity(0.5), in: RoundedRectangle(cornerRadius: 15))
+    }
 
-            Section("SAVED SETS") {
-                ForEach(completed) { set in
-                    HStack {
-                        Image(systemName: "checkmark.circle.fill")
-                            .foregroundStyle(WTheme.lime)
-                        Text("SET \(set.index)").font(WTheme.label(11))
-                        Spacer()
-                        Text("\(set.weightLb?.formatted() ?? "—") × \(set.reps)")
-                            .font(WTheme.metric(17))
+    private func restPanel(remaining: TimeInterval) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("REST BETWEEN SETS")
+                .font(WTheme.label(11))
+                .tracking(1.1)
+                .foregroundStyle(WTheme.aqua)
+            Text(wClock(remaining))
+                .font(WTheme.metric(55))
+                .foregroundStyle(WTheme.aqua)
+                .frame(maxWidth: .infinity, alignment: .center)
+            Text("Next: \(current?.name ?? "Workout complete")")
+                .font(.system(size: 13, weight: .medium))
+                .lineLimit(2)
+            WPrimary(title: "SKIP REST", symbol: "forward.end.fill",
+                     color: WTheme.aqua) { store.skipRest() }
+        }
+        .padding(13)
+        .background(WTheme.panel, in: RoundedRectangle(cornerRadius: 15))
+    }
+
+    private var finishedSection: some View {
+        VStack(alignment: .leading, spacing: 13) {
+            Image(systemName: "checkmark.seal.fill")
+                .font(.system(size: 34))
+                .foregroundStyle(WTheme.lime)
+            Text("ALL SETS DONE")
+                .font(.system(size: 22, weight: .heavy, design: .rounded))
+            Text("\(store.guidedCompletedSets) working sets recorded.")
+                .font(.system(size: 13))
+                .foregroundStyle(WTheme.muted)
+            WPrimary(title: "FINISH WORKOUT", symbol: "flag.checkered",
+                     action: onFinish)
+        }
+    }
+
+    private func loadNextTargets() {
+        guard let next = current else { return }
+        let previous = store.completedSets(for: next).last
+        let suggested = previous?.weightLb ?? next.suggestedWeightLb
+        if let suggested {
+            weight = suggested
+            includeWeight = true
+        } else {
+            weight = 0
+            includeWeight = false
+        }
+        reps = previous?.reps ?? next.repMin
+        rir = Int((previous?.rir ?? 2).rounded())
+    }
+}
+
+private struct WatchMovementPicker: View {
+    @EnvironmentObject private var store: WatchWorkoutStore
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        List {
+            ForEach(store.workout.exercises) { ex in
+                Button {
+                    store.selectGuidedExercise(ex)
+                    dismiss()
+                } label: {
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text(ex.name)
+                            .font(.system(size: 14, weight: .bold))
+                        Text("\(store.completedSets(for: ex).count)/\(ex.prescribedSets) sets complete")
+                            .font(.system(size: 11))
+                            .foregroundStyle(WTheme.muted)
                     }
+                    .frame(minHeight: 53, alignment: .leading)
                 }
-                if completed.isEmpty {
-                    Text("Your recorded sets will appear here.")
-                        .foregroundStyle(WTheme.muted)
-                }
+                .disabled(store.completedSets(for: ex).count >= ex.prescribedSets)
             }
         }
         .listStyle(.plain)
-        .scrollIndicators(.hidden)
-        .background(WTheme.bg.ignoresSafeArea())
-        .navigationTitle("Set")
-        .onAppear {
-            reps = exercise.repMin
-            if let suggested = exercise.suggestedWeightLb {
-                weight = suggested
-                hasWeight = true
+        .navigationTitle("Exercises")
+    }
+}
+
+private struct WatchPreferences: View {
+    @AppStorage("hcAccentStyle") private var accent = "crimson"
+    @AppStorage("hcWeightIncrement") private var increment = 5.0
+    @AppStorage("hcRestOverrideSeconds") private var restOverride = 0
+    @AppStorage("hcWatchHaptics") private var haptics = true
+
+    var body: some View {
+        List {
+            Picker("Accent", selection: $accent) {
+                Text("Crimson + White").tag("crimson")
+                Text("Performance Lime").tag("lime")
+                Text("Ocean Aqua").tag("aqua")
+                Text("Minimal White").tag("white")
             }
+            Picker("Weight steps", selection: $increment) {
+                Text("2.5 lb").tag(2.5)
+                Text("5 lb").tag(5.0)
+                Text("10 lb").tag(10.0)
+            }
+            Picker("Rest duration", selection: $restOverride) {
+                Text("Use program").tag(0)
+                Text("60 seconds").tag(60)
+                Text("90 seconds").tag(90)
+                Text("2 minutes").tag(120)
+                Text("3 minutes").tag(180)
+            }
+            Toggle("Haptic feedback", isOn: $haptics)
+                .tint(WTheme.lime)
         }
+        .listStyle(.plain)
+        .navigationTitle("Preferences")
     }
 }
 
@@ -523,7 +716,7 @@ private struct WatchRunScreen: View {
                     }
                     WPrimary(title: "RECORD LAP", symbol: "flag.fill", color: WTheme.aqua) {
                         store.addRunSplit(currentDistanceMeters: health.distanceMeters)
-                        WKInterfaceDevice.current().play(.click)
+                        wHaptic(.click)
                     }
                     WPrimary(title: "FINISH RUN", symbol: "flag.checkered",
                              color: WTheme.amber) { confirmFinish = true }
@@ -534,7 +727,7 @@ private struct WatchRunScreen: View {
                     WPrimary(title: "START RUN", symbol: "play.fill", color: WTheme.aqua) {
                         store.startRun()
                         health.start(kind: .run)
-                        WKInterfaceDevice.current().play(.start)
+                        wHaptic(.start)
                     }
                 }
             }
@@ -582,7 +775,7 @@ private struct WatchRunScreen: View {
                 store.finishRun(distanceMeters: health.distanceMeters,
                                 heartRateBPM: health.averageHeartRateBPM)
                 if health.kind == .run { health.finish() }
-                WKInterfaceDevice.current().play(.success)
+                wHaptic(.success)
             }
         }
     }
