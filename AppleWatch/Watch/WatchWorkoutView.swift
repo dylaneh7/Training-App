@@ -16,7 +16,13 @@ private enum WTheme {
     static var onAccent: Color {
         (UserDefaults.standard.string(forKey: "hcAccentStyle") ?? "crimson") == "crimson" ? .white : bg
     }
-    static let aqua = Color(red: 0.41, green: 0.85, blue: 0.82)
+    static var aqua: Color {
+        switch UserDefaults.standard.string(forKey: "hcAccentStyle") ?? "crimson" {
+        case "crimson": return .white
+        case "white": return Color(red: 0.83, green: 0.88, blue: 0.94)
+        default: return Color(red: 0.41, green: 0.85, blue: 0.82)
+        }
+    }
     static let amber = Color(red: 1.0, green: 0.7, blue: 0.35)
 
     static func metric(_ size: CGFloat) -> Font {
