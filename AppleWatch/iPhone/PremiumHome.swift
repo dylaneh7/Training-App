@@ -961,6 +961,45 @@ private struct IMUNMoveWorkoutSheet: View {
     }
 }
 
+private struct IMUNSetHistoryPage: View {
+    @EnvironmentObject private var coach: PhoneWorkoutBridge
+
+    var body: some View {
+        List {
+            Section {
+                Text("Saved working sets from your earlier Health Coach sessions and IMUN Watch recordings. Loads are shown in pounds.")
+                    .font(.caption)
+                    .foregroundStyle(HCDesign.secondary)
+            }
+            ForEach(Array(coach.performanceHistory
+                .sorted { $0.date == $1.date ? $0.exercise < $1.exercise : $0.date > $1.date }
+                .prefix(350).enumerated()), id: \.offset) { _, row in
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack {
+                        Text(row.date)
+                            .font(HCDesign.label(11))
+                            .foregroundStyle(HCDesign.electric)
+                        Spacer()
+                        Text(row.source)
+                            .font(.caption2)
+                            .foregroundStyle(HCDesign.secondary)
+                    }
+                    Text(row.exercise)
+                        .font(.system(size: 15, weight: .semibold))
+                    Text("\(row.weightLb.formatted()) lb × \(row.reps) reps" +
+                         (row.rir.map { "  ·  RIR \($0.formatted())" } ?? ""))
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(HCDesign.secondary)
+                }
+                .listRowBackground(HCDesign.card)
+            }
+        }
+        .scrollContentBackground(.hidden)
+        .background(HCDesign.canvas)
+        .navigationTitle("Strength history")
+    }
+}
+
 private struct PremiumProgressPage: View {
     @EnvironmentObject private var coach: PhoneWorkoutBridge
     @State private var selectedExercise = ""
@@ -1104,6 +1143,23 @@ private struct PremiumProgressPage: View {
                         }
                     }
                 }
+                HCSectionTitle(title: "Past working sets", detail: "\(coach.performanceHistory.count) records")
+                NavigationLink {
+                    IMUNSetHistoryPage()
+                } label: {
+                    HCCard {
+                        HStack {
+                            Image(systemName: "list.bullet.rectangle.portrait")
+                                .foregroundStyle(HCDesign.electric)
+                            Text("View every logged weight, rep and RIR")
+                                .font(.system(size: 14, weight: .semibold))
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .foregroundStyle(HCDesign.secondary)
+                        }
+                    }
+                }
+                .buttonStyle(.plain)
                 HCSectionTitle(title: "Exercise progression", detail: "Recorded weight")
                 HCCard {
                     VStack(alignment: .leading, spacing: 16) {
