@@ -12,7 +12,7 @@
   <key>CFBundleShortVersionString</key><string>$(MARKETING_VERSION)</string>
   <key>CFBundleVersion</key><string>$(CURRENT_PROJECT_VERSION)</string>
   <key>WKCompanionAppBundleIdentifier</key><string>$(HC_IOS_BUNDLE_ID)</string>
-  <key>WKWatchKitApp</key><true/>
+  <key>WKApplication</key><true/>
   <key>WKWatchOnly</key><false/>
   <key>WKRunsIndependentlyOfCompanionApp</key><false/>
   <key>WKBackgroundModes</key><array><string>workout-processing</string></array>
