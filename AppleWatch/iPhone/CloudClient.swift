@@ -198,6 +198,30 @@ actor HCCloudClient {
         }
     }
 
+    /// Move an unsaved day in the saved strength rotation. This writes a real
+    /// planner event with a preserved original template date, suppressing the
+    /// automatic copy on the old day. It never edits historical completed sets.
+    func moveRotationWorkout(originalDate: String, to date: String,
+                             title: String) async throws {
+        guard HCPlanBuilder.startOfDate(originalDate) != nil,
+              HCPlanBuilder.startOfDate(date) != nil,
+              originalDate != date else {
+            throw HCCloudError.server("Choose a different valid workout day.")
+        }
+        let authenticated = try await authorizedToken()
+        let bytes = try await send(path: "/rest/v1/rpc/imun_move_rotation_workout",
+                                   method: "POST",
+                                   json: ["p_original_date": originalDate,
+                                          "p_new_date": date,
+                                          "p_title": title],
+                                   bearer: authenticated.access)
+        let changed = (try? JSONSerialization.jsonObject(
+            with: bytes, options: .fragmentsAllowed)) as? Bool
+        guard changed == true else {
+            throw HCCloudError.server("This strength session already has a date or the destination is occupied.")
+        }
+    }
+
     /// Existing completed workouts are preserved with their original source.
     /// Tredict entries include Garmin-synced sessions already in Command Center.
     func fetchActivityHistory() async throws -> [HCTrainingActivity] {
