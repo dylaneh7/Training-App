@@ -189,6 +189,7 @@ private struct WQuickEditor: View {
 struct WatchWorkoutView: View {
     @EnvironmentObject private var store: WatchWorkoutStore
     @AppStorage("hcAccentStyle") private var accent = "crimson"
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         NavigationStack {
@@ -219,6 +220,22 @@ struct WatchWorkoutView: View {
                                      detail: "Today's plan · History", tint: WTheme.aqua)
                     }
                     .listRowBackground(WTheme.panel)
+                }
+                Section("TODAY · IPHONE SCHEDULE") {
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text(store.scheduleState == "ready" ?
+                             (store.hasScheduledLift ? store.workout.title : "No lift planned today") :
+                             (store.scheduleState == "signedOut" ? "Sign in on iPhone" : "Checking iPhone…"))
+                            .font(.system(size: 12, weight: .semibold))
+                        Text(store.runPlan?.title ?? "No run scheduled")
+                            .font(.system(size: 11)).foregroundStyle(WTheme.muted)
+                        if let last = store.scheduleUpdatedAt {
+                            Text("Synced " + last.formatted(date: .omitted, time: .shortened))
+                                .font(WTheme.label(10)).foregroundStyle(WTheme.aqua)
+                        }
+                        Button("Refresh from iPhone") { store.requestCurrentSchedule() }
+                            .font(.system(size: 11))
+                    }
                 }
                 Section("PREFERENCES") {
                     NavigationLink {
@@ -259,6 +276,10 @@ struct WatchWorkoutView: View {
         .tint(WTheme.lime)
         .preferredColorScheme(.dark)
         .id(accent)
+        .onAppear { store.requestCurrentSchedule() }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active { store.requestCurrentSchedule() }
+        }
     }
 }
 
@@ -332,6 +353,21 @@ private struct WatchStrengthReady: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
+                if !store.hasScheduledLift {
+                    Text(store.scheduleState == "ready" ? "REST DAY" : "IPHONE SYNC")
+                        .font(WTheme.label()).tracking(1.5)
+                        .foregroundStyle(WTheme.aqua)
+                    Text(store.scheduleState == "ready" ? "No strength workout scheduled" :
+                         "Checking today's workout…")
+                        .font(.system(size: 21, weight: .heavy, design: .rounded))
+                    Text(store.scheduleState == "ready" ?
+                         "Your iPhone calendar controls the plan. You can create a workout there." :
+                         "Open imun on your iPhone to load the latest schedule.")
+                        .font(.system(size: 12)).foregroundStyle(WTheme.muted)
+                    WSecondary(title: "REFRESH", symbol: "arrow.clockwise") {
+                        store.requestCurrentSchedule()
+                    }
+                } else {
                 Text("TODAY'S LIFT")
                     .font(WTheme.label()).tracking(1.5)
                     .foregroundStyle(WTheme.aqua)
@@ -369,6 +405,7 @@ private struct WatchStrengthReady: View {
                      : "Start once, then follow each set. You can change exercises anytime.")
                     .font(.system(size: 11))
                     .foregroundStyle(WTheme.muted)
+                }
             }
             .padding(8)
         }
@@ -755,7 +792,9 @@ private struct WatchRunScreen: View {
                                 .foregroundStyle(WTheme.muted)
                         }
                     } else {
-                        Text("Sync your planned run from the iPhone app.")
+                        Text(store.scheduleState == "ready" ?
+                             "No run scheduled today. You can still start a free run." :
+                             "Checking the latest run plan on iPhone.")
                             .font(.system(size: 12)).foregroundStyle(WTheme.muted)
                     }
                 }
