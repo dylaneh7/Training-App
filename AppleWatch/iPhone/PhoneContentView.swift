@@ -243,7 +243,7 @@ private struct StrengthHome: View {
     }
 }
 
-private struct StrengthExerciseDetails: View {
+struct StrengthExerciseDetails: View {
     @EnvironmentObject private var coach: PhoneWorkoutBridge
     @Environment(\.dismiss) private var dismiss
     @AppStorage("hcAggressiveProgression") private var aggressive = true
@@ -484,7 +484,7 @@ private struct SetCorrectionSheet: View {
     }
 }
 
-private struct ExerciseLibraryPicker: View {
+struct ExerciseLibraryPicker: View {
     @Environment(\.dismiss) private var dismiss
     let onSelect: (HCLibraryExercise) -> Void
     @State private var search = ""
