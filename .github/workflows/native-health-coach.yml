@@ -48,24 +48,6 @@ jobs:
           fi
           /usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$APP/PlugIns/HealthCoachWatch.app/Info.plist"
           /usr/libexec/PlistBuddy -c "Print :WKCompanionAppBundleIdentifier" "$APP/PlugIns/HealthCoachWatch.app/Info.plist"
-      - name: Install iPhone app with embedded watch on simulator
-        run: |
-          APP=/tmp/healthcoach-derived/Build/Products/Debug-iphonesimulator/HealthCoach.app
-          SIMULATOR_ID=$(xcrun simctl list devices available -j | python3 -c '
-          import json,sys
-          devices=json.load(sys.stdin)["devices"]
-          options=[d for xs in devices.values() for d in xs
-                   if "iPhone" in d.get("name","") and d.get("isAvailable",True)]
-          print(options[0]["udid"] if options else "")
-          ')
-          if [ -z "$SIMULATOR_ID" ]; then
-            echo "::error::No available iPhone simulator was found"
-            exit 1
-          fi
-          xcrun simctl boot "$SIMULATOR_ID"
-          xcrun simctl bootstatus "$SIMULATOR_ID" -b
-          xcrun simctl install "$SIMULATOR_ID" "$APP"
-          xcrun simctl shutdown "$SIMULATOR_ID"
       - name: Test strength progression conversions
         run: |
           swiftc \
@@ -84,3 +66,22 @@ jobs:
             -destination 'generic/platform=watchOS Simulator' \
             CODE_SIGNING_ALLOWED=NO \
             | tee /tmp/healthcoach-watch-build.log
+
+      - name: Install iPhone app with embedded watch on simulator
+        run: |
+          APP=/tmp/healthcoach-derived/Build/Products/Debug-iphonesimulator/HealthCoach.app
+          SIMULATOR_ID=$(xcrun simctl list devices available -j | python3 -c '
+          import json,sys
+          devices=json.load(sys.stdin)["devices"]
+          options=[d for xs in devices.values() for d in xs
+                   if "iPhone" in d.get("name","") and d.get("isAvailable",True)]
+          print(options[0]["udid"] if options else "")
+          ')
+          if [ -z "$SIMULATOR_ID" ]; then
+            echo "::error::No available iPhone simulator was found"
+            exit 1
+          fi
+          xcrun simctl boot "$SIMULATOR_ID"
+          python3 -c 'import subprocess,sys;subprocess.run(["xcrun","simctl","bootstatus",sys.argv[1],"-b"],check=True,timeout=150)' "$SIMULATOR_ID"
+          python3 -c 'import subprocess,sys;subprocess.run(["xcrun","simctl","install",sys.argv[1],sys.argv[2]],check=True,timeout=150)' "$SIMULATOR_ID" "$APP"
+          xcrun simctl shutdown "$SIMULATOR_ID"
