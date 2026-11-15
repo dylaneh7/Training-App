@@ -58,11 +58,28 @@ enum HCPlanBuilder {
         let originalDay = (planned?["imunOriginalDate"] as? String).flatMap(startOfDate)
         guard let key = originalDay.flatMap(sessionKey(for:)) ?? sessionKey(for: date)
         else { return nil }
-        // Only the user-requested one-off Saturday workout exists without a
-        // Command Center Lift entry. Other missing days are genuine rest days.
-        if planned == nil && !key.hasSuffix("SatUpper") { return nil }
-        let title = (planned?["title"] as? String)
-            ?? (key.hasSuffix("SatUpper") ? "Full Upper — Return to Training" : "Today's Strength")
+        // Recover the user's established Health Coach strength rotation on
+        // training days even when the planner lacks an explicit lift event.
+        // A deliberately moved workout must *not* reappear on its old date.
+        let movedAway = items.contains {
+            ($0["category"] as? String) == "workout"
+                && ($0["type"] as? String)?.lowercased() == "lift"
+                && ($0["imunOriginalDate"] as? String) == iso
+                && ($0["date"] as? String) != iso
+        }
+        if planned == nil && (movedAway || HCProgramCatalog.templates(for: key).isEmpty) {
+            return nil
+        }
+        let rotationName: String
+        switch String(key.split(separator: "-").last ?? "") {
+        case "Mon": rotationName = "Push — Strength"
+        case "Tue": rotationName = "Pull — Strength"
+        case "Wed", "UpperThu": rotationName = "Upper Support"
+        case "Thu", "LegsFri": rotationName = "Legs — Strength"
+        case "SatUpper": rotationName = "Full Upper — Return to Training"
+        default: rotationName = "Strength"
+        }
+        let title = (planned?["title"] as? String) ?? rotationName
 
         let previous = previousWorkingWeights(from: history, before: date)
         return HCProgramCatalog.makeWorkout(date: iso, sessionKey: key,
