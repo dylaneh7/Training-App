@@ -998,7 +998,9 @@ final class HCAppleHealthReader: ObservableObject {
         .init(identifier:"BloodPressureDiastolic", name:"Diastolic BP", category:"Heart & Vitals",
               unit:HKUnit.millimeterOfMercury(), suffix:"mmHg", isDailySum:false),
         .init(identifier:"VO2Max", name:"VO₂ max", category:"Heart & Vitals",
-              unit:HKUnit(from:"ml/kg*min"), suffix:"mL/kg/min", isDailySum:false),
+              unit:HKUnit.literUnit(with:.milli)
+                  .unitDivided(by: HKUnit.gramUnit(with:.kilo))
+                  .unitDivided(by: HKUnit.minute()), suffix:"mL/kg/min", isDailySum:false),
         .init(identifier:"BodyTemperature", name:"Body temperature", category:"Heart & Vitals",
               unit:HKUnit.degreeCelsius(), suffix:"°C", isDailySum:false),
         .init(identifier:"BasalBodyTemperature", name:"Basal temperature", category:"Heart & Vitals",
@@ -1023,7 +1025,9 @@ final class HCAppleHealthReader: ObservableObject {
         .init(identifier:"FlightsClimbed",name:"Flights climbed",category:"Activity & Energy",
               unit:HKUnit.count(),suffix:"flights",isDailySum:true),
         .init(identifier:"PhysicalEffort",name:"Physical effort",category:"Activity & Energy",
-              unit:HKUnit(from:"kcal/hr*kg"),suffix:"MET",isDailySum:false),
+              unit:HKUnit.kilocalorie()
+                  .unitDivided(by: HKUnit.hour())
+                  .unitDivided(by: HKUnit.gramUnit(with:.kilo)),suffix:"MET",isDailySum:false),
 
         .init(identifier:"RunningSpeed",name:"Running speed",category:"Running & Cycling",
               unit:HKUnit.meter().unitDivided(by:.second()),suffix:"m/s",isDailySum:false),
