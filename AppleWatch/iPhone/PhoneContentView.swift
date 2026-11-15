@@ -1252,8 +1252,17 @@ final class HCAppleHealthReader: ObservableObject {
                         HCPlanBuilder.dateString($0.endDate)
                     })
                     let points: [HCHealthTrendSample] = days.map { date, entries in
-                        let seconds = entries.reduce(0.0) {
-                            $0 + $1.endDate.timeIntervalSince($1.startDate)
+                        // Union overlapping sleep intervals so exports from
+                        // one source do not double-count staged and unstaged sleep.
+                        let ordered = entries.sorted { $0.startDate < $1.startDate }
+                        var seconds = 0.0
+                        var coveredUntil = Date.distantPast
+                        for segment in ordered {
+                            let uncoveredStart = max(segment.startDate, coveredUntil)
+                            if segment.endDate > uncoveredStart {
+                                seconds += segment.endDate.timeIntervalSince(uncoveredStart)
+                            }
+                            coveredUntil = max(coveredUntil, segment.endDate)
                         }
                         return HCHealthTrendSample(name: name, source: source,
                                                    date: date, value: seconds / 3600)
