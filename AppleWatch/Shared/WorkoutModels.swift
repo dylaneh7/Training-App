@@ -47,10 +47,35 @@ struct HCLoggedSet: Codable, Identifiable, Hashable {
     let reps: Int
     let rir: Double?
     let completedAt: Date
+    var startedAt: Date? = nil
+    var durationSeconds: Double? = nil
+}
+
+/// A run from the Command Center calendar. Runs are separate from lifting
+/// sessions so one can't accidentally mark the other as completed.
+struct HCRunPlan: Codable, Identifiable, Hashable {
+    let id: String
+    let date: String
+    let title: String
+    let notes: String
+    let targetDistanceMiles: Double?
+    let isCompleted: Bool
+}
+
+struct HCRunFinished: Codable, Identifiable, Hashable {
+    let id: UUID
+    let planID: String?
+    let date: String
+    let startedAt: Date
+    let endedAt: Date
+    let distanceMeters: Double?
+    let averageHeartRate: Double?
 }
 
 enum HCPayload {
     static let workout = "workout"
+    static let runPlan = "runPlan"
+    static let completedRun = "completedRun"
     static let loggedSet = "loggedSet"
     static let kind = "kind"
     static let data = "payload"
