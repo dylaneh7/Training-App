@@ -150,7 +150,7 @@ struct HCRunRoutePoint: Codable, Hashable {
     let altitudeMeters: Double?
 }
 
-struct HCRecoveryDatum: Identifiable {
+struct HCRecoveryDatum: Codable, Identifiable {
     let date: String
     let sleepSeconds: Double?
     let hrvMS: Double?
