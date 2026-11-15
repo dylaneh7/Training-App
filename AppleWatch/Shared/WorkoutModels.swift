@@ -107,6 +107,11 @@ struct HCTrainingActivity: Codable, Identifiable {
     let maxBPM: Double?
     let calories: Double?
     let perceivedEffort: Double?
+    var totalDurationSeconds: Double? = nil
+    var paceSecondsPerKm: Double? = nil
+    var enjoyment: Double? = nil
+    var attribution: String? = nil
+    var externalID: String? = nil
 }
 
 struct HCProgressRun: Codable, Identifiable {
