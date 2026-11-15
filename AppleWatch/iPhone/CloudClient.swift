@@ -180,6 +180,47 @@ actor HCCloudClient {
         return try JSONDecoder().decode(HCWorkout.self, from: bytes)
     }
 
+    /// Atomically moves one existing planner workout without rewriting the
+    /// user's full calendar from a potentially stale iPhone snapshot.
+    func movePlannedWorkout(id: String, to date: String) async throws {
+        guard UUID(uuidString: id) != nil,
+              HCPlanBuilder.startOfDate(date) != nil else {
+            throw HCCloudError.server("Choose a valid saved workout and date.")
+        }
+        let authenticated = try await authorizedToken()
+        let bytes = try await send(path: "/rest/v1/rpc/imun_move_planned_workout",
+                                   method: "POST",
+                                   json: ["p_item_id": id, "p_new_date": date],
+                                   bearer: authenticated.access)
+        let changed = (try? JSONSerialization.jsonObject(with: bytes, options: .fragmentsAllowed)) as? Bool
+        guard changed == true else {
+            throw HCCloudError.server("This workout could not be moved. Refresh the plan and try again.")
+        }
+    }
+
+    /// Existing completed workouts are preserved with their original source.
+    /// Tredict entries include Garmin-synced sessions already in Command Center.
+    func fetchActivityHistory() async throws -> [HCTrainingActivity] {
+        let rows = try await readRows("workout_completion_events",
+            fields: "id,workout_date,workout_kind,title,source,activity_distance_m,activity_duration_sec,activity_avg_hr,activity_max_hr,activity_calories,activity_rpe",
+            otherQuery: [URLQueryItem(name: "order", value: "workout_date.desc")],limit:1500)
+        return rows.compactMap { row in
+            guard let id = row["id"] as? String,
+                  let date = row["workout_date"] as? String else { return nil }
+            return HCTrainingActivity(
+                id: id, date: date,
+                title: row["title"] as? String ?? "Workout",
+                kind: row["workout_kind"] as? String ?? "other",
+                source: row["source"] as? String ?? "Recorded",
+                distanceMeters: numeric(row["activity_distance_m"]),
+                durationSeconds: numeric(row["activity_duration_sec"]),
+                averageBPM: numeric(row["activity_avg_hr"]),
+                maxBPM: numeric(row["activity_max_hr"]),
+                calories: numeric(row["activity_calories"]),
+                perceivedEffort: numeric(row["activity_rpe"]))
+        }
+    }
+
     func saveWorkout(_ workout: HCWorkout) async throws {
         let authenticated = try await authorizedToken()
         let bytes = try JSONEncoder().encode(workout)
@@ -237,7 +278,7 @@ actor HCCloudClient {
 
     func fetchRunHistory() async throws -> [HCProgressRun] {
         let old = try await readRows("workout_completion_events",
-            fields: "id,workout_date,title,source,activity_distance_m,activity_duration_sec,activity_avg_hr",
+            fields: "id,workout_date,title,source,activity_started_at,activity_distance_m,activity_duration_sec,activity_avg_hr,activity_max_hr,activity_calories",
             otherQuery: [
                 URLQueryItem(name: "workout_kind", value: "eq.run"),
                 URLQueryItem(name: "order", value: "workout_date.desc")
@@ -248,11 +289,20 @@ actor HCCloudClient {
         let converted: [HCProgressRun] = old.compactMap { x in
             guard let date = x["workout_date"] as? String,
                   let id = x["id"] as? String else { return nil }
-            return HCProgressRun(id:id,date:date,title:x["title"] as? String ?? "Run",
+            var run = HCProgressRun(id:id,date:date,title:x["title"] as? String ?? "Run",
                 source:x["source"] as? String ?? "Connected service",
                 distanceMeters:numeric(x["activity_distance_m"]),
                 durationSeconds:numeric(x["activity_duration_sec"]),
                 averageBPM:numeric(x["activity_avg_hr"]),splits:[])
+            run.maxBPM = numeric(x["activity_max_hr"])
+            run.activeCalories = numeric(x["activity_calories"])
+            if let started = x["activity_started_at"] as? String {
+                let iso = ISO8601DateFormatter()
+                iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+                run.startedAt = iso.date(from: started)
+                    ?? ISO8601DateFormatter().date(from: started)
+            }
+            return run
         }
         let native: [HCProgressRun] = watch.compactMap { x in
             guard let date = x["workout_date"] as? String,
