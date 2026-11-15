@@ -1,6 +1,6 @@
 import SwiftUI
 
-// Health Coach 2.0 design system. Original identity—not a copy of WHOOP.
+// imun: restrained native typography, subtle graphite surfaces and a single accent.
 enum HCDesign {
     static let canvas = Color(red: 0.035, green: 0.055, blue: 0.082)
     static let card = Color(red: 0.072, green: 0.098, blue: 0.132)
@@ -33,15 +33,13 @@ enum HCDesign {
     static let amber = Color(red: 1.0, green: 0.73, blue: 0.39)
 
     static func display(_ size: CGFloat = 34) -> Font {
-        // Avenir Next is bundled with iOS: a distinctive geometric display face
-        // without shipping a third-party font binary.
-        .custom("AvenirNext-Heavy", fixedSize: size)
+        .system(size: size, weight: .semibold, design: .rounded)
     }
     static func metric(_ size: CGFloat = 28) -> Font {
-        .custom("DINCondensed-Bold", fixedSize: size).monospacedDigit()
+        .system(size: size, weight: .semibold, design: .rounded).monospacedDigit()
     }
     static func label(_ size: CGFloat = 11) -> Font {
-        .system(size: size, weight: .heavy, design: .rounded)
+        .system(size: size, weight: .medium, design: .rounded)
     }
 }
 
