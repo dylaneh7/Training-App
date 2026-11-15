@@ -2,14 +2,17 @@ import Foundation
 import Combine
 import WatchConnectivity
 
-/// Observable iPhone coordinator: five app tabs share the same current date,
-/// cloud session, exercise history and WatchConnectivity queues.
+/// Observable IMUN coordinator: today's workout, editable upcoming schedule,
+/// historical training sources and WatchConnectivity queues.
 final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
     @Published private(set) var workout: HCWorkout?
     @Published private(set) var runPlan: HCRunPlan?
     @Published private(set) var loggedSets: [HCLoggedSet] = []
     @Published private(set) var completedWatchRuns: [HCRunFinished] = []
     @Published private(set) var runHistory: [HCProgressRun] = []
+    @Published private(set) var plannedSessions: [HCPlannedSession] = []
+    @Published private(set) var trainingActivities: [HCTrainingActivity] = []
+    @Published private(set) var movingWorkoutID: String?
     // Apple Health running results stay on device unless user elects to share them.
     private var importedHealthRuns: [HCProgressRun] = []
     private var remoteRunHistory: [HCProgressRun] = []
@@ -52,6 +55,8 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
     override init() {
         super.init()
         loggedSets = read("health-coach-watch-sets.json") ?? []
+        plannedSessions = read("imun-planned-workouts.json") ?? []
+        trainingActivities = read("imun-training-activity-history.json") ?? []
         importedHealthRuns = read("apple-health-imported-runs.json") ?? []
         runHistory = importedHealthRuns
         completedWatchRuns = read("health-coach-native-runs.json") ?? []
@@ -161,10 +166,15 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
                 let run = HCPlanBuilder.run(for:date,planner:snapshot.planner)
                 let priorRuns = (try? await cloud.fetchRunHistory()) ?? []
                 let recovery = (try? await cloud.fetchRecoveryHistory()) ?? []
+                let activities = (try? await cloud.fetchActivityHistory()) ?? []
 
                 DispatchQueue.main.async {
                     self.workout = active
                     self.runPlan = run
+                    self.plannedSessions = HCPlanBuilder.plannedSessions(from: snapshot.planner)
+                    self.trainingActivities = activities
+                    self.save(self.plannedSessions, name: "imun-planned-workouts.json")
+                    self.save(activities, name: "imun-training-activity-history.json")
                     self.performanceHistory = history
                     self.remoteRunHistory = priorRuns
                     self.mergeRunHistory()
@@ -181,6 +191,34 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
                     self.loading = false
                     self.status = "Unable to refresh: \(error.localizedDescription)"
                     self.retryPendingCloudSets()
+                }
+            }
+        }
+    }
+
+    /// Move a scheduled workout without asking the coach. The RPC updates the
+    /// original Command Center calendar atomically for this signed-in user.
+    func moveWorkout(_ entry: HCPlannedSession, to newDate: Date) {
+        guard signedIn, movingWorkoutID == nil else {
+            status = "Sign in or finish the current schedule change first."
+            return
+        }
+        let day = HCPlanBuilder.dateString(newDate)
+        if day == entry.date { return }
+        movingWorkoutID = entry.id
+        status = "Moving \(entry.title)…"
+        Task {
+            do {
+                try await cloud.movePlannedWorkout(id: entry.id, to: day)
+                DispatchQueue.main.async {
+                    self.movingWorkoutID = nil
+                    self.status = "Moved \(entry.title) to \(day)."
+                    self.refresh(date: Date())
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    self.movingWorkoutID = nil
+                    self.status = "Move failed: \(error.localizedDescription)"
                 }
             }
         }
