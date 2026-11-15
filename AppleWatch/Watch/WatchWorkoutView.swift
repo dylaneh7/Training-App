@@ -195,7 +195,7 @@ struct WatchWorkoutView: View {
             List {
                 Section {
                     VStack(alignment: .leading, spacing: 5) {
-                        Text("IMUN")
+                        Text("imun")
                             .font(WTheme.label(10))
                             .tracking(2)
                             .foregroundStyle(WTheme.aqua)
@@ -254,7 +254,7 @@ struct WatchWorkoutView: View {
             .listStyle(.plain)
             .scrollIndicators(.hidden)
             .background(WTheme.bg.ignoresSafeArea())
-            .navigationTitle("IMUN")
+            .navigationTitle("imun")
         }
         .tint(WTheme.lime)
         .preferredColorScheme(.dark)
