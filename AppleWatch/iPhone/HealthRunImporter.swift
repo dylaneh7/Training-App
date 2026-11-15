@@ -1,5 +1,6 @@
 import Foundation
 import HealthKit
+import CoreLocation
 import Combine
 
 /// Imports completed running workouts from the authorized Apple Health store.
@@ -50,7 +51,7 @@ final class HCRunHealthImporter: ObservableObject {
             .distanceWalkingRunning, .heartRate, .activeEnergyBurned,
             .runningPower, .runningSpeed, .stepCount
         ]
-        var readable: Set<HKObjectType> = [HKObjectType.workoutType()]
+        var readable: Set<HKObjectType> = [HKObjectType.workoutType(), HKSeriesType.workoutRoute()]
         for id in quantityIDs {
             if let kind = HKObjectType.quantityType(forIdentifier: id) { readable.insert(kind) }
         }
@@ -122,7 +123,7 @@ final class HCRunHealthImporter: ObservableObject {
 
     private func queryRecent() {
         let earliest = Calendar.current.date(byAdding: .year, value: -2, to: Date()) ?? .distantPast
-        let predicate = HKQuery.predicateForSamples(withStart: earliest, end: nil)
+        let predicate = HKQuery.predicateForSamples(withStart: earliest, end: nil, options: [])
         let sort = NSSortDescriptor(key: HKSampleSortIdentifierEndDate, ascending: false)
         let query = HKSampleQuery(sampleType: HKObjectType.workoutType(),
                                   predicate: predicate, limit: 750,
@@ -134,7 +135,18 @@ final class HCRunHealthImporter: ObservableObject {
                 } else {
                     let workouts = (results as? [HKWorkout] ?? [])
                         .filter { $0.workoutActivityType == .running }
-                    let incoming = workouts.map { self.convert($0) }
+                    let previous = Dictionary(self.runs.map { ($0.id, $0) },
+                                              uniquingKeysWith: { current, _ in current })
+                    let incoming = workouts.map { workout -> HCProgressRun in
+                        var item = self.convert(workout)
+                        if let stored = previous[item.id] {
+                            item.heartRateTrace = stored.heartRateTrace
+                            item.routePoints = stored.routePoints
+                            if item.averageBPM == nil { item.averageBPM = stored.averageBPM }
+                            if item.maxBPM == nil { item.maxBPM = stored.maxBPM }
+                        }
+                        return item
+                    }
                     // Stable HealthKit workout UUIDs make repeated imports
                     // idempotent. WHOOP and Apple may both save one event;
                     // that cross-source duplicate is resolved in the bridge.
@@ -148,6 +160,13 @@ final class HCRunHealthImporter: ObservableObject {
                     self.status = self.runs.isEmpty
                         ? "No running workouts were shared with Health Coach."
                         : "Imported \(self.runs.count) runs from Apple Health."
+                    // Detailed HR samples and GPS routes can arrive after the
+                    // original workout. Query recent items without blocking
+                    // the observer completion handler or summary display.
+                    for workout in workouts.prefix(16) {
+                        self.enrichHeartRate(workout)
+                        self.enrichRoute(workout)
+                    }
                 }
                 self.isLoading = false
                 self.refreshing = false
@@ -157,6 +176,89 @@ final class HCRunHealthImporter: ObservableObject {
             }
         }
         store.execute(query)
+    }
+
+    private func patchRun(id: String, apply: (inout HCProgressRun) -> Void) {
+        guard let index = runs.firstIndex(where: { $0.id == id }) else { return }
+        var item = runs[index]
+        apply(&item)
+        runs[index] = item
+        if let url = try? cacheURL(), let data = try? JSONEncoder().encode(runs) {
+            try? data.write(to: url, options: .atomic)
+        }
+    }
+
+    /// Use samples from the SAME HealthKit source as the workout to avoid
+    /// silently combining simultaneous WHOOP and Apple Watch sensors.
+    private func enrichHeartRate(_ workout: HKWorkout) {
+        let id = "healthkit:\(workout.uuid.uuidString)"
+        guard let current = runs.first(where: { $0.id == id }),
+              current.heartRateTrace.isEmpty,
+              let kind = HKObjectType.quantityType(forIdentifier: .heartRate)
+        else { return }
+
+        let predicate = HKQuery.predicateForSamples(withStart: workout.startDate,
+                                                     end: workout.endDate,
+                                                     options: [.strictStartDate])
+        let sort = NSSortDescriptor(key: HKSampleSortIdentifierStartDate, ascending: true)
+        let query = HKSampleQuery(sampleType: kind, predicate: predicate,
+                                  limit: 15000, sortDescriptors: [sort]) { [weak self] _, found, error in
+            guard error == nil else { return }
+            let source = workout.sourceRevision.source.bundleIdentifier
+            let unit = HKUnit.count().unitDivided(by: .minute())
+            let values = (found as? [HKQuantitySample] ?? []).filter {
+                $0.sourceRevision.source.bundleIdentifier == source
+            }.map {
+                HCRunHeartPoint(at: $0.startDate, bpm: $0.quantity.doubleValue(for: unit))
+            }
+            guard !values.isEmpty else { return }
+            // Keep an evenly sampled, chart-friendly trace; calculate summary
+            // using all of the retrieved same-source measurements.
+            let stride = max(1, Int(ceil(Double(values.count) / 450.0)))
+            let chart = values.enumerated().compactMap { index, value in
+                index % stride == 0 ? value : nil
+            }
+            let avg = values.map(\.bpm).reduce(0, +) / Double(values.count)
+            let high = values.map(\.bpm).max()
+            DispatchQueue.main.async {
+                self?.patchRun(id: id) { run in
+                    run.heartRateTrace = chart
+                    if run.averageBPM == nil { run.averageBPM = avg }
+                    if run.maxBPM == nil { run.maxBPM = high }
+                }
+            }
+        }
+        store.execute(query)
+    }
+
+    private func enrichRoute(_ workout: HKWorkout) {
+        let id = "healthkit:\(workout.uuid.uuidString)"
+        guard runs.first(where: { $0.id == id })?.routePoints.isEmpty == true else { return }
+
+        let predicate = HKQuery.predicateForObjects(from: workout)
+        let sampleQuery = HKSampleQuery(sampleType: HKSeriesType.workoutRoute(),
+                                        predicate: predicate, limit: 4,
+                                        sortDescriptors: nil) { [weak self] _, found, error in
+            guard error == nil, let route = (found as? [HKWorkoutRoute])?.first else { return }
+            var coordinates: [CLLocation] = []
+            let routeQuery = HKWorkoutRouteQuery(route: route) { _, locations, done, failure in
+                DispatchQueue.main.async {
+                    guard failure == nil else { return }
+                    coordinates.append(contentsOf: locations ?? [])
+                    guard done, !coordinates.isEmpty else { return }
+                    let stride = max(1, Int(ceil(Double(coordinates.count) / 650.0)))
+                    let path = coordinates.enumerated().compactMap { index, value -> HCRunRoutePoint? in
+                        guard index % stride == 0 || index == coordinates.count - 1 else { return nil }
+                        return HCRunRoutePoint(latitude: value.coordinate.latitude,
+                                               longitude: value.coordinate.longitude,
+                                               altitudeMeters: value.altitude)
+                    }
+                    self?.patchRun(id: id) { $0.routePoints = path }
+                }
+            }
+            self?.store.execute(routeQuery)
+        }
+        store.execute(sampleQuery)
     }
 
     private func convert(_ workout: HKWorkout) -> HCProgressRun {
