@@ -20,12 +20,24 @@ function textFromResponse(data: any): string {
 
 export default {
   fetch: withSupabase({ auth: "user" }, async (req, ctx) => {
-    if (req.method !== "POST") {
-      return Response.json({ error: "POST required" }, { status: 405, headers });
-    }
     const userID = String(ctx.userClaims?.id ?? ctx.userClaims?.sub ?? "");
     if (!userID) {
       return Response.json({ error: "Sign in required" }, { status: 401, headers });
+    }
+    const model = Deno.env.get("IMUN_AI_MODEL") ||
+      Deno.env.get("OPENAI_MODEL") || "gpt-6-luna";
+    const apiKey = Deno.env.get("OPENAI_API_KEY");
+    if (req.method === "GET") {
+      // Authenticated diagnostics; never expose credentials to the client.
+      return Response.json({
+        ready: Boolean(apiKey),
+        model,
+        message: apiKey ? "AI coach backend configured" :
+          "The server's OPENAI_API_KEY secret is missing"
+      }, { headers });
+    }
+    if (req.method !== "POST") {
+      return Response.json({ error: "POST required" }, { status: 405, headers });
     }
     const now = Date.now();
     const timestamps = (recent.get(userID) ?? []).filter(t => now - t < 3600_000);
@@ -42,14 +54,13 @@ export default {
     if (question.length < 2 || question.length > 1500) {
       return Response.json({ error: "Enter a training question" }, { status: 400, headers });
     }
-    const key = Deno.env.get("OPENAI_API_KEY");
+    const key = apiKey;
     if (!key) {
       return Response.json({ error: "AI server key is not configured yet" },
         { status: 503, headers });
     }
     recent.set(userID, [...timestamps, now]);
-    const model = Deno.env.get("IMUN_AI_MODEL") ??
-      Deno.env.get("OPENAI_MODEL") ?? "gpt-6";
+
     const instructions = [
       "You are imun Coach, a supportive training assistant for a strength and endurance app.",
       "Use supplied training context only. Never invent schedules, workout results or wearable measurements.",
