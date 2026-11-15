@@ -13,6 +13,7 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
     @Published private(set) var plannedSessions: [HCPlannedSession] = []
     @Published private(set) var trainingActivities: [HCTrainingActivity] = []
     @Published private(set) var movingWorkoutID: String?
+    @Published private(set) var lastArchiveAt: Date?
     // Apple Health running results stay on device unless user elects to share them.
     private var importedHealthRuns: [HCProgressRun] = []
     private var remoteRunHistory: [HCProgressRun] = []
@@ -52,9 +53,50 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
         }
     }
 
+    /// Keep a complete, private, source-labelled on-device snapshot of the
+    /// original planner and historical training JSON. Normalized charts are
+    /// convenient, but must not silently discard legacy details.
+    var legacyArchiveURL: URL? {
+        let url = local("imun-original-training-archive.json")
+        return FileManager.default.fileExists(atPath: url.path) ? url : nil
+    }
+
+    private func saveOriginalSources(planner: [String: Any], history: [String: Any],
+                                     activities: [HCTrainingActivity],
+                                     recovery: [HCRecoveryDatum]) {
+        guard let activityBytes = try? encoder.encode(activities),
+              let recoveryBytes = try? encoder.encode(recovery),
+              let activityJSON = try? JSONSerialization.jsonObject(with: activityBytes),
+              let recoveryJSON = try? JSONSerialization.jsonObject(with: recoveryBytes)
+        else { return }
+        let snapshot: [String: Any] = [
+            "format": "imun-original-sources-v1",
+            "archivedAt": ISO8601DateFormatter().string(from: Date()),
+            "plannerState": planner,
+            "hybridCoachState": history,
+            "workoutCompletionEvents": activityJSON,
+            "recoveryDailyMetrics": recoveryJSON
+        ]
+        guard JSONSerialization.isValidJSONObject(snapshot),
+              let bytes = try? JSONSerialization.data(withJSONObject: snapshot,
+                                                      options: [.prettyPrinted, .sortedKeys])
+        else { return }
+        let file = local("imun-original-training-archive.json")
+        do {
+            try bytes.write(to: file, options: .atomic)
+            try? FileManager.default.setAttributes(
+                [.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication],
+                ofItemAtPath: file.path)
+            lastArchiveAt = Date()
+        } catch {
+            status = "Training history loaded; original archive failed: \(error.localizedDescription)"
+        }
+    }
+
     override init() {
         super.init()
         loggedSets = read("health-coach-watch-sets.json") ?? []
+        lastArchiveAt = read("imun-source-archive-date.json")
         plannedSessions = read("imun-planned-workouts.json") ?? []
         trainingActivities = read("imun-training-activity-history.json") ?? []
         importedHealthRuns = read("apple-health-imported-runs.json") ?? []
@@ -175,6 +217,12 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
                     self.trainingActivities = activities
                     self.save(self.plannedSessions, name: "imun-planned-workouts.json")
                     self.save(activities, name: "imun-training-activity-history.json")
+                    self.saveOriginalSources(planner: snapshot.planner,
+                                             history: snapshot.history,
+                                             activities: activities, recovery: recovery)
+                    if let archived = self.lastArchiveAt {
+                        self.save(archived, name: "imun-source-archive-date.json")
+                    }
                     self.performanceHistory = history
                     self.remoteRunHistory = priorRuns
                     self.mergeRunHistory()
