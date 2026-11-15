@@ -180,6 +180,145 @@ actor HCCloudClient {
         return try JSONDecoder().decode(HCWorkout.self, from: bytes)
     }
 
+    func saveWorkout(_ workout: HCWorkout) async throws {
+        let authenticated = try await authorizedToken()
+        let bytes = try JSONEncoder().encode(workout)
+        guard let plan = try JSONSerialization.jsonObject(with: bytes) as? [String: Any]
+        else { throw HCCloudError.malformedResponse }
+        _ = try await send(path: "/rest/v1/health_coach_native_plans",
+                           query: [URLQueryItem(name: "on_conflict", value: "user_id,workout_date")],
+                           method: "POST",
+                           json: [[
+                             "user_id": authenticated.userID,
+                             "workout_date": workout.date,
+                             "plan": plan,
+                             "updated_at": ISO8601DateFormatter().string(from: Date())
+                           ]],
+                           bearer: authenticated.access,
+                           prefer: "resolution=merge-duplicates,return=minimal")
+    }
+
+    private func readRows(_ table: String, fields: String, otherQuery: [URLQueryItem] = [],
+                          limit: Int = 500) async throws -> [[String: Any]] {
+        let authenticated = try await authorizedToken()
+        let data = try await send(path: "/rest/v1/\(table)", query: [
+            URLQueryItem(name: "select", value: fields),
+            URLQueryItem(name: "user_id", value: "eq.\(authenticated.userID)"),
+            URLQueryItem(name: "limit", value: String(limit))
+        ] + otherQuery, bearer: authenticated.access)
+        guard let rows = try JSONSerialization.jsonObject(with: data) as? [[String: Any]]
+        else { throw HCCloudError.malformedResponse }
+        return rows
+    }
+
+    private func numeric(_ x: Any?) -> Double? {
+        if let n = x as? NSNumber { return n.doubleValue }
+        if let s = x as? String { return Double(s) }
+        return nil
+    }
+
+    func fetchWatchPerformance(before: String) async throws -> [HCPerformanceSet] {
+        let rows = try await readRows("health_coach_watch_sets",
+            fields: "exercise_name,weight_lb,reps,rir,workout_date",
+            otherQuery: [
+                URLQueryItem(name: "workout_date", value: "lt.\(before)"),
+                URLQueryItem(name: "order", value: "workout_date.desc")
+            ])
+        return rows.compactMap { x -> HCPerformanceSet? in
+            guard let name = x["exercise_name"] as? String,
+                  let w = numeric(x["weight_lb"]), w > 0,
+                  let reps = numeric(x["reps"]), reps > 0,
+                  let date = x["workout_date"] as? String else { return nil }
+            return .init(exercise:name,weightLb:w,reps:Int(reps),
+                         rir:numeric(x["rir"]),date:date)
+        }
+    }
+
+    func fetchRunHistory() async throws -> [HCProgressRun] {
+        let old = try await readRows("workout_completion_events",
+            fields: "id,workout_date,title,source,activity_distance_m,activity_duration_sec,activity_avg_hr",
+            otherQuery: [
+                URLQueryItem(name: "workout_kind", value: "eq.run"),
+                URLQueryItem(name: "order", value: "workout_date.desc")
+            ])
+        let watch = try await readRows("health_coach_native_runs",
+            fields: "id,workout_date,distance_meters,started_at,ended_at,avg_heart_rate_bpm,source,splits",
+            otherQuery: [URLQueryItem(name: "order", value: "workout_date.desc")])
+        let converted: [HCProgressRun] = old.compactMap { x in
+            guard let date = x["workout_date"] as? String,
+                  let id = x["id"] as? String else { return nil }
+            return HCProgressRun(id:id,date:date,title:x["title"] as? String ?? "Run",
+                source:x["source"] as? String ?? "Connected service",
+                distanceMeters:numeric(x["activity_distance_m"]),
+                durationSeconds:numeric(x["activity_duration_sec"]),
+                averageBPM:numeric(x["activity_avg_hr"]),splits:[])
+        }
+        let native: [HCProgressRun] = watch.compactMap { x in
+            guard let date = x["workout_date"] as? String,
+                  let id = x["id"] as? String else { return nil }
+            let started = (x["started_at"] as? String).flatMap { ISO8601DateFormatter().date(from:$0) }
+            let ended = (x["ended_at"] as? String).flatMap { ISO8601DateFormatter().date(from:$0) }
+            let splits = ((x["splits"] as? [[String: Any]]) ?? []).enumerated().map { i, lap in
+                HCRunSplit(index:i+1,
+                           elapsedSeconds:numeric(lap["elapsedSeconds"]) ?? 0,
+                           distanceMeters:numeric(lap["distanceMeters"]))
+            }
+            return HCProgressRun(id:id,date:date,title:"Apple Watch Run",
+                source:x["source"] as? String ?? "Apple Watch",
+                distanceMeters:numeric(x["distance_meters"]),
+                durationSeconds:started != nil && ended != nil ? ended!.timeIntervalSince(started!) : nil,
+                averageBPM:numeric(x["avg_heart_rate_bpm"]),splits:splits)
+        }
+        // Both Apple Watch and an imported provider may describe the same run.
+        var unique:[HCProgressRun]=[]
+        for x in (native+converted).sorted(by:{$0.date > $1.date}) {
+            let duplicate=unique.contains { other in
+                other.date==x.date && other.distanceMeters != nil && x.distanceMeters != nil
+                  && abs(other.distanceMeters!-x.distanceMeters!) < 150
+                  && abs((other.durationSeconds ?? 0)-(x.durationSeconds ?? 0)) < 90
+            }
+            if !duplicate {unique.append(x)}
+        }
+        return unique
+    }
+
+    func fetchRecoveryHistory() async throws -> [HCRecoveryDatum] {
+        let rows=try await readRows("recovery_daily_metrics",
+            fields:"metric_date,sleep_seconds,hrv_ms,hrv_baseline_ms,daily_low_hr_bpm,source",
+            otherQuery:[URLQueryItem(name:"order",value:"metric_date.desc")],limit:120)
+        return rows.compactMap { x in
+            guard let date=x["metric_date"] as? String else{return nil}
+            return HCRecoveryDatum(date:date,sleepSeconds:numeric(x["sleep_seconds"]),
+                                   hrvMS:numeric(x["hrv_ms"]),hrvBaselineMS:numeric(x["hrv_baseline_ms"]),
+                                   dailyLowHR:numeric(x["daily_low_hr_bpm"]),
+                                   source:x["source"] as? String ?? "Tredict")
+        }
+    }
+
+    func upload(_ run: HCRunFinished) async throws {
+        let authenticated=try await authorizedToken()
+        let iso=ISO8601DateFormatter()
+        iso.formatOptions=[.withInternetDateTime,.withFractionalSeconds]
+        let rows=run.splits.map {[
+            "index":$0.index,
+            "elapsedSeconds":$0.elapsedSeconds,
+            "distanceMeters":$0.distanceMeters.map{$0 as Any} ?? NSNull()
+        ]}
+        _ = try await send(path:"/rest/v1/health_coach_native_runs",
+            query:[URLQueryItem(name:"on_conflict",value:"id")],
+            method:"POST",json:[[ "id":run.id.uuidString.lowercased(),
+                "user_id":authenticated.userID,
+                "plan_id":run.planID.map{$0 as Any} ?? NSNull(),
+                "workout_date":run.date,
+                "started_at":iso.string(from:run.startedAt),
+                "ended_at":iso.string(from:run.endedAt),
+                "distance_meters":run.distanceMeters.map{$0 as Any} ?? NSNull(),
+                "avg_heart_rate_bpm":run.averageHeartRate.map{$0 as Any} ?? NSNull(),
+                "splits":rows,"source":"Apple Watch"
+            ]],bearer:authenticated.access,
+            prefer:"resolution=ignore-duplicates,return=minimal")
+    }
+
     func upload(_ set: HCLoggedSet) async throws {
         let authenticated = try await authorizedToken()
         let stamp = ISO8601DateFormatter()
@@ -200,6 +339,8 @@ actor HCCloudClient {
         ]
         body["weight_lb"] = set.weightLb.map { $0 as Any } ?? NSNull()
         body["rir"] = set.rir.map { $0 as Any } ?? NSNull()
+        body["started_at"] = set.startedAt.map { stamp.string(from:$0) as Any } ?? NSNull()
+        body["duration_seconds"] = set.durationSeconds.map { $0 as Any } ?? NSNull()
 
         _ = try await send(path: "/rest/v1/health_coach_watch_sets",
                            query: [URLQueryItem(name: "on_conflict", value: "id")],
