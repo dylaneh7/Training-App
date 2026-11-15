@@ -41,7 +41,7 @@ struct PremiumHomeView: View {
             NavigationStack { PremiumProgressPage() }
                 .tabItem { Label("Progress", systemImage: "chart.xyaxis.line") }
             NavigationStack { PremiumRecoveryPage(appleHealth: appleHealth) }
-                .tabItem { Label("Recovery", systemImage: "waveform.path.ecg") }
+                .tabItem { Label("Health", systemImage: "heart.text.square.fill") }
             NavigationStack { PremiumCoachPage() }
                 .tabItem { Label("Coach", systemImage: "bubble.left.and.text.bubble.right") }
         }
@@ -99,6 +99,7 @@ struct PremiumHomeView: View {
 private struct PremiumTrainingPage: View {
     @EnvironmentObject private var coach: PhoneWorkoutBridge
     @AppStorage("hcTrainingActivity") private var chosenActivity = "weightlifting"
+    @State private var activityPickerExpanded = false
 
     private var selected: IMUNTrainingActivity {
         IMUNTrainingActivity(rawValue: chosenActivity) ?? .weightlifting
@@ -120,77 +121,91 @@ private struct PremiumTrainingPage: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            VStack(alignment: .leading, spacing: 13) {
-                HCPremiumHero(eyebrow: "YOUR PERFORMANCE SPACE",
-                              title: "Train with intention.",
-                              subtitle: Date().formatted(.dateTime.weekday(.wide).month(.wide).day()),
-                              icon: "figure.run.circle",
-                              tint: HCDesign.electric) {
-                    HStack(spacing: 9) {
-                        HCInsightChip(title: coach.signedIn ? "PLAN CONNECTED" : "SIGN IN TO SYNC",
-                                      symbol: coach.signedIn ? "checkmark.icloud" : "icloud.slash",
-                                      tint: coach.signedIn ? HCDesign.good : HCDesign.amber)
-                        Spacer()
-                        Text("IMUN / 01")
-                            .font(HCDesign.label(10))
-                            .foregroundStyle(HCDesign.secondary)
-                    }
-                }
-
-                HStack(spacing: 9) {
-                    ForEach(IMUNTrainingActivity.allCases) { activity in
-                        let active = selected == activity
-                        Button {
-                            withAnimation(.easeInOut(duration: 0.2)) {
-                                chosenActivity = activity.rawValue
-                            }
-                        } label: {
-                            VStack(spacing: 7) {
-                                Image(systemName: activity.symbol)
-                                    .font(.system(size: 21, weight: .medium))
-                                Text(activity.title.uppercased())
-                                    .font(HCDesign.label(11))
-                                    .tracking(0.6)
-                            }
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 14)
-                            .foregroundStyle(active ? HCDesign.onAccent : HCDesign.secondary)
-                            .background(active ? HCDesign.electric : HCDesign.raised,
-                                        in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-                            .overlay {
-                                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                                    .strokeBorder(active ? HCDesign.electric : HCDesign.outline, lineWidth: 1)
-                            }
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityAddTraits(active ? [.isSelected] : [])
-                    }
-                }
-                .accessibilityLabel("Choose training activity")
-
-                HCCard(accent: HCDesign.aqua) {
-                    HStack(spacing: 13) {
-                        Image(systemName: "calendar.badge.clock")
-                            .font(.system(size: 20))
+            VStack(alignment: .leading, spacing: 9) {
+                HStack {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("IMUN / TRAINING")
+                            .font(HCDesign.label(9))
+                            .tracking(1.5)
                             .foregroundStyle(HCDesign.aqua)
-                            .frame(width: 37)
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("TODAY'S PLANNED \(selected.title.uppercased())")
-                                .font(HCDesign.label(9))
-                                .tracking(1.3)
-                                .foregroundStyle(HCDesign.secondary)
-                            Text(plannedTitle)
-                                .font(.system(size: 17, weight: .bold, design: .rounded))
-                                .foregroundStyle(HCDesign.ink)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                        Spacer(minLength: 0)
+                        Text("Training")
+                            .font(HCDesign.display(25))
+                            .foregroundStyle(HCDesign.ink)
                     }
+                    Spacer()
+                    Text(Date().formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day()))
+                        .font(HCDesign.label(11))
+                        .foregroundStyle(HCDesign.secondary)
+                }
+
+                Button {
+                    withAnimation(.easeInOut(duration: 0.22)) {
+                        activityPickerExpanded.toggle()
+                    }
+                } label: {
+                    HStack(spacing: 12) {
+                        Image(systemName: selected.symbol)
+                            .font(.system(size: 17, weight: .bold))
+                            .foregroundStyle(HCDesign.electric)
+                            .frame(width: 34, height: 34)
+                            .background(HCDesign.electric.opacity(0.13),
+                                        in: RoundedRectangle(cornerRadius: 10))
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(selected.title)
+                                .font(.system(size: 15, weight: .bold, design: .rounded))
+                                .foregroundStyle(HCDesign.ink)
+                            Text(plannedTitle)
+                                .font(.system(size: 11, weight: .medium))
+                                .lineLimit(1)
+                                .foregroundStyle(HCDesign.secondary)
+                        }
+                        Spacer(minLength: 8)
+                        Text("CHANGE")
+                            .font(HCDesign.label(9))
+                            .tracking(0.5)
+                            .foregroundStyle(HCDesign.aqua)
+                        Image(systemName: activityPickerExpanded ? "chevron.up" : "chevron.down")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(HCDesign.aqua)
+                    }
+                    .padding(.horizontal, 13)
+                    .padding(.vertical, 9)
+                    .background(HCDesign.card,
+                                in: RoundedRectangle(cornerRadius: 15, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 15, style: .continuous)
+                                .strokeBorder(HCDesign.outline, lineWidth: 1))
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Selected activity \(selected.title). Tap to change.")
+
+                if activityPickerExpanded {
+                    HStack(spacing: 9) {
+                        ForEach(IMUNTrainingActivity.allCases) { activity in
+                            Button {
+                                withAnimation(.easeInOut(duration: 0.22)) {
+                                    chosenActivity = activity.rawValue
+                                    activityPickerExpanded = false
+                                }
+                            } label: {
+                                Label(activity.title, systemImage: activity.symbol)
+                                    .font(.system(size: 12, weight: .semibold))
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.vertical, 12)
+                                    .foregroundStyle(selected == activity ?
+                                        HCDesign.onAccent : HCDesign.ink)
+                                    .background(selected == activity ?
+                                        HCDesign.electric : HCDesign.raised,
+                                        in: RoundedRectangle(cornerRadius: 12))
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .transition(.opacity.combined(with: .move(edge: .top)))
                 }
             }
             .padding(.horizontal, 18)
-            .padding(.top, 12)
-            .padding(.bottom, 14)
+            .padding(.top, 8)
+            .padding(.bottom, 10)
 
             Rectangle()
                 .fill(HCDesign.outline.opacity(0.65))
