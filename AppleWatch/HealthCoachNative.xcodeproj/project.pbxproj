@@ -5,6 +5,26 @@
 	};
 	objectVersion = 56;
 	objects = {
+		000000000000000000000047 = {
+			isa = PBXFileReference;
+			lastKnownFileType = folder.assetcatalog;
+			path = "Assets.xcassets";
+			sourceTree = "<group>";
+		};
+		000000000000000000000048 = {
+			isa = PBXFileReference;
+			lastKnownFileType = folder.assetcatalog;
+			path = "Assets.xcassets";
+			sourceTree = "<group>";
+		};
+		000000000000000000000049 = {
+			isa = PBXBuildFile;
+			fileRef = 000000000000000000000047;
+		};
+		00000000000000000000004A = {
+			isa = PBXBuildFile;
+			fileRef = 000000000000000000000048;
+		};
 		000000000000000000000041 = {
 			isa = PBXFileReference;
 			lastKnownFileType = "sourcecode.swift";
@@ -104,6 +124,7 @@
 				000000000000000000000041,
 				000000000000000000000042,
 				000000000000000000000045,
+				000000000000000000000047,
 			);
 			path = iPhone;
 			sourceTree = "<group>";
@@ -153,6 +174,7 @@
 				00000000000000000000000E,
 				00000000000000000000000F,
 				000000000000000000000010,
+				000000000000000000000048,
 			);
 			path = Watch;
 			sourceTree = "<group>";
@@ -277,6 +299,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				000000000000000000000049,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -315,6 +338,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				00000000000000000000004A,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -358,6 +382,7 @@
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
 				GENERATE_INFOPLIST_FILE = NO;
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CURRENT_PROJECT_VERSION = "1";
 				MARKETING_VERSION = "1.0";
 				CODE_SIGN_ENTITLEMENTS = "iPhone/HealthCoachPhone.entitlements";
@@ -379,6 +404,7 @@
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
 				GENERATE_INFOPLIST_FILE = NO;
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CURRENT_PROJECT_VERSION = "1";
 				MARKETING_VERSION = "1.0";
 				CODE_SIGN_ENTITLEMENTS = "iPhone/HealthCoachPhone.entitlements";
@@ -408,6 +434,7 @@
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
 				GENERATE_INFOPLIST_FILE = NO;
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CURRENT_PROJECT_VERSION = "1";
 				MARKETING_VERSION = "1.0";
 				INFOPLIST_FILE = "Watch/Info.plist";
@@ -429,6 +456,7 @@
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
 				GENERATE_INFOPLIST_FILE = NO;
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CURRENT_PROJECT_VERSION = "1";
 				MARKETING_VERSION = "1.0";
 				INFOPLIST_FILE = "Watch/Info.plist";
