@@ -41,7 +41,7 @@ jobs:
               names = {item.get("filename") for item in manifest["images"]}
               assert "IMUNIcon.png" in names, "Missing IMUN app icon declaration"
               data = (folder / "IMUNIcon.png").read_bytes()
-              assert data[:8] == b"\\x89PNG\\r\\n\\x1a\\n"
+              assert data[:8] == bytes([137, 80, 78, 71, 13, 10, 26, 10])
               position, compressed, chunks = 8, [], []
               while position < len(data):
                   size = struct.unpack(">I", data[position:position+4])[0]
