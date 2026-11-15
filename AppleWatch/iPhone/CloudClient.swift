@@ -202,12 +202,12 @@ actor HCCloudClient {
     /// Tredict entries include Garmin-synced sessions already in Command Center.
     func fetchActivityHistory() async throws -> [HCTrainingActivity] {
         let rows = try await readRows("workout_completion_events",
-            fields: "id,workout_date,workout_kind,title,source,activity_distance_m,activity_duration_sec,activity_avg_hr,activity_max_hr,activity_calories,activity_rpe",
+            fields: "id,workout_date,workout_kind,title,source,external_id,activity_distance_m,activity_duration_sec,activity_duration_total_sec,activity_avg_hr,activity_max_hr,activity_calories,activity_pace_sec_km,activity_rpe,activity_enjoyment,activity_attribution",
             otherQuery: [URLQueryItem(name: "order", value: "workout_date.desc")],limit:1500)
         return rows.compactMap { row in
             guard let id = row["id"] as? String,
                   let date = row["workout_date"] as? String else { return nil }
-            return HCTrainingActivity(
+            var activity = HCTrainingActivity(
                 id: id, date: date,
                 title: row["title"] as? String ?? "Workout",
                 kind: row["workout_kind"] as? String ?? "other",
@@ -218,6 +218,12 @@ actor HCCloudClient {
                 maxBPM: numeric(row["activity_max_hr"]),
                 calories: numeric(row["activity_calories"]),
                 perceivedEffort: numeric(row["activity_rpe"]))
+            activity.totalDurationSeconds = numeric(row["activity_duration_total_sec"])
+            activity.paceSecondsPerKm = numeric(row["activity_pace_sec_km"])
+            activity.enjoyment = numeric(row["activity_enjoyment"])
+            activity.attribution = row["activity_attribution"] as? String
+            activity.externalID = row["external_id"] as? String
+            return activity
         }
     }
 
