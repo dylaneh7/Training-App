@@ -17,6 +17,10 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
     @Published private(set) var loading = false
     @Published private(set) var savingPlan = false
     @Published private(set) var cloudPendingCount = 0
+    @Published private(set) var phoneSessionStartedAt: Date?
+    @Published private(set) var phoneSetExerciseID: String?
+    @Published private(set) var phoneSetStartedAt: Date?
+    @Published private(set) var phoneRestEndsAt: Date?
 
     private let cloud = HCCloudClient()
     private let encoder = JSONEncoder()
@@ -48,6 +52,10 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
         completedWatchRuns = read("health-coach-native-runs.json") ?? []
         uploadedIDs = Set(read("uploaded-watch-set-ids.json") ?? [])
         pendingEditedWorkout = read("pending-edited-workout.json")
+        phoneSessionStartedAt = read("iphone-session-start.json")
+        phoneSetStartedAt = read("iphone-set-start.json")
+        phoneSetExerciseID = read("iphone-set-exercise.json")
+        phoneRestEndsAt = read("iphone-rest-end.json")
         workout = pendingEditedWorkout
         updatePendingCount()
         if WCSession.isSupported() {
@@ -231,6 +239,37 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
         }
     }
 
+    func startPhoneWorkout() {
+        guard phoneSessionStartedAt == nil else { return }
+        let started = Date()
+        phoneSessionStartedAt = started
+        save(started,name:"iphone-session-start.json")
+    }
+
+    func finishPhoneWorkout() {
+        guard phoneSetStartedAt == nil else { return }
+        phoneSessionStartedAt = nil
+        phoneRestEndsAt = nil
+        try? FileManager.default.removeItem(at: local("iphone-session-start.json"))
+        try? FileManager.default.removeItem(at: local("iphone-rest-end.json"))
+    }
+
+    func startPhoneSet(exercise: HCExercise) {
+        guard phoneSessionStartedAt != nil, phoneSetStartedAt == nil else { return }
+        phoneSetExerciseID = exercise.id
+        phoneSetStartedAt = Date()
+        phoneRestEndsAt = nil
+        save(exercise.id,name:"iphone-set-exercise.json")
+        save(phoneSetStartedAt,name:"iphone-set-start.json")
+    }
+
+    func cancelPhoneSet() {
+        phoneSetExerciseID = nil
+        phoneSetStartedAt = nil
+        try? FileManager.default.removeItem(at: local("iphone-set-exercise.json"))
+        try? FileManager.default.removeItem(at: local("iphone-set-start.json"))
+    }
+
     func logFromPhone(exercise: HCExercise, weightLb: Double?, reps: Int, rir: Double?) {
         guard let workout, reps > 0, reps <= 300,
               weightLb == nil || (weightLb! >= 0 && weightLb! <= 3000) else { return }
@@ -243,6 +282,13 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
                                 exerciseIndex:exercise.exerciseIndex,index:existing+1,
                                 weightLb:weightLb,reps:reps,rir:rir,completedAt:Date())
         entry.source = "iPhone"
+        if phoneSetExerciseID == exercise.id, let started = phoneSetStartedAt {
+            entry.startedAt = started
+            entry.durationSeconds = Date().timeIntervalSince(started)
+            cancelPhoneSet()
+            phoneRestEndsAt = Date().addingTimeInterval(Double(exercise.restSeconds))
+            save(phoneRestEndsAt,name:"iphone-rest-end.json")
+        }
         acceptSet(entry)
     }
 
@@ -273,6 +319,11 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
         }
         status="Updated set saved locally; syncing correction…"
         retryPendingCloudSets()
+    }
+
+    func skipPhoneRest() {
+        phoneRestEndsAt = nil
+        try? FileManager.default.removeItem(at: local("iphone-rest-end.json"))
     }
 
     private func updatePendingCount() {
