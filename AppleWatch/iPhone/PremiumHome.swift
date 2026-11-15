@@ -205,7 +205,8 @@ private struct PremiumStrengthPage: View {
                         }
                     }
                     HCSectionTitle(title: "Workout lineup", detail: "Tap to train")
-                    ForEach(Array(plan.exercises.enumerated()), id: \.element.id) { index, exercise in
+                    ForEach(plan.exercises.indices, id: \.self) { index in
+                        let exercise = plan.exercises[index]
                         NavigationLink {
                             PremiumExerciseSession(exerciseID: exercise.id)
                         } label: {
