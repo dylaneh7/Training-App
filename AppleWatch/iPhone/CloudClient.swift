@@ -345,6 +345,6 @@ actor HCCloudClient {
         _ = try await send(path: "/rest/v1/health_coach_watch_sets",
                            query: [URLQueryItem(name: "on_conflict", value: "id")],
                            method: "POST", json: [body], bearer: authenticated.access,
-                           prefer: "resolution=ignore-duplicates,return=minimal")
+                           prefer: "resolution=merge-duplicates,return=minimal")
     }
 }
