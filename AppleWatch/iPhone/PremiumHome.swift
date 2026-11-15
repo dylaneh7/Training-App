@@ -1472,90 +1472,319 @@ private struct PremiumProgressPage: View {
 
 // MARK: - Recovery: no invented WHOOP readiness
 
+// MARK: - Recovery: personal baselines without invented clinical claims
+private struct HCRecoverySignal: Identifiable {
+    let id: String
+    let label: String
+    let symbol: String
+    let source: String
+    let date: String
+    let current: Double
+    let baseline: Double?
+    let baselineLabel: String
+    let unit: String
+    let lowerIsWorse: Bool
+    let points: [HCPlotMark]
+
+    var formattedValue: String {
+        unit == "h" ? String(format: "%.1f h", current) :
+        String(format: "%.0f %@", current, unit)
+    }
+    var percent: Double? {
+        guard let baseline, baseline > 0 else { return nil }
+        return (current - baseline) * 100 / baseline
+    }
+    var unfavorableMagnitude: Double? {
+        guard let percent else { return nil }
+        return lowerIsWorse ? -percent : percent
+    }
+    // Conservative *display thresholds*, not diagnostic ranges.
+    var severity: Int {
+        guard let delta = unfavorableMagnitude else { return 0 }
+        if delta > 25 { return 2 }
+        if delta > 12 { return 1 }
+        return 0
+    }
+    var color: Color {
+        guard baseline != nil else { return HCDesign.secondary }
+        return severity == 2 ? HCDesign.danger :
+            severity == 1 ? HCDesign.caution : HCDesign.good
+    }
+    var comparison: String {
+        guard let percent, let baseline else {
+            return "More same-source history is needed for a reliable comparison."
+        }
+        let direction = percent < 0 ? "below" : "above"
+        return "\(Int(abs(percent).rounded()))% \(direction) your \(baselineLabel) baseline " +
+               "(\(String(format: "%.1f", baseline)) \(unit))"
+    }
+    var status: String {
+        baseline == nil ? "BASELINE PENDING" :
+        severity == 2 ? "OUTSIDE RECENT PATTERN" :
+        severity == 1 ? "WORTH WATCHING" : "NEAR YOUR BASELINE"
+    }
+    // A baseline-normalized display ring, NOT an invented recovery score.
+    var ringProgress: Double {
+        guard let baseline, baseline > 0 else { return 0 }
+        let ratio = lowerIsWorse ? current / baseline : baseline / max(0.01, current)
+        return min(1, max(0, ratio))
+    }
+
+    static func build(label: String, symbol: String, source: String,
+                      unit: String, lowerIsWorse: Bool,
+                      rows: [(String, Double)], suppliedBaseline: Double? = nil)
+        -> HCRecoverySignal? {
+        let unique = Dictionary(grouping: rows, by: { $0.0 })
+            .compactMap { date, readings -> (String, Double)? in
+                guard !readings.isEmpty else { return nil }
+                let values = readings.map { $0.1 }.sorted()
+                let middle = values.count / 2
+                let median = values.count.isMultiple(of: 2)
+                    ? (values[middle - 1] + values[middle]) / 2 : values[middle]
+                return (date, median)
+            }.sorted { $0.0 < $1.0 }
+        guard let latest = unique.last,
+              let anchor = HCPlanBuilder.startOfDate(latest.0) else { return nil }
+        let earlier = unique.dropLast().compactMap { row -> (Double, Int)? in
+            guard let day = HCPlanBuilder.startOfDate(row.0) else { return nil }
+            let delta = Calendar.current.dateComponents([.day], from: day, to: anchor).day ?? 999
+            return delta > 0 && delta <= 28 ? (row.1, delta) : nil
+        }
+        let seven = earlier.filter { $0.1 <= 7 }.map { $0.0 }
+        let month = earlier.map { $0.0 }
+        let baseline: Double? = {
+            if seven.count >= 5 { return seven.reduce(0,+) / Double(seven.count) }
+            if month.count >= 5 { return month.reduce(0,+) / Double(month.count) }
+            if let suppliedBaseline, suppliedBaseline > 0 { return suppliedBaseline }
+            return nil
+        }()
+        let baselineName = seven.count >= 5 ? "7-day" :
+            month.count >= 5 ? "28-day" : "provider-supplied"
+        return HCRecoverySignal(id: source + "-" + label, label: label, symbol: symbol,
+                                source: source, date: latest.0, current: latest.1,
+                                baseline: baseline, baselineLabel: baselineName,
+                                unit: unit, lowerIsWorse: lowerIsWorse,
+                                points: unique.suffix(30).compactMap { row in
+                                    HCPlanBuilder.startOfDate(row.0).map {
+                                        HCPlotMark(date: $0, value: row.1)
+                                    }
+                                })
+    }
+}
+
 private struct PremiumRecoveryPage: View {
     @EnvironmentObject private var coach: PhoneWorkoutBridge
     @ObservedObject var appleHealth: HCAppleHealthReader
+    @State private var showHistory = false
+
+    private var signals: [HCRecoverySignal] {
+        var result: [HCRecoverySignal] = []
+        let grouped = Dictionary(grouping: coach.recoveryHistory, by: \.source)
+        for source in grouped.keys.sorted() {
+            guard let items = grouped[source] else { continue }
+            let newest = items.sorted { $0.date > $1.date }.first
+            if let metric = HCRecoverySignal.build(
+                label: "HRV · RMSSD", symbol: "waveform.path.ecg",
+                source: source, unit: "ms", lowerIsWorse: true,
+                rows: items.compactMap { item in item.hrvMS.map { (item.date, $0) } },
+                suppliedBaseline: newest?.hrvBaselineMS) { result.append(metric) }
+            if let metric = HCRecoverySignal.build(
+                label: "Sleep", symbol: "moon.zzz.fill", source: source,
+                unit: "h", lowerIsWorse: true,
+                rows: items.compactMap { item in
+                    item.sleepSeconds.map { (item.date, $0 / 3600) }
+                }) { result.append(metric) }
+            if let metric = HCRecoverySignal.build(
+                label: "Daily low HR", symbol: "heart.fill", source: source,
+                unit: "bpm", lowerIsWorse: false,
+                rows: items.compactMap { item in item.dailyLowHR.map { (item.date, $0) } }
+            ) { result.append(metric) }
+        }
+        for metric in appleHealth.metrics where metric.name != "Sleep (asleep time)" {
+            let samples = appleHealth.metricHistory.filter {
+                $0.name == metric.name && $0.source == metric.source
+            }
+            if let signal = HCRecoverySignal.build(
+                label: metric.name,
+                symbol: metric.name.contains("HRV") ? "waveform.path.ecg" : "heart.fill",
+                source: metric.source,
+                unit: metric.name.contains("HRV") ? "ms" : "bpm",
+                lowerIsWorse: metric.name.contains("HRV"),
+                rows: samples.map { ($0.date, $0.value) }
+            ) { result.append(signal) }
+        }
+        return result.sorted { $0.date > $1.date }
+    }
+
+    private var flags: [HCRecoverySignal] {
+        signals.filter { $0.severity > 0 && $0.baseline != nil }
+    }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 19) {
-                PremiumHeader(eyebrow: "RECOVERY / SIGNALS",
-                              title: "Know your baseline.",
-                              subtitle: "Source-labeled recovery. No fictional metrics.")
-                HCCard(accent: HCDesign.aqua) {
+                HCPremiumHero(eyebrow: "RECOVERY / YOUR BASELINE",
+                              title: "Listen to the signals.",
+                              subtitle: "Trends that give today's numbers context.",
+                              icon: "waveform.path.ecg",
+                              tint: HCDesign.aqua) {
+                    HStack(alignment: .center, spacing: 15) {
+                        HCProgressRing(progress: signals.isEmpty ? 0 :
+                                       Double(signals.filter { $0.baseline != nil }.count) /
+                                       Double(max(1, signals.count)),
+                                       value: "\(signals.filter { $0.baseline != nil }.count)",
+                                       subtitle: "Baselines",
+                                       tint: HCDesign.aqua, diameter: 92)
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text(flags.isEmpty ? "YOUR BASELINE IS THE BENCHMARK" :
+                                 "\(flags.count) METRIC\(flags.count == 1 ? "" : "S") NEED ATTENTION")
+                                .font(.system(size: 14, weight: .bold, design: .rounded))
+                            Text("Ring shows available comparisons, not a made-up recovery score.")
+                                .font(.caption).foregroundStyle(HCDesign.secondary)
+                        }
+                    }
+                }
+
+                if !flags.isEmpty {
+                    HCSectionTitle(title: "Outside your recent pattern",
+                                   detail: "Personal comparisons")
+                    ForEach(flags) { metric in
+                        HCStatusLine(text: metric.label + " · " + metric.comparison,
+                                     symbol: "exclamationmark.triangle.fill",
+                                     tint: metric.color)
+                    }
+                    Text("These are training signals, not a medical diagnosis. Individual readings can be affected by device, illness, measurement time and sleep.")
+                        .font(.caption2).foregroundStyle(HCDesign.secondary)
+                } else if !signals.isEmpty {
+                    HCStatusLine(text: "No large unfavorable changes detected in metrics with sufficient same-source history.",
+                                 symbol: "checkmark.circle.fill", tint: HCDesign.good)
+                }
+
+                HCSectionTitle(title: "Your recovery signals",
+                               detail: "Previous 7 / 28 days")
+                if signals.isEmpty {
+                    HCCard {
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text("Build your baseline")
+                                .font(HCDesign.display(22))
+                            Text("Connect Apple Health or import Tredict / Garmin history. We need repeated readings from the same source before showing an out-of-range comparison.")
+                                .font(.subheadline).foregroundStyle(HCDesign.secondary)
+                        }
+                    }
+                }
+                ForEach(Array(signals.prefix(9))) { metric in
+                    HCCard(accent: metric.color) {
+                        VStack(alignment: .leading, spacing: 13) {
+                            HCMetricGauge(title: metric.label,
+                                          value: metric.formattedValue,
+                                          progress: metric.ringProgress,
+                                          detail: metric.comparison,
+                                          tint: metric.color,
+                                          symbol: metric.symbol)
+                            HStack {
+                                HCInsightChip(title: metric.status,
+                                              symbol: metric.severity > 0 ?
+                                                  "exclamationmark.circle" : "chart.line.uptrend.xyaxis",
+                                              tint: metric.color)
+                                Spacer()
+                                Text(metric.source)
+                                    .font(HCDesign.label(10))
+                                    .foregroundStyle(HCDesign.secondary)
+                                    .lineLimit(1)
+                            }
+                            if metric.points.count >= 2 {
+                                Chart(metric.points) { point in
+                                    LineMark(x: .value("Date", point.date),
+                                             y: .value("Reading", point.value))
+                                        .interpolationMethod(.catmullRom)
+                                        .foregroundStyle(metric.color)
+                                    AreaMark(x: .value("Date", point.date),
+                                             y: .value("Reading", point.value))
+                                        .foregroundStyle(metric.color.opacity(0.07))
+                                    if let baseline = metric.baseline {
+                                        RuleMark(y: .value("Baseline", baseline))
+                                            .lineStyle(StrokeStyle(lineWidth: 1, dash: [3, 4]))
+                                            .foregroundStyle(HCDesign.secondary.opacity(0.5))
+                                    }
+                                }
+                                .chartYAxis(.hidden)
+                                .chartXAxis(.hidden)
+                                .frame(height: 64)
+                                .accessibilityLabel("Recent trend of \(metric.label)")
+                            }
+                            Text("Last reading \(metric.date) · \(metric.baselineLabel) comparison when available")
+                                .font(.caption2).foregroundStyle(HCDesign.secondary)
+                        }
+                    }
+                }
+
+                HCSectionTitle(title: "Apple Health",
+                               detail: "Latest authorized measurements")
+                HCCard {
                     VStack(alignment: .leading, spacing: 14) {
-                        HCAccentTag(title: "APPLE HEALTH", color: HCDesign.aqua)
-                        Text("Apple Watch + WHOOP")
-                            .font(HCDesign.display(23))
-                        Text("Measurements appear only after permission. WHOOP data shows here only if it has been shared to Apple Health.")
-                            .font(.subheadline).foregroundStyle(HCDesign.secondary)
-                        HCFilledButton(title: "READ HEALTH MEASUREMENTS",
-                                       icon: "heart.text.square", tint: HCDesign.aqua) {
-                            appleHealth.connect()
+                        HStack(alignment: .top) {
+                            VStack(alignment: .leading, spacing: 5) {
+                                Text("Connected readings")
+                                    .font(HCDesign.display(19))
+                                Text("Watch and WHOOP values appear only when shared to Apple Health.")
+                                    .font(.caption).foregroundStyle(HCDesign.secondary)
+                            }
+                            Spacer()
+                            Image(systemName: "heart.text.square.fill")
+                                .font(.title).foregroundStyle(HCDesign.aqua)
+                        }
+                        if appleHealth.metrics.isEmpty {
+                            HCFilledButton(title: "CONNECT APPLE HEALTH",
+                                           icon: "heart.fill", tint: HCDesign.aqua) {
+                                appleHealth.connect()
+                            }
+                        }
+                        ForEach(appleHealth.metrics) { metric in
+                            HStack {
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text(metric.name)
+                                        .font(.system(size: 13, weight: .semibold))
+                                    Text(metric.source + " · " + metric.date)
+                                        .font(.caption2).foregroundStyle(HCDesign.secondary)
+                                }
+                                Spacer()
+                                Text(metric.value)
+                                    .font(HCDesign.metric(20))
+                                    .foregroundStyle(HCDesign.ink)
+                            }
+                            Divider().overlay(HCDesign.outline)
                         }
                         Text(appleHealth.status)
                             .font(.caption2).foregroundStyle(HCDesign.secondary)
                     }
                 }
-                HCSectionTitle(title: "Latest device readings")
-                ForEach(appleHealth.metrics) { metric in
-                    HCCard {
+
+                DisclosureGroup(isExpanded: $showHistory) {
+                    ForEach(Array(coach.recoveryHistory.prefix(14))) { item in
                         HStack {
-                            VStack(alignment: .leading, spacing: 6) {
-                                Text(metric.name.uppercased())
-                                    .font(HCDesign.label()).tracking(1.2)
-                                    .foregroundStyle(HCDesign.secondary)
-                                Text(metric.source + " · " + metric.date)
-                                    .font(.caption2).foregroundStyle(HCDesign.secondary)
-                            }
+                            Text(item.date + " · " + item.source)
                             Spacer()
-                            Text(metric.value)
-                                .font(HCDesign.metric(25))
-                                .foregroundStyle(HCDesign.electric)
+                            Text(item.hrvMS.map { String(format: "%.0f ms", $0) } ?? "—")
                         }
+                        .font(.caption2)
+                        .padding(.vertical, 4)
                     }
+                } label: {
+                    Label("See source history", systemImage: "clock.arrow.circlepath")
+                        .font(.system(size: 13, weight: .semibold))
                 }
-                HCSectionTitle(title: "Tredict / Garmin recovery history",
-                               detail: "\(coach.recoveryHistory.count) days")
-                ForEach(coach.recoveryHistory, id: \.date) { result in
-                    HCCard {
-                        VStack(alignment: .leading, spacing: 12) {
-                            Text(result.date + " · " + result.source)
-                                .font(.caption)
-                                .foregroundStyle(HCDesign.secondary)
-                            HStack {
-                                HCMetricBlock(label: "Sleep",
-                                              value: result.sleepSeconds.map(hcDuration) ?? "—")
-                                HCMetricBlock(label: "HRV RMSSD",
-                                              value: result.hrvMS.map { "\($0.formatted()) ms" } ?? "—",
-                                              tint: HCDesign.aqua)
-                            }
-                            HStack {
-                                HCMetricBlock(label: "Daily low HR",
-                                              value: result.dailyLowHR.map { "\($0.formatted())" } ?? "—")
-                                HCMetricBlock(label: "14-day HRV baseline",
-                                              value: result.hrvBaselineMS.map { "\($0.formatted())" } ?? "—")
-                            }
-                        }
-                    }
-                }
-                if coach.recoveryHistory.isEmpty {
-                    HCCard {
-                        Text("Tredict recovery will appear when the connected service has synced.")
-                            .foregroundStyle(HCDesign.secondary)
-                    }
-                }
-                HCCard {
-                    Text("Apple Health HRV (SDNN), Tredict HRV (RMSSD), and WHOOP Recovery use different definitions. We show labels and sources rather than combining them into a misleading score.")
-                        .font(.caption)
-                        .foregroundStyle(HCDesign.secondary)
-                }
-                Spacer(minLength: 30)
+                .tint(HCDesign.aqua)
+
+                Text("Apple Health SDNN and Tredict RMSSD are separate HRV measurements. Comparisons use the same named source only. Baselines require at least five earlier daily observations unless the provider supplies one. No proprietary WHOOP recovery score is inferred.")
+                    .font(.caption2)
+                    .foregroundStyle(HCDesign.secondary)
+                    .padding(.bottom, 28)
             }
             .padding(18)
         }
         .scrollIndicators(.hidden)
         .hcPage()
+        .navigationBarTitleDisplayMode(.inline)
     }
 }
 
