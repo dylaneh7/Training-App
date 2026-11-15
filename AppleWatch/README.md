@@ -3,6 +3,20 @@
 A standalone **native SwiftUI iPhone/watchOS companion** for the existing Health Coach web app. This folder is kept separate from the web app, so nothing here replaces your PWA or its workout history.
 
 
+## Apple Health + WHOOP automatic run import (2.1)
+
+On a **physical iPhone**, open **Run → Connect Apple Health** and allow reading workouts plus available running measurements. After you opt in, Health Coach checks saved running workouts during app launches/foreground returns and via a HealthKit workout observer. The iPhone HealthKit Background Delivery entitlement is enabled for supported development provisioning; true wake-up behavior still requires device testing.
+
+- **Apple Workout:** finish and save a Running workout using Apple's Workout app. The iPhone Health app must receive the workout before Health Coach can import it.
+- **WHOOP:** in WHOOP settings enable the Apple Health integration and enable WHOOP to **write Workouts** and supported measurements to Apple Health. WHOOP supports exporting auto-detected workouts, but Apple Health does not necessarily receive WHOOP's full proprietary workout analysis or routes.
+- **Run details:** see date, original source, elapsed time, distance, pace, average/max HR, calories, running power, cadence, elevation, actual lap events, and—in recently imported workouts, when present—attributed heart-rate samples and GPS route points. Missing data displays as missing, not generated values.
+- **Native schedule:** an imported run from a scheduled date marks that run complete in the local Health Coach view. Provider completion is not automatically written back to the external Command Center calendar; this feature does not promise a bidirectional sync.
+- **On Watch:** updated run summaries and the selected run plan arrive through WatchConnectivity after the iPhone's Health Coach app sends its context. GPS traces and detailed HR series are deliberately excluded from the watch transfer and remain on the iPhone.
+
+Deduplication compares HealthKit workout IDs and close matching dates/start times/distances/durations where legacy sources lack a shared ID. WHOOP and Apple can both export a single workout, so validate source attribution before trusting a duplicate.
+
+**Do not test automatic HealthKit background delivery in the simulator.** Apple requires testing that part on a real device. If your free Personal Team provisioning profile does not support the background-delivery entitlement, remove that capability for a foreground-only prototype or use the appropriate Apple Developer membership; continue to test the native timers normally.
+
 ## Health Coach 2.0 native redesign
 
 The iPhone entry point now loads **PremiumHomeView** with a unified premium dark palette and five deliberately designed tabs:
