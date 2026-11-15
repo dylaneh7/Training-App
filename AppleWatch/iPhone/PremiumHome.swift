@@ -2295,7 +2295,7 @@ private struct PremiumCoachQuickChat: View {
         .task(id: coach.signedIn) {
             if coach.signedIn {
                 let status = await coach.checkCoachAIConnection()
-                serviceStatus = status.hasPrefix("Secure AI") ? "CONNECTED" : "SETUP NEEDED"
+                serviceStatus = status.hasPrefix("Secure AI") ? "SERVER CONFIGURED" : "SETUP NEEDED"
                 serviceError = status.hasPrefix("Secure AI") ? nil : status
             } else {
                 serviceStatus = "SIGN IN REQUIRED"
@@ -2320,7 +2320,7 @@ private struct PremiumCoachQuickChat: View {
                 await MainActor.run {
                     turns.append(IMUNCoachTurn(role: "assistant", text: response))
                     waiting = false
-                    serviceStatus = "CONNECTED"
+                    serviceStatus = "AI RESPONDING"
                 }
             } catch {
                 await MainActor.run {
