@@ -290,6 +290,12 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
             var context:[String:Any] = [:]
             if let workout {context[HCPayload.workout] = try encoder.encode(workout)}
             if let runPlan {context[HCPayload.runPlan] = try encoder.encode(runPlan)}
+            // Preferences are lightweight and shared when the current plan is sent.
+            let prefs = UserDefaults.standard
+            context[HCPayload.accentStyle] = prefs.string(forKey: "hcAccentStyle") ?? "crimson"
+            context[HCPayload.weightIncrement] = prefs.object(forKey: "hcWeightIncrement") as? Double ?? 5.0
+            context[HCPayload.restOverride] = prefs.integer(forKey: "hcRestOverrideSeconds")
+            context[HCPayload.watchHaptics] = prefs.object(forKey: "hcWatchHaptics") as? Bool ?? true
             // Keep GPS coordinates and high-volume HR traces on the iPhone.
             // The Watch receives only compact source-labeled summaries.
             let watchRuns = runHistory.prefix(12).map { source -> HCProgressRun in
