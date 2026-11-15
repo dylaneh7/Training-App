@@ -2,50 +2,65 @@ import Foundation
 import Combine
 import WatchConnectivity
 
-/// Owns the iPhone/watch connection, offline queue and Health Coach cloud sync.
-/// Watch-origin events are persisted *before* attempting a network request.
+/// Observable iPhone coordinator: five app tabs share the same current date,
+/// cloud session, exercise history and WatchConnectivity queues.
 final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
     @Published private(set) var workout: HCWorkout?
+    @Published private(set) var runPlan: HCRunPlan?
     @Published private(set) var loggedSets: [HCLoggedSet] = []
+    @Published private(set) var completedWatchRuns: [HCRunFinished] = []
+    @Published private(set) var runHistory: [HCProgressRun] = []
+    @Published private(set) var recoveryHistory: [HCRecoveryDatum] = []
+    @Published private(set) var performanceHistory: [HCPerformanceSet] = []
     @Published private(set) var status = "Preparing Health Coach…"
     @Published private(set) var signedIn = false
     @Published private(set) var loading = false
+    @Published private(set) var savingPlan = false
     @Published private(set) var cloudPendingCount = 0
 
     private let cloud = HCCloudClient()
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
     private var uploadedIDs: Set<UUID> = []
+    private var syncingQueue = false
+    private var pendingEditedWorkout: HCWorkout?
 
-    private var storageDirectory: URL {
+    private var directory: URL {
         FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
     }
-    private var setsURL: URL { storageDirectory.appendingPathComponent("health-coach-watch-sets.json") }
-    private var uploadedURL: URL { storageDirectory.appendingPathComponent("uploaded-watch-set-ids.json") }
+    private func local(_ name: String) -> URL { directory.appendingPathComponent(name) }
+    private func read<T: Decodable>(_ name: String) -> T? {
+        guard let data = try? Data(contentsOf: local(name)) else { return nil }
+        return try? decoder.decode(T.self, from: data)
+    }
+    private func save<T: Encodable>(_ value: T, name: String) {
+        guard let data = try? encoder.encode(value) else { return }
+        do {
+            try data.write(to: local(name), options: .atomic)
+        } catch {
+            status = "Local save failed: \(error.localizedDescription)"
+        }
+    }
 
     override init() {
         super.init()
-        if let data = try? Data(contentsOf: setsURL),
-           let prior = try? decoder.decode([HCLoggedSet].self, from: data) {
-            loggedSets = prior
-        }
-        if let data = try? Data(contentsOf: uploadedURL),
-           let ids = try? decoder.decode([UUID].self, from: data) {
-            uploadedIDs = Set(ids)
-        }
+        loggedSets = read("health-coach-watch-sets.json") ?? []
+        completedWatchRuns = read("health-coach-native-runs.json") ?? []
+        uploadedIDs = Set(read("uploaded-watch-set-ids.json") ?? [])
+        pendingEditedWorkout = read("pending-edited-workout.json")
+        workout = pendingEditedWorkout
         updatePendingCount()
-
         if WCSession.isSupported() {
             WCSession.default.delegate = self
             WCSession.default.activate()
         } else {
-            status = "Watch Connectivity is not available on this device."
+            status = "Watch Connectivity is unavailable on this device."
         }
         Task {
-            let existing = await cloud.signedInUserID
+            let user = await cloud.signedInUserID
             DispatchQueue.main.async {
-                self.signedIn = existing != nil
-                if existing != nil { self.refresh(date: Date()) }
+                self.signedIn = user != nil
+                if user != nil { self.refresh(date: Date()) }
             }
         }
     }
@@ -63,7 +78,7 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
                 DispatchQueue.main.async {
                     self.signedIn = true
                     self.loading = false
-                    self.status = "Signed in to Health Coach."
+                    self.status = "Signed in to Health Coach"
                     self.refresh(date: date)
                 }
             } catch {
@@ -78,124 +93,222 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
     func logout() {
         Task { await cloud.signOut() }
         signedIn = false
-        workout = nil
-        status = "Signed out. Local logged sets are preserved on this phone."
+        status = "Signed out. Local workouts and sets are preserved."
+    }
+
+    func suggestion(for exercise: HCExercise, on date: String,
+                    aggressive: Bool = true) -> HCLoadSuggestion {
+        let relevant = performanceHistory.filter { $0.date < date }
+        let lastDate = relevant.sorted { $0.date > $1.date }.first?.date
+        let returned = lastDate.flatMap { HCPlanBuilder.startOfDate($0) }
+            .map { Date().timeIntervalSince($0) > 21 * 86400 } ?? false
+        return HCProgressionEngine.suggest(exercise, history: relevant,
+                                          aggressive: aggressive, returning: returned)
+    }
+
+    private func smartTargets(_ plan: HCWorkout, history: [HCPerformanceSet]) -> HCWorkout {
+        let smartExercises = plan.exercises.map { exercise -> HCExercise in
+            let target = HCProgressionEngine.suggest(exercise,
+                history: history.filter { $0.date < plan.date },
+                returning: plan.sessionKey.hasSuffix("SatUpper"))
+            return HCExercise(id:exercise.id, name:exercise.name,
+                originalName:exercise.originalName,exerciseIndex:exercise.exerciseIndex,
+                prescribedSets:exercise.prescribedSets,repMin:exercise.repMin,repMax:exercise.repMax,
+                suggestedWeightLb:exercise.suggestedWeightLb ?? target.weightLb,
+                restSeconds:exercise.restSeconds)
+        }
+        return HCWorkout(id:plan.id,date:plan.date,sessionKey:plan.sessionKey,
+                         title:plan.title,exercises:smartExercises,isPreview:false)
     }
 
     func refresh(date: Date) {
-        guard signedIn else { status = "Sign in to load your live plan."; return }
+        guard signedIn else { status = "Sign in to load your plan."; return }
         loading = true
-        status = "Loading your Health Coach plan…"
+        status = "Refreshing workouts and training history…"
         Task {
             do {
                 let snapshot = try await cloud.fetchPlannerAndHistory()
-                // Prefer the exact exercises and rep/weight edits exported by
-                // Health Coach web; use the locally versioned plan as fallback.
-                let published = try? await cloud.fetchPublishedPlan(date: HCPlanBuilder.dateString(date))
-                let planned = published ?? HCPlanBuilder.workout(for: date, planner: snapshot.planner,
-                                                                history: snapshot.history)
+                let dateText = HCPlanBuilder.dateString(date)
+                let watchHistory = (try? await cloud.fetchWatchPerformance(before:dateText)) ?? []
+                let history = HCPlanBuilder.performanceHistory(from:snapshot.history,before:date)
+                    + watchHistory
+                let saved = try? await cloud.fetchPublishedPlan(date:dateText)
+                let baseline = saved ?? HCPlanBuilder.workout(for:date,planner:snapshot.planner,
+                                                              history:snapshot.history)
+                let active = pendingEditedWorkout?.date == dateText
+                    ? pendingEditedWorkout : baseline.map { smartTargets($0,history:history) }
+                let run = HCPlanBuilder.run(for:date,planner:snapshot.planner)
+                let priorRuns = (try? await cloud.fetchRunHistory()) ?? []
+                let recovery = (try? await cloud.fetchRecoveryHistory()) ?? []
+
                 DispatchQueue.main.async {
-                    self.workout = planned
+                    self.workout = active
+                    self.runPlan = run
+                    self.performanceHistory = history
+                    self.runHistory = priorRuns
+                    self.recoveryHistory = recovery
                     self.loading = false
-                    self.status = planned == nil
-                        ? "No scheduled strength workout for this day."
-                        : "Ready: \(planned!.title)"
-                    if planned != nil { self.sendToWatch() }
+                    self.status = active == nil ? "No strength session on this date." :
+                        "Workout ready: \(active!.title)"
+                    self.sendToWatch()
                     self.retryPendingCloudSets()
+                    self.retryPendingWorkout()
                 }
             } catch {
                 DispatchQueue.main.async {
                     self.loading = false
-                    self.status = "Cannot load plan: \(error.localizedDescription)"
+                    self.status = "Unable to refresh: \(error.localizedDescription)"
                     self.retryPendingCloudSets()
+                }
+            }
+        }
+    }
+
+    func newWorkout(date: Date, title: String) {
+        let day = HCPlanBuilder.dateString(date)
+        let key = HCPlanBuilder.sessionKey(for:date)
+            ?? day.replacingOccurrences(of:"-",with:"") + "-Custom"
+        let plan = HCWorkout(id:"\(day)-\(key)",date:day,sessionKey:key,
+                             title:title.isEmpty ? "Custom Strength Workout" : title,
+                             exercises:[],isPreview:false)
+        saveEditedWorkout(plan)
+    }
+
+    func saveEditedWorkout(_ plan: HCWorkout) {
+        workout = plan
+        pendingEditedWorkout = plan
+        save(plan,name:"pending-edited-workout.json")
+        status = "Workout saved locally; syncing to watch and cloud…"
+        sendToWatch()
+        retryPendingWorkout()
+    }
+
+    func retryPendingWorkout() {
+        guard signedIn, !savingPlan, let toSave = pendingEditedWorkout else { return }
+        savingPlan = true
+        Task {
+            do {
+                try await cloud.saveWorkout(toSave)
+                DispatchQueue.main.async {
+                    // An edit may have occurred while the previous version saved.
+                    if self.pendingEditedWorkout?.id == toSave.id &&
+                        self.pendingEditedWorkout?.exercises == toSave.exercises &&
+                        self.pendingEditedWorkout?.title == toSave.title {
+                        self.pendingEditedWorkout = nil
+                        try? FileManager.default.removeItem(at:self.local("pending-edited-workout.json"))
+                    }
+                    self.savingPlan = false
+                    self.status = "Workout edits synced to Health Coach"
+                    if self.pendingEditedWorkout != nil { self.retryPendingWorkout() }
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    self.savingPlan = false
+                    self.status = "Workout changes saved offline; cloud retry available: \(error.localizedDescription)"
                 }
             }
         }
     }
 
     func sendToWatch() {
-        guard let workout else { status = "No workout to send."; return }
-        guard WCSession.isSupported() else { status = "Watch Connectivity unavailable."; return }
-        let session = WCSession.default
-        guard session.activationState == .activated, session.isPaired, session.isWatchAppInstalled
-        else {
-            status = "Install Health Coach Watch on your paired Apple Watch first."
+        guard WCSession.isSupported() else { return }
+        let connection = WCSession.default
+        guard connection.activationState == .activated,
+              connection.isPaired, connection.isWatchAppInstalled else {
+            status = "Install the Health Coach watch companion, then send again."
             return
         }
         do {
-            let payload = try encoder.encode(workout)
-            // Current workout replaces old context; logged sets use the reliable queue.
-            try session.updateApplicationContext([HCPayload.workout: payload])
-            status = "Workout sent or queued for Apple Watch."
+            var context:[String:Any] = [:]
+            if let workout {context[HCPayload.workout] = try encoder.encode(workout)}
+            if let runPlan {context[HCPayload.runPlan] = try encoder.encode(runPlan)}
+            if !context.isEmpty {
+                try connection.updateApplicationContext(context)
+                status = "Workout and run sent or queued for watch."
+            }
         } catch {
-            status = "Could not send workout: \(error.localizedDescription)"
+            status = "Watch transfer failed: \(error.localizedDescription)"
         }
     }
 
-    private func persistLocalSets() {
-        guard let data = try? encoder.encode(loggedSets) else { return }
-        do {
-            try data.write(to: setsURL, options: .atomic)
-        } catch {
-            status = "Could not save watch set locally: \(error.localizedDescription)"
-        }
+    func logFromPhone(exercise: HCExercise, weightLb: Double?, reps: Int, rir: Double?) {
+        guard let workout, reps > 0, reps <= 300,
+              weightLb == nil || (weightLb! >= 0 && weightLb! <= 3000) else { return }
+        let existing = loggedSets.filter {
+            $0.workoutID == workout.id && $0.exerciseID == exercise.id
+        }.count
+        var entry = HCLoggedSet(id:UUID(),workoutID:workout.id,workoutDate:workout.date,
+                                sessionKey:workout.sessionKey,workoutTitle:workout.title,
+                                exerciseID:exercise.id,exerciseName:exercise.name,
+                                exerciseIndex:exercise.exerciseIndex,index:existing+1,
+                                weightLb:weightLb,reps:reps,rir:rir,completedAt:Date())
+        entry.source = "iPhone"
+        acceptSet(entry)
     }
 
     private func updatePendingCount() {
-        cloudPendingCount = loggedSets.filter { !uploadedIDs.contains($0.id) }.count
+        cloudPendingCount = loggedSets.filter { !uploadedIDs.contains($0.id) }.count +
+            completedWatchRuns.filter { !uploadedIDs.contains($0.id) }.count
     }
 
-    private func persistUploadedIDs() {
-        if let bytes = try? encoder.encode(Array(uploadedIDs)) {
-            try? bytes.write(to: uploadedURL, options: .atomic)
-        }
+    private func acceptSet(_ entry: HCLoggedSet) {
+        guard !loggedSets.contains(where:{$0.id == entry.id}) else { return }
+        loggedSets.append(entry)
+        save(loggedSets,name:"health-coach-watch-sets.json")
         updatePendingCount()
+        status = "Set saved locally"
+        retryPendingCloudSets()
+    }
+
+    private func acceptRun(_ entry: HCRunFinished) {
+        guard !completedWatchRuns.contains(where:{$0.id == entry.id}) else { return }
+        completedWatchRuns.append(entry)
+        save(completedWatchRuns,name:"health-coach-native-runs.json")
+        updatePendingCount()
+        status = "Run saved locally"
+        retryPendingCloudSets()
     }
 
     func retryPendingCloudSets() {
-        guard signedIn else { return }
-        let pending = loggedSets.filter { !uploadedIDs.contains($0.id) }
-        guard !pending.isEmpty else { updatePendingCount(); return }
-
-        // A single sequential worker avoids simultaneous refresh-token requests.
+        guard signedIn, !syncingQueue else { return }
+        let pendingSets = loggedSets.filter { !uploadedIDs.contains($0.id) }
+        let pendingRuns = completedWatchRuns.filter { !uploadedIDs.contains($0.id) }
+        guard !pendingSets.isEmpty || !pendingRuns.isEmpty else { return }
+        syncingQueue = true
         Task {
-            for item in pending {
-                do {
-                    try await cloud.upload(item)
-                    DispatchQueue.main.async {
-                        self.uploadedIDs.insert(item.id)
-                        self.persistUploadedIDs()
-                        self.status = "Watch sets synced to Health Coach."
-                    }
-                } catch {
-                    DispatchQueue.main.async {
-                        self.status = "Sets saved locally. Cloud will retry: \(error.localizedDescription)"
-                    }
-                    break
+            var errorMessage: String?
+            var savedIDs:[UUID] = []
+            for s in pendingSets {
+                do { try await cloud.upload(s); savedIDs.append(s.id) }
+                catch { errorMessage=error.localizedDescription; break }
+            }
+            if errorMessage == nil {
+                for r in pendingRuns {
+                    do { try await cloud.upload(r); savedIDs.append(r.id) }
+                    catch { errorMessage=error.localizedDescription; break }
                 }
+            }
+            DispatchQueue.main.async {
+                self.uploadedIDs.formUnion(savedIDs)
+                self.save(Array(self.uploadedIDs),name:"uploaded-watch-set-ids.json")
+                self.updatePendingCount()
+                self.syncingQueue = false
+                self.status = errorMessage.map {
+                    "Saved offline. Sync will retry: \($0)"
+                } ?? "Workout data synced"
             }
         }
     }
 
-    private func accept(_ incoming: HCLoggedSet) {
-        guard !loggedSets.contains(where: { $0.id == incoming.id }) else { return }
-        loggedSets.append(incoming)
-        persistLocalSets()
-        updatePendingCount()
-        status = "Received a set from Apple Watch."
-        retryPendingCloudSets()
-    }
-
     // MARK: - Watch Connectivity
 
-    func session(_ session: WCSession,
-                 activationDidCompleteWith state: WCSessionActivationState,
-                 error: Error?) {
+    func session(_ session: WCSession, activationDidCompleteWith state: WCSessionActivationState, error: Error?) {
         DispatchQueue.main.async {
             if state == .activated {
-                if self.workout != nil { self.sendToWatch() }
+                self.sendToWatch()
+                self.retryPendingCloudSets()
             } else if let error {
-                self.status = error.localizedDescription
+                self.status = "Watch not ready: \(error.localizedDescription)"
             }
         }
     }
@@ -204,10 +317,16 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
     func sessionDidDeactivate(_ session: WCSession) { session.activate() }
 
     func session(_ session: WCSession, didReceiveUserInfo userInfo: [String: Any] = [:]) {
-        guard userInfo[HCPayload.kind] as? String == HCPayload.loggedSet,
-              let payload = userInfo[HCPayload.data] as? Data,
-              let set = try? decoder.decode(HCLoggedSet.self, from: payload)
-        else { return }
-        DispatchQueue.main.async { self.accept(set) }
+        guard let kind = userInfo[HCPayload.kind] as? String,
+              let payload = userInfo[HCPayload.data] as? Data else { return }
+        switch kind {
+        case HCPayload.loggedSet:
+            guard let item = try? decoder.decode(HCLoggedSet.self,from:payload) else { return }
+            DispatchQueue.main.async { self.acceptSet(item) }
+        case HCPayload.completedRun:
+            guard let item = try? decoder.decode(HCRunFinished.self,from:payload) else { return }
+            DispatchQueue.main.async { self.acceptRun(item) }
+        default: break
+        }
     }
 }
