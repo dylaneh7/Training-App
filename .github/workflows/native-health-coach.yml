@@ -15,7 +15,7 @@ permissions:
 
 jobs:
   apple-simulator-build:
-    runs-on: macos-15
+    runs-on: macos-26
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
@@ -34,8 +34,38 @@ jobs:
             -scheme HealthCoach \
             -configuration Debug \
             -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath /tmp/healthcoach-derived \
             CODE_SIGNING_ALLOWED=NO \
             | tee /tmp/healthcoach-build.log
+      - name: Verify modern watch embedding in iPhone app
+        run: |
+          APP=/tmp/healthcoach-derived/Build/Products/Debug-iphonesimulator/HealthCoach.app
+          test -d "$APP"
+          test -d "$APP/PlugIns/HealthCoachWatch.app"
+          if test -d "$APP/Watch/HealthCoachWatch.app"; then
+            echo "::error::Legacy Watch/ embed detected; modern watch target needs PlugIns/"
+            exit 1
+          fi
+          /usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$APP/PlugIns/HealthCoachWatch.app/Info.plist"
+          /usr/libexec/PlistBuddy -c "Print :WKCompanionAppBundleIdentifier" "$APP/PlugIns/HealthCoachWatch.app/Info.plist"
+      - name: Install iPhone app with embedded watch on simulator
+        run: |
+          APP=/tmp/healthcoach-derived/Build/Products/Debug-iphonesimulator/HealthCoach.app
+          SIMULATOR_ID=$(xcrun simctl list devices available -j | python3 -c '
+          import json,sys
+          devices=json.load(sys.stdin)["devices"]
+          options=[d for xs in devices.values() for d in xs
+                   if "iPhone" in d.get("name","") and d.get("isAvailable",True)]
+          print(options[0]["udid"] if options else "")
+          ')
+          if [ -z "$SIMULATOR_ID" ]; then
+            echo "::error::No available iPhone simulator was found"
+            exit 1
+          fi
+          xcrun simctl boot "$SIMULATOR_ID"
+          xcrun simctl bootstatus "$SIMULATOR_ID" -b
+          xcrun simctl install "$SIMULATOR_ID" "$APP"
+          xcrun simctl shutdown "$SIMULATOR_ID"
       - name: Test strength progression conversions
         run: |
           swiftc \
