@@ -112,6 +112,18 @@ struct HCTrainingActivity: Codable, Identifiable {
     var enjoyment: Double? = nil
     var attribution: String? = nil
     var externalID: String? = nil
+    // Source-attributed extended metrics, populated only when recorded.
+    var powerWatts: Double? = nil
+    var cadenceSPM: Double? = nil
+    var ascentMeters: Double? = nil
+    var strengthSetCount: Int? = nil
+    var strengthRepetitions: Int? = nil
+    var tonnageKilograms: Double? = nil
+    var maxSetWeightKilograms: Double? = nil
+    var activeSetSeconds: Double? = nil
+    var restSeconds: Double? = nil
+    var runningEffectiveness: Double? = nil
+    var vo2Max: Double? = nil
 }
 
 struct HCProgressRun: Codable, Identifiable {
