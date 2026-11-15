@@ -2,6 +2,27 @@
 
 A standalone **native SwiftUI iPhone/watchOS companion** for the existing Health Coach web app. This folder is kept separate from the web app, so nothing here replaces your PWA or its workout history.
 
+
+## Health Coach 2.0 native redesign
+
+The iPhone entry point now loads **PremiumHomeView** with a unified premium dark palette and five deliberately designed tabs:
+
+- **Strength:** session overview, timer, completed-set/volume metrics, fast set weight/reps/RIR adjustments, personalized suggestions, workout editor and exercise library.
+- **Run:** today's planned run, optional completed splits, pace, distances and prior sessions.
+- **Progress:** per-exercise load and running mileage charts based on actual recorded data.
+- **Recovery:** Apple Health measurements (including WHOOP-sourced readings when available), plus source-labeled Tredict history. Incompatible HRV types are not mixed.
+- **Coach:** progression preference, private coaching notes, user-initiated AI export, sync visibility and account controls.
+
+The Apple Watch app now uses a separate wrist-optimized interface with prominent strength/run start controls, a persistent workout timer, per-set Start / Stop & Save, rest countdowns and haptic notification, and manual run laps. Offline event storage and cloud bridges are unchanged.
+
+### Updating the Mac copy
+
+**If you previously downloaded a ZIP:** the files on your Mac do not auto-update. Download a new ZIP from the repository, unpack it and open the new \`AppleWatch/HealthCoachNative.xcodeproj\`. Select your signing team if prompted, and Run again to replace the installed build.
+
+**For future edits:** clone this repository through Xcode Source Control or \`git clone\`. Then subsequent assistant commits can be received with \`git pull\` instead of redownloading the whole archive.
+
+A code commit or a successful simulator build is not proof of usability on a real Apple Watch. Check workout starts, set-saving, heart-rate permissions and watch-to-phone delivery on paired devices. If a new screen doesn't load, ensure Xcode is opening the latest copy of the repository.
+
 ## What is ready
 
 - A **directly openable Xcode project** at [HealthCoachNative.xcodeproj](HealthCoachNative.xcodeproj), with both app targets, embedded watch app, two shared schemes, automatic-signing settings, HealthKit entitlements, and Info.plist files.
