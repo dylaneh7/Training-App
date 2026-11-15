@@ -25,7 +25,10 @@ struct HCTrainingClock: Codable {
 }
 
 final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
-    @Published private(set) var workout: HCWorkout = .preview
+    @Published private(set) var workout: HCWorkout = .unscheduled(date: WatchWorkoutStore.today())
+    @Published private(set) var scheduleState = "loading"
+    @Published private(set) var scheduleUpdatedAt: Date?
+    @Published private(set) var hasScheduledLift = false
     @Published private(set) var runPlan: HCRunPlan?
     @Published private(set) var runHistory: [HCProgressRun] = []
     @Published private(set) var sets: [HCLoggedSet] = []
@@ -38,6 +41,16 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
     private var queuedIDs: Set<UUID> = []
+    private var latestSchedule: HCWatchSchedule?
+
+    static func today() -> String {
+        let f = DateFormatter()
+        f.calendar = Calendar(identifier: .gregorian)
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.timeZone = .current
+        f.dateFormat = "yyyy-MM-dd"
+        return f.string(from: Date())
+    }
 
     private var directory: URL {
         FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
@@ -45,7 +58,11 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
 
     override init() {
         super.init()
-        if let s: HCWorkout = load("workout.json") { workout = s }
+        // Never revive the older hardcoded Saturday example or yesterday's cache.
+        if let snapshot: HCWatchSchedule = load("latest-schedule.json"),
+           snapshot.date == Self.today() {
+            applySchedule(snapshot)
+        }
         if let s: [HCLoggedSet] = load("sets.json") { sets = s }
         if let s: [UUID] = load("queued-ids.json") { queuedIDs = Set(s) }
         if let s: HCTrainingClock = load("lifting-clock.json") { liftClock = s }
@@ -59,6 +76,7 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
             WCSession.default.delegate = self
             WCSession.default.activate()
             applyContext(WCSession.default.receivedApplicationContext)
+            requestCurrentSchedule()
         }
     }
 
@@ -132,7 +150,9 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
     // MARK: - Full strength session clock
 
     func startLifting() {
-        guard liftClock?.isActive != true && runClock?.isActive != true else { return }
+        invalidatePreviousDayIfNeeded()
+        guard hasScheduledLift, workout.date == Self.today(), !workout.exercises.isEmpty,
+              liftClock?.isActive != true && runClock?.isActive != true else { return }
         liftClock = HCTrainingClock(workoutID: workout.id, startedAt: Date())
         let first = workout.exercises.first(where: {
             completedSets(for: $0).count < $0.prescribedSets
@@ -168,6 +188,8 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
         clock.restEndsAt = nil
         liftClock = clock
         save(clock, name: "lifting-clock.json")
+        if let latestSchedule { applySchedule(latestSchedule) }
+        invalidatePreviousDayIfNeeded()
     }
 
     // MARK: - Per-set clock and rest period
@@ -329,9 +351,84 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
 
     // MARK: - WatchConnectivity
 
+    private func invalidatePreviousDayIfNeeded() {
+        let today = Self.today()
+        guard latestSchedule?.date != today else { return }
+        scheduleState = "loading"
+        scheduleUpdatedAt = nil
+        latestSchedule = nil
+        runPlan = nil
+        hasScheduledLift = false
+        // Preserve an in-progress workout until the user finishes it.
+        if liftClock?.isActive != true {
+            workout = .unscheduled(date: today)
+            guidedExerciseID = nil
+        }
+    }
+
+    private func applySchedule(_ schedule: HCWatchSchedule) {
+        guard schedule.date == Self.today() else {
+            invalidatePreviousDayIfNeeded()
+            return
+        }
+        if let previous = latestSchedule, previous.date == schedule.date,
+           previous.generatedAt > schedule.generatedAt { return }
+        latestSchedule = schedule
+        scheduleState = schedule.state
+        scheduleUpdatedAt = schedule.generatedAt
+        if schedule.state == "ready" {
+            runPlan = schedule.runPlan?.date == schedule.date ? schedule.runPlan : nil
+            hasScheduledLift = schedule.workout?.date == schedule.date
+            if liftClock?.isActive == true && workout.id != schedule.workout?.id {
+                // Do not interrupt a recording when another device edits the plan.
+                status = "Schedule changed; active workout preserved until finish."
+            } else {
+                workout = schedule.workout?.date == schedule.date
+                    ? schedule.workout! : .unscheduled(date: schedule.date)
+                if let selected = guidedExerciseID,
+                   !workout.exercises.contains(where: { $0.id == selected }) {
+                    guidedExerciseID = workout.exercises.first?.id
+                }
+                status = hasScheduledLift ? "Today synced from iPhone" : "Rest day · No lift scheduled"
+            }
+        } else if schedule.state == "signedOut" {
+            hasScheduledLift = false
+            runPlan = nil
+            if liftClock?.isActive != true { workout = .unscheduled(date: schedule.date) }
+            status = "Sign in on your iPhone to view the training plan."
+        } else {
+            // A failed/ongoing cloud refresh must not masquerade as a rest day.
+            status = "Checking today's iPhone schedule…"
+            if liftClock?.isActive != true && !hasScheduledLift {
+                workout = .unscheduled(date: schedule.date)
+            }
+        }
+        save(schedule, name: "latest-schedule.json")
+    }
+
+    func requestCurrentSchedule() {
+        invalidatePreviousDayIfNeeded()
+        guard WCSession.isSupported(),
+              WCSession.default.activationState == .activated else { return }
+        let session = WCSession.default
+        if session.isReachable {
+            session.sendMessage([HCPayload.kind: HCPayload.requestSchedule],
+                                replyHandler: { [weak self] response in
+                DispatchQueue.main.async { self?.applyContext(response) }
+            }, errorHandler: { [weak self] _ in
+                DispatchQueue.main.async {
+                    self?.status = "iPhone unavailable · last confirmed schedule shown"
+                }
+            })
+        } else {
+            status = scheduleState == "ready" ?
+                "iPhone offline · last confirmed schedule shown" :
+                "Open imun on iPhone to sync today's plan"
+        }
+    }
+
     private func applyContext(_ context: [String: Any]) {
-        // Settings arrive from the user's iPhone. Users may also adjust these
-        // locally through the watch Preferences screen.
+        // Preferences are cheap to apply even while the plan is loading.
         if let color = context[HCPayload.accentStyle] as? String,
            ["crimson", "lime", "aqua", "white"].contains(color) {
             UserDefaults.standard.set(color, forKey: "hcAccentStyle")
@@ -347,35 +444,15 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
         if let haptics = context[HCPayload.watchHaptics] as? Bool {
             UserDefaults.standard.set(haptics, forKey: "hcWatchHaptics")
         }
-        if let data = context[HCPayload.workout] as? Data,
-           let next = try? decoder.decode(HCWorkout.self, from: data) {
-            DispatchQueue.main.async {
-                if self.liftClock?.isActive == true && self.workout.id != next.id {
-                    self.status = "Finish current lift before switching workouts."
-                } else {
-                    self.workout = next
-                    if let currentID = self.guidedExerciseID,
-                       !next.exercises.contains(where: { $0.id == currentID }) {
-                        self.guidedExerciseID = next.exercises.first?.id
-                    }
-                    self.save(next, name: "workout.json")
-                    self.status = "Workout updated from iPhone"
-                }
-            }
+        if let data = context[HCPayload.schedule] as? Data,
+           let snapshot = try? decoder.decode(HCWatchSchedule.self, from: data) {
+            DispatchQueue.main.async { self.applySchedule(snapshot) }
         }
         if let data = context[HCPayload.runHistory] as? Data,
            let history = try? decoder.decode([HCProgressRun].self, from: data) {
             DispatchQueue.main.async {
                 self.runHistory = Array(history.prefix(12))
                 self.save(self.runHistory, name: "run-history.json")
-                self.status = "Run history updated from iPhone"
-            }
-        }
-        if let data = context[HCPayload.runPlan] as? Data,
-           let next = try? decoder.decode(HCRunPlan.self, from: data) {
-            DispatchQueue.main.async {
-                self.runPlan = next
-                self.save(next, name: "run-plan.json")
             }
         }
     }
@@ -386,12 +463,30 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
         let session = WCSession.default
         for entry in sets where !queuedIDs.contains(entry.id) {
             guard let bytes = try? encoder.encode(entry) else { continue }
-            session.transferUserInfo([HCPayload.kind: HCPayload.loggedSet, HCPayload.data: bytes])
+            let packet: [String: Any] = [HCPayload.kind: HCPayload.loggedSet,
+                                         HCPayload.data: bytes]
+            session.transferUserInfo(packet)
+            if session.isReachable {
+                session.sendMessage(packet, replyHandler: { [weak self] reply in
+                    if reply["saved"] as? Bool == true {
+                        DispatchQueue.main.async { self?.status = "Set synced to iPhone" }
+                    }
+                }, errorHandler: { _ in /* background queue will deliver it */ })
+            }
             queuedIDs.insert(entry.id)
         }
         for run in completedRuns where !queuedIDs.contains(run.id) {
             guard let bytes = try? encoder.encode(run) else { continue }
-            session.transferUserInfo([HCPayload.kind: HCPayload.completedRun, HCPayload.data: bytes])
+            let packet: [String: Any] = [HCPayload.kind: HCPayload.completedRun,
+                                         HCPayload.data: bytes]
+            session.transferUserInfo(packet)
+            if session.isReachable {
+                session.sendMessage(packet, replyHandler: { [weak self] reply in
+                    if reply["saved"] as? Bool == true {
+                        DispatchQueue.main.async { self?.status = "Run synced to iPhone" }
+                    }
+                }, errorHandler: { _ in /* background queue will deliver it */ })
+            }
             queuedIDs.insert(run.id)
         }
         save(Array(queuedIDs), name: "queued-ids.json")
@@ -402,7 +497,10 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
                  activationDidCompleteWith state: WCSessionActivationState,
                  error: Error?) {
         if state == .activated {
-            DispatchQueue.main.async { self.sendPending() }
+            DispatchQueue.main.async {
+                self.sendPending()
+                self.requestCurrentSchedule()
+            }
         } else if let error {
             DispatchQueue.main.async { self.status = error.localizedDescription }
         }
