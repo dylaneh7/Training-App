@@ -82,7 +82,9 @@ struct HCRunSplit: Codable, Hashable, Identifiable {
     var id: Int { index }
 }
 
-struct HCProgressRun: Identifiable {
+/// A saved run from HealthKit, the watch, or an authorized existing provider.
+/// Optional fields reflect what that source actually shared: never invent metrics.
+struct HCProgressRun: Codable, Identifiable {
     let id: String
     let date: String
     let title: String
@@ -91,6 +93,15 @@ struct HCProgressRun: Identifiable {
     let durationSeconds: Double?
     let averageBPM: Double?
     let splits: [HCRunSplit]
+    var startedAt: Date? = nil
+    var endedAt: Date? = nil
+    var maxBPM: Double? = nil
+    var activeCalories: Double? = nil
+    var averagePowerWatts: Double? = nil
+    var averageCadenceSPM: Double? = nil
+    var elevationGainMeters: Double? = nil
+    var sourceBundleID: String? = nil
+    var fromAppleHealth: Bool = false
 }
 
 struct HCRecoveryDatum: Identifiable {
@@ -106,6 +117,7 @@ struct HCRecoveryDatum: Identifiable {
 enum HCPayload {
     static let workout = "workout"
     static let runPlan = "runPlan"
+    static let runHistory = "runHistory"
     static let completedRun = "completedRun"
     static let loggedSet = "loggedSet"
     static let kind = "kind"
