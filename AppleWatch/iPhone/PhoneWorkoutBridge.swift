@@ -476,9 +476,18 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
         }
     }
 
+    func checkCoachAIConnection() async -> String {
+        do {
+            return try await cloud.checkIMUNCoachAvailability()
+        } catch {
+            return "AI unavailable · " + error.localizedDescription
+        }
+    }
+
     /// No AI context is uploaded until a user explicitly taps Ask Coach.
     /// A Health/Recovery snapshot is transmitted only with the extra opt-in.
-    func askIMUNCoach(question: String, shareRecovery: Bool) async throws -> String {
+    func askIMUNCoach(question: String, shareRecovery: Bool,
+                      recentConversation: String = "") async throws -> String {
         let today = HCPlanBuilder.dateString(Date())
         var lines = ["Today: \(today)", "Source: IMUN training calendar and recorded workout history"]
         if let lift = workout, lift.date == today {
@@ -507,6 +516,12 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
                 let hr = datum.dailyLowHR.map { String(format: "%.0f bpm", $0) } ?? "missing"
                 lines.append("Recovery \(datum.source) \(datum.date): HRV RMSSD \(hrv), sleep \(sleep), low HR \(hr)")
             }
+        }
+        let prior = recentConversation.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !prior.isEmpty {
+            // Keep history small and device-initiated. Nothing is uploaded while idle.
+            lines.insert("Recent coach conversation (for continuity only): " +
+                         String(prior.suffix(1000)), at: 1)
         }
         return try await cloud.askIMUNCoach(question: question,
                                             context: lines.joined(separator: "\n"),

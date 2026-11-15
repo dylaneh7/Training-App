@@ -41,7 +41,7 @@ struct PremiumHomeView: View {
             NavigationStack { PremiumProgressPage() }
                 .tabItem { Label("Progress", systemImage: "chart.xyaxis.line") }
             NavigationStack { PremiumRecoveryPage(appleHealth: appleHealth) }
-                .tabItem { Label("Recovery", systemImage: "waveform.path.ecg") }
+                .tabItem { Label("Health", systemImage: "heart.text.square.fill") }
             NavigationStack { PremiumCoachPage() }
                 .tabItem { Label("Coach", systemImage: "bubble.left.and.text.bubble.right") }
         }
@@ -99,6 +99,7 @@ struct PremiumHomeView: View {
 private struct PremiumTrainingPage: View {
     @EnvironmentObject private var coach: PhoneWorkoutBridge
     @AppStorage("hcTrainingActivity") private var chosenActivity = "weightlifting"
+    @State private var activityPickerExpanded = false
 
     private var selected: IMUNTrainingActivity {
         IMUNTrainingActivity(rawValue: chosenActivity) ?? .weightlifting
@@ -120,77 +121,91 @@ private struct PremiumTrainingPage: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            VStack(alignment: .leading, spacing: 13) {
-                HCPremiumHero(eyebrow: "YOUR PERFORMANCE SPACE",
-                              title: "Train with intention.",
-                              subtitle: Date().formatted(.dateTime.weekday(.wide).month(.wide).day()),
-                              icon: "figure.run.circle",
-                              tint: HCDesign.electric) {
-                    HStack(spacing: 9) {
-                        HCInsightChip(title: coach.signedIn ? "PLAN CONNECTED" : "SIGN IN TO SYNC",
-                                      symbol: coach.signedIn ? "checkmark.icloud" : "icloud.slash",
-                                      tint: coach.signedIn ? HCDesign.good : HCDesign.amber)
-                        Spacer()
-                        Text("IMUN / 01")
-                            .font(HCDesign.label(10))
-                            .foregroundStyle(HCDesign.secondary)
-                    }
-                }
-
-                HStack(spacing: 9) {
-                    ForEach(IMUNTrainingActivity.allCases) { activity in
-                        let active = selected == activity
-                        Button {
-                            withAnimation(.easeInOut(duration: 0.2)) {
-                                chosenActivity = activity.rawValue
-                            }
-                        } label: {
-                            VStack(spacing: 7) {
-                                Image(systemName: activity.symbol)
-                                    .font(.system(size: 21, weight: .medium))
-                                Text(activity.title.uppercased())
-                                    .font(HCDesign.label(11))
-                                    .tracking(0.6)
-                            }
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 14)
-                            .foregroundStyle(active ? HCDesign.onAccent : HCDesign.secondary)
-                            .background(active ? HCDesign.electric : HCDesign.raised,
-                                        in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-                            .overlay {
-                                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                                    .strokeBorder(active ? HCDesign.electric : HCDesign.outline, lineWidth: 1)
-                            }
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityAddTraits(active ? [.isSelected] : [])
-                    }
-                }
-                .accessibilityLabel("Choose training activity")
-
-                HCCard(accent: HCDesign.aqua) {
-                    HStack(spacing: 13) {
-                        Image(systemName: "calendar.badge.clock")
-                            .font(.system(size: 20))
+            VStack(alignment: .leading, spacing: 9) {
+                HStack {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("IMUN / TRAINING")
+                            .font(HCDesign.label(9))
+                            .tracking(1.5)
                             .foregroundStyle(HCDesign.aqua)
-                            .frame(width: 37)
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("TODAY'S PLANNED \(selected.title.uppercased())")
-                                .font(HCDesign.label(9))
-                                .tracking(1.3)
-                                .foregroundStyle(HCDesign.secondary)
-                            Text(plannedTitle)
-                                .font(.system(size: 17, weight: .bold, design: .rounded))
-                                .foregroundStyle(HCDesign.ink)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                        Spacer(minLength: 0)
+                        Text("Training")
+                            .font(HCDesign.display(25))
+                            .foregroundStyle(HCDesign.ink)
                     }
+                    Spacer()
+                    Text(Date().formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day()))
+                        .font(HCDesign.label(11))
+                        .foregroundStyle(HCDesign.secondary)
+                }
+
+                Button {
+                    withAnimation(.easeInOut(duration: 0.22)) {
+                        activityPickerExpanded.toggle()
+                    }
+                } label: {
+                    HStack(spacing: 12) {
+                        Image(systemName: selected.symbol)
+                            .font(.system(size: 17, weight: .bold))
+                            .foregroundStyle(HCDesign.electric)
+                            .frame(width: 34, height: 34)
+                            .background(HCDesign.electric.opacity(0.13),
+                                        in: RoundedRectangle(cornerRadius: 10))
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(selected.title)
+                                .font(.system(size: 15, weight: .bold, design: .rounded))
+                                .foregroundStyle(HCDesign.ink)
+                            Text(plannedTitle)
+                                .font(.system(size: 11, weight: .medium))
+                                .lineLimit(1)
+                                .foregroundStyle(HCDesign.secondary)
+                        }
+                        Spacer(minLength: 8)
+                        Text("CHANGE")
+                            .font(HCDesign.label(9))
+                            .tracking(0.5)
+                            .foregroundStyle(HCDesign.aqua)
+                        Image(systemName: activityPickerExpanded ? "chevron.up" : "chevron.down")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(HCDesign.aqua)
+                    }
+                    .padding(.horizontal, 13)
+                    .padding(.vertical, 9)
+                    .background(HCDesign.card,
+                                in: RoundedRectangle(cornerRadius: 15, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 15, style: .continuous)
+                                .strokeBorder(HCDesign.outline, lineWidth: 1))
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Selected activity \(selected.title). Tap to change.")
+
+                if activityPickerExpanded {
+                    HStack(spacing: 9) {
+                        ForEach(IMUNTrainingActivity.allCases) { activity in
+                            Button {
+                                withAnimation(.easeInOut(duration: 0.22)) {
+                                    chosenActivity = activity.rawValue
+                                    activityPickerExpanded = false
+                                }
+                            } label: {
+                                Label(activity.title, systemImage: activity.symbol)
+                                    .font(.system(size: 12, weight: .semibold))
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.vertical, 12)
+                                    .foregroundStyle(selected == activity ?
+                                        HCDesign.onAccent : HCDesign.ink)
+                                    .background(selected == activity ?
+                                        HCDesign.electric : HCDesign.raised,
+                                        in: RoundedRectangle(cornerRadius: 12))
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .transition(.opacity.combined(with: .move(edge: .top)))
                 }
             }
             .padding(.horizontal, 18)
-            .padding(.top, 12)
-            .padding(.bottom, 14)
+            .padding(.top, 8)
+            .padding(.bottom, 10)
 
             Rectangle()
                 .fill(HCDesign.outline.opacity(0.65))
@@ -1534,6 +1549,7 @@ private struct HCRecoverySignal: Identifiable {
     let baselineLabel: String
     let unit: String
     let lowerIsWorse: Bool
+    let alertEnabled: Bool
     let points: [HCPlotMark]
 
     var formattedValue: String {
@@ -1550,7 +1566,7 @@ private struct HCRecoverySignal: Identifiable {
     }
     // Conservative *display thresholds*, not diagnostic ranges.
     var severity: Int {
-        guard let delta = unfavorableMagnitude else { return 0 }
+        guard alertEnabled, let delta = unfavorableMagnitude else { return 0 }
         if delta > 25 { return 2 }
         if delta > 12 { return 1 }
         return 0
@@ -1569,6 +1585,7 @@ private struct HCRecoverySignal: Identifiable {
                "(\(String(format: "%.1f", baseline)) \(unit))"
     }
     var status: String {
+        !alertEnabled ? "PERSONAL TREND" :
         baseline == nil ? "BASELINE PENDING" :
         severity == 2 ? "OUTSIDE RECENT PATTERN" :
         severity == 1 ? "WORTH WATCHING" : "NEAR YOUR BASELINE"
@@ -1582,7 +1599,8 @@ private struct HCRecoverySignal: Identifiable {
 
     static func build(label: String, symbol: String, source: String,
                       unit: String, lowerIsWorse: Bool,
-                      rows: [(String, Double)], suppliedBaseline: Double? = nil)
+                      rows: [(String, Double)], suppliedBaseline: Double? = nil,
+                      alertEnabled: Bool = true)
         -> HCRecoverySignal? {
         let unique = Dictionary(grouping: rows, by: { $0.0 })
             .compactMap { date, readings -> (String, Double)? in
@@ -1614,6 +1632,7 @@ private struct HCRecoverySignal: Identifiable {
                                 source: source, date: latest.0, current: latest.1,
                                 baseline: baseline, baselineLabel: baselineName,
                                 unit: unit, lowerIsWorse: lowerIsWorse,
+                                alertEnabled: alertEnabled,
                                 points: unique.suffix(30).compactMap { row in
                                     HCPlanBuilder.startOfDate(row.0).map {
                                         HCPlotMark(date: $0, value: row.1)
@@ -1626,6 +1645,52 @@ private struct PremiumRecoveryPage: View {
     @EnvironmentObject private var coach: PhoneWorkoutBridge
     @ObservedObject var appleHealth: HCAppleHealthReader
     @State private var showHistory = false
+    @State private var selectedHealthCategory = "Overview"
+    @State private var metricSearch = ""
+
+    private let categoryOrder = ["Heart & Vitals", "Sleep", "Activity & Energy",
+                                 "Running & Cycling", "Mobility",
+                                 "Body Measurements", "Metabolic & Nutrition", "Workouts"]
+    private var healthCategories: [String] {
+        let found = Set(appleHealth.metrics.map(\.category))
+        let main = categoryOrder.filter { found.contains($0) }
+        let whoop = (appleHealth.metrics.contains {
+            $0.source.localizedCaseInsensitiveContains("whoop")
+        } || coach.recoveryHistory.contains {
+            $0.source.localizedCaseInsensitiveContains("whoop")
+        }) ? ["WHOOP"] : []
+        return ["Overview", "All"] + whoop + main
+    }
+
+    private var visibleSignals: [HCRecoverySignal] {
+        let groupFiltered: [HCRecoverySignal]
+        switch selectedHealthCategory {
+        case "Overview":
+            groupFiltered = signals.filter {
+                let name = $0.label.lowercased()
+                return name.contains("hrv") || name.contains("sleep") ||
+                       name.contains("resting heart") || name.contains("respiratory") ||
+                       name.contains("blood oxygen") || name.contains("daily low hr")
+            }
+        case "All":
+            groupFiltered = signals
+        case "WHOOP":
+            groupFiltered = signals.filter {
+                $0.source.localizedCaseInsensitiveContains("whoop")
+            }
+        default:
+            let names = Set(appleHealth.metrics.filter {
+                $0.category == selectedHealthCategory
+            }.map(\.name))
+            groupFiltered = signals.filter { names.contains($0.label) }
+        }
+        let searched = metricSearch.trimmingCharacters(in: .whitespacesAndNewlines)
+        return (searched.isEmpty ? groupFiltered : groupFiltered.filter {
+            $0.label.localizedCaseInsensitiveContains(searched) ||
+            $0.source.localizedCaseInsensitiveContains(searched)
+        }).sorted { $0.date > $1.date }
+    }
+
 
     private var signals: [HCRecoverySignal] {
         var result: [HCRecoverySignal] = []
@@ -1650,33 +1715,39 @@ private struct PremiumRecoveryPage: View {
                 rows: items.compactMap { item in item.dailyLowHR.map { (item.date, $0) } }
             ) { result.append(metric) }
         }
-        for metric in appleHealth.metrics where metric.name != "Sleep (asleep time)" {
+        for metric in appleHealth.metrics {
             let samples = appleHealth.metricHistory.filter {
                 $0.name == metric.name && $0.source == metric.source
             }
             if let signal = HCRecoverySignal.build(
                 label: metric.name,
-                symbol: metric.name.contains("HRV") ? "waveform.path.ecg" : "heart.fill",
+                symbol: metric.category == "Sleep" ? "moon.zzz.fill" :
+                    metric.category == "Activity & Energy" ? "figure.walk" :
+                    metric.category == "Running & Cycling" ? "figure.run" :
+                    metric.category == "Metabolic & Nutrition" ? "leaf.fill" :
+                    "waveform.path.ecg",
                 source: metric.source,
-                unit: metric.name.contains("HRV") ? "ms" : "bpm",
-                lowerIsWorse: metric.name.contains("HRV"),
-                rows: samples.map { ($0.date, $0.value) }
+                unit: metric.unit,
+                lowerIsWorse: metric.lowerIsWorse,
+                rows: samples.map { ($0.date, $0.value) },
+                alertEnabled: metric.lowerIsWorse || metric.higherIsWorse
             ) { result.append(signal) }
         }
         return result.sorted { $0.date > $1.date }
     }
 
     private var flags: [HCRecoverySignal] {
-        signals.filter { $0.severity > 0 && $0.baseline != nil }
+        signals.filter { $0.alertEnabled && $0.severity > 0 &&
+                         $0.baseline != nil }
     }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 19) {
-                HCPremiumHero(eyebrow: "RECOVERY / YOUR BASELINE",
-                              title: "Listen to the signals.",
-                              subtitle: "Trends that give today's numbers context.",
-                              icon: "waveform.path.ecg",
+                HCPremiumHero(eyebrow: "IMUN / HEALTH",
+                              title: "See the whole picture.",
+                              subtitle: "Your metrics, their sources, and what has changed.",
+                              icon: "heart.text.square.fill",
                               tint: HCDesign.aqua) {
                     HStack(alignment: .center, spacing: 15) {
                         HCProgressRing(progress: signals.isEmpty ? 0 :
@@ -1710,8 +1781,40 @@ private struct PremiumRecoveryPage: View {
                                  symbol: "checkmark.circle.fill", tint: HCDesign.good)
                 }
 
-                HCSectionTitle(title: "Your recovery signals",
-                               detail: "Previous 7 / 28 days")
+                HCSectionTitle(title: "Explore your health",
+                               detail: "\(appleHealth.metrics.count) synced readings")
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(healthCategories, id: \.self) { group in
+                            Button {
+                                withAnimation(.easeInOut(duration: 0.2)) {
+                                    selectedHealthCategory = group
+                                }
+                            } label: {
+                                Text(group)
+                                    .font(.system(size: 12, weight: .semibold))
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 9)
+                                    .foregroundStyle(selectedHealthCategory == group ?
+                                        HCDesign.onAccent : HCDesign.secondary)
+                                    .background(selectedHealthCategory == group ?
+                                        HCDesign.electric : HCDesign.raised,
+                                        in: Capsule())
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+                TextField("Search health metrics or sources", text: $metricSearch)
+                    .textInputAutocapitalization(.never)
+                    .padding(13)
+                    .background(HCDesign.raised, in: RoundedRectangle(cornerRadius: 12))
+                    .font(.system(size: 13))
+                    .accessibilityLabel("Search available health measurements")
+
+                HCSectionTitle(title: selectedHealthCategory == "Overview" ?
+                               "Key health signals" : selectedHealthCategory,
+                               detail: "7 / 28-day comparisons")
                 if signals.isEmpty {
                     HCCard {
                         VStack(alignment: .leading, spacing: 12) {
@@ -1722,7 +1825,7 @@ private struct PremiumRecoveryPage: View {
                         }
                     }
                 }
-                ForEach(Array(signals.prefix(9))) { metric in
+                ForEach(visibleSignals) { metric in
                     HCCard(accent: metric.color) {
                         VStack(alignment: .leading, spacing: 13) {
                             HCMetricGauge(title: metric.label,
@@ -1768,8 +1871,8 @@ private struct PremiumRecoveryPage: View {
                     }
                 }
 
-                HCSectionTitle(title: "Apple Health",
-                               detail: "Latest authorized measurements")
+                HCSectionTitle(title: "Apple Health and WHOOP",
+                               detail: "Authorized sources")
                 HCCard {
                     VStack(alignment: .leading, spacing: 14) {
                         HStack(alignment: .top) {
@@ -1783,13 +1886,29 @@ private struct PremiumRecoveryPage: View {
                             Image(systemName: "heart.text.square.fill")
                                 .font(.title).foregroundStyle(HCDesign.aqua)
                         }
-                        if appleHealth.metrics.isEmpty {
-                            HCFilledButton(title: "CONNECT APPLE HEALTH",
-                                           icon: "heart.fill", tint: HCDesign.aqua) {
-                                appleHealth.connect()
-                            }
+                        HStack(spacing: 10) {
+                            HCOutlineButton(title: "Grant Health access",
+                                            icon: "heart.fill") { appleHealth.connect() }
+                            HCOutlineButton(title: appleHealth.loading ?
+                                            "Reading…" : "Refresh",
+                                            icon: "arrow.clockwise") { appleHealth.refreshIfAuthorized() }
                         }
-                        ForEach(appleHealth.metrics) { metric in
+                        if appleHealth.loading { ProgressView().tint(HCDesign.aqua) }
+                        Text("HealthKit lists only readings you have authorized and actually recorded. Apple Watch and WHOOP exports remain labeled by source.")
+                            .font(.caption2).foregroundStyle(HCDesign.secondary)
+                        ForEach(appleHealth.metrics.filter {
+                            selectedHealthCategory == "All" ||
+                            (selectedHealthCategory == "WHOOP" &&
+                             $0.source.localizedCaseInsensitiveContains("whoop")) ||
+                            (selectedHealthCategory == "Overview" &&
+                             (["Resting heart rate","HRV · SDNN","Respiratory rate",
+                               "Total asleep","Blood oxygen","Steps"].contains($0.name))) ||
+                            $0.category == selectedHealthCategory
+                        }.filter {
+                            metricSearch.isEmpty ||
+                            $0.name.localizedCaseInsensitiveContains(metricSearch) ||
+                            $0.source.localizedCaseInsensitiveContains(metricSearch)
+                        }) { metric in
                             HStack {
                                 VStack(alignment: .leading, spacing: 3) {
                                     Text(metric.name)
@@ -1825,7 +1944,22 @@ private struct PremiumRecoveryPage: View {
                 }
                 .tint(HCDesign.aqua)
 
-                Text("Apple Health SDNN and Tredict RMSSD are separate HRV measurements. Comparisons use the same named source only. Baselines require at least five earlier daily observations unless the provider supplies one. No proprietary WHOOP recovery score is inferred.")
+                HCCard {
+                    VStack(alignment: .leading, spacing: 9) {
+                        Text("WHOOP CONNECTION")
+                            .font(HCDesign.label(10))
+                            .tracking(1.2)
+                            .foregroundStyle(HCDesign.aqua)
+                        Text("WHOOP can share several health measurements and sleep to Apple Health after you enable its integration. WHOOP's proprietary Recovery score, Strain, and HRV RMSSD are not exported to Apple Health. They require an authorized WHOOP API connection, or source-labeled records from an existing connected service.")
+                            .font(.system(size: 12))
+                            .foregroundStyle(HCDesign.secondary)
+                        Link("WHOOP → Apple Health setup",
+                             destination: URL(string:"https://support.whoop.com/s/article/Apple-Health-Integration")!)
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(HCDesign.aqua)
+                    }
+                }
+                Text("Comparisons use readings from the same named source and never mix SDNN with RMSSD. A personal baseline requires five earlier daily observations or a provider baseline. Trends and flags are informational, not diagnostic.")
                     .font(.caption2)
                     .foregroundStyle(HCDesign.secondary)
                     .padding(.bottom, 28)
@@ -1835,6 +1969,7 @@ private struct PremiumRecoveryPage: View {
         .scrollIndicators(.hidden)
         .hcPage()
         .navigationBarTitleDisplayMode(.inline)
+        .onAppear { appleHealth.refreshIfAuthorized() }
     }
 }
 
@@ -1957,7 +2092,8 @@ private struct PremiumCoachPage: View {
                     }
                 }
 
-                HCSectionTitle(title: "Ask imun", detail: "Secure AI coaching")
+                PremiumCoachQuickChat()
+                HCSectionTitle(title: "More coaching", detail: "Full-screen view")
                 NavigationLink {
                     PremiumAskCoachPage()
                 } label: {
@@ -1970,9 +2106,9 @@ private struct PremiumCoachPage: View {
                                 .background(HCDesign.aqua.opacity(0.12),
                                             in: RoundedRectangle(cornerRadius: 14))
                             VStack(alignment: .leading, spacing: 5) {
-                                Text("Ask Coach")
+                                Text("Full-screen coaching")
                                     .font(HCDesign.display(19))
-                                Text("Understand your progress, workouts and training choices")
+                                Text("Separate workspace for longer questions")
                                     .font(.caption).foregroundStyle(HCDesign.secondary)
                             }
                             Spacer(minLength: 5)
@@ -2056,6 +2192,149 @@ private struct PremiumCoachPage: View {
 }
 
 // All original settings, exports and integrations are preserved here.
+// Real on-screen AI conversation. The model is called only on explicit Send.
+// The server uses the signed-in user's JWT; provider credentials stay server-side.
+private struct IMUNCoachTurn: Identifiable {
+    let id = UUID()
+    let role: String
+    let text: String
+}
+
+private struct PremiumCoachQuickChat: View {
+    @EnvironmentObject private var coach: PhoneWorkoutBridge
+    @AppStorage("hcAIShareRecovery") private var shareRecovery = false
+    @State private var question = ""
+    @State private var turns: [IMUNCoachTurn] = []
+    @State private var waiting = false
+    @State private var serviceStatus = "Checking the AI service…"
+    @State private var serviceError: String?
+    private var priorContext: String {
+        turns.suffix(6).map { ($0.role == "user" ? "Athlete: " : "Coach: ") + $0.text }
+            .joined(separator: "\n")
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HCSectionTitle(title: "AI Coach", detail: "Ask about your training")
+            HCCard(accent: HCDesign.aqua) {
+                VStack(alignment: .leading, spacing: 13) {
+                    HStack {
+                        Label("ASK IMUN", systemImage: "sparkles")
+                            .font(HCDesign.label(11))
+                            .tracking(1.2)
+                            .foregroundStyle(HCDesign.aqua)
+                        Spacer()
+                        Text(serviceStatus)
+                            .font(HCDesign.label(10))
+                            .foregroundStyle(serviceError == nil ?
+                                             HCDesign.good : HCDesign.caution)
+                            .lineLimit(2)
+                            .multilineTextAlignment(.trailing)
+                    }
+                    if !turns.isEmpty {
+                        ForEach(turns.suffix(8)) { turn in
+                            VStack(alignment: .leading, spacing: 5) {
+                                Text(turn.role == "user" ? "YOU" : "IMUN COACH · AI")
+                                    .font(HCDesign.label(9))
+                                    .tracking(1)
+                                    .foregroundStyle(turn.role == "user" ?
+                                                     HCDesign.secondary : HCDesign.aqua)
+                                Text(turn.text)
+                                    .font(.system(size: 14))
+                                    .foregroundStyle(HCDesign.ink)
+                                    .textSelection(.enabled)
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(11)
+                            .background(turn.role == "user" ?
+                                        HCDesign.raised : HCDesign.canvas.opacity(0.68),
+                                        in: RoundedRectangle(cornerRadius: 12))
+                        }
+                    } else {
+                        Text("Ask about today's workout, your running progress, or how to balance training with recovery.")
+                            .font(.system(size: 14))
+                            .foregroundStyle(HCDesign.secondary)
+                    }
+                    TextField("Ask your coach a question…",
+                              text: $question, axis: .vertical)
+                        .lineLimit(2...4)
+                        .font(.system(size: 14))
+                        .padding(12)
+                        .background(HCDesign.raised, in: RoundedRectangle(cornerRadius: 11))
+                    Toggle("Include recovery data in this question", isOn: $shareRecovery)
+                        .font(.system(size: 12))
+                        .tint(HCDesign.aqua)
+                    HStack(alignment: .center) {
+                        Text("Training context is shared only when you send.")
+                            .font(.caption2)
+                            .foregroundStyle(HCDesign.secondary)
+                        Spacer(minLength: 10)
+                        Button {
+                            send()
+                        } label: {
+                            Label(waiting ? "ASKING…" : "SEND", systemImage: "arrow.up")
+                                .font(.system(size: 12, weight: .bold))
+                                .foregroundStyle(HCDesign.canvas)
+                                .padding(.horizontal, 15)
+                                .padding(.vertical, 10)
+                                .background(HCDesign.aqua, in: Capsule())
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(waiting || !coach.signedIn ||
+                                  question.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    }
+                    if waiting { ProgressView().tint(HCDesign.aqua) }
+                    if let serviceError {
+                        HCStatusLine(text: serviceError,
+                                     symbol: "exclamationmark.triangle",
+                                     tint: HCDesign.caution)
+                    }
+                }
+            }
+        }
+        .task(id: coach.signedIn) {
+            if coach.signedIn {
+                let status = await coach.checkCoachAIConnection()
+                serviceStatus = status.hasPrefix("Secure AI") ? "SERVER CONFIGURED" : "SETUP NEEDED"
+                serviceError = status.hasPrefix("Secure AI") ? nil : status
+            } else {
+                serviceStatus = "SIGN IN REQUIRED"
+                serviceError = nil
+            }
+        }
+    }
+
+    private func send() {
+        let ask = question.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !waiting, !ask.isEmpty, coach.signedIn else { return }
+        let context = priorContext
+        question = ""
+        turns.append(IMUNCoachTurn(role: "user", text: ask))
+        waiting = true
+        serviceError = nil
+        Task {
+            do {
+                let response = try await coach.askIMUNCoach(
+                    question: ask, shareRecovery: shareRecovery,
+                    recentConversation: context)
+                await MainActor.run {
+                    turns.append(IMUNCoachTurn(role: "assistant", text: response))
+                    waiting = false
+                    serviceStatus = "AI RESPONDING"
+                }
+            } catch {
+                await MainActor.run {
+                    turns.append(IMUNCoachTurn(role: "assistant",
+                                               text: "I couldn't answer that request."))
+                    serviceError = error.localizedDescription
+                    serviceStatus = "CONNECTION ISSUE"
+                    waiting = false
+                }
+            }
+        }
+    }
+}
+
 // User-initiated AI, no continuous health upload and no client-side provider keys.
 private struct PremiumAskCoachPage: View {
     @EnvironmentObject private var coach: PhoneWorkoutBridge
