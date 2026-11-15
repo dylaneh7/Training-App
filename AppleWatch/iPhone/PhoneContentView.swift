@@ -919,19 +919,23 @@ private func paceText(seconds:Double,meters:Double)->String {
     return String(format:"%d:%02d /mi",pace/60,pace%60)
 }
 
-// Local Apple Health is not a proxy for WHOOP's proprietary recovery score.
-// Only quantities actually granted and present in Apple Health are displayed.
-struct HCHealthMetric:Identifiable {
-    let id=UUID()
-    let name:String
-    let value:String
-    let source:String
-    let date:String
+// HealthKit is a permission-based catalog: the available categories depend on
+// the user's devices, the data sources they have connected, and actual samples.
+// A WHOOP reading written to Apple Health is attributed to WHOOP; the private
+// WHOOP RMSSD / recovery/strain score requires the separate WHOOP OAuth API.
+struct HCHealthMetric: Identifiable {
+    let id = UUID()
+    let name: String
+    let value: String
+    let source: String
+    let date: String
+    var category: String = "Vitals"
+    var unit: String = ""
+    var numericValue: Double? = nil
+    var higherIsWorse: Bool = false
+    var lowerIsWorse: Bool = false
 }
 
-
-/// Source-specific, per-calendar-day Apple Health quantities for personal trends.
-/// HRV SDNN is never mixed with Tredict RMSSD or WHOOP Recovery scores.
 struct HCHealthTrendSample: Identifiable {
     let name: String
     let source: String
@@ -940,117 +944,365 @@ struct HCHealthTrendSample: Identifiable {
     var id: String { name + ":" + source + ":" + date }
 }
 
-final class HCAppleHealthReader:ObservableObject {
-    @Published private(set) var metricHistory:[HCHealthTrendSample]=[]
-    @Published private(set) var metrics:[HCHealthMetric]=[]
-    @Published private(set) var status="Not connected. No health data is read without permission."
-    private let store=HKHealthStore()
-    private let kinds:[(HKQuantityTypeIdentifier,String,HKUnit)] = [
-        (.heartRateVariabilitySDNN,"HRV (SDNN)",.secondUnit(with:.milli)),
-        (.restingHeartRate,"Resting heart rate",HKUnit.count().unitDivided(by:.minute())),
-        (.heartRate,"Heart rate",HKUnit.count().unitDivided(by:.minute()))
+private struct HCHealthCatalogItem {
+    let identifier: String
+    let name: String
+    let category: String
+    let unit: HKUnit
+    let suffix: String
+    let isDailySum: Bool
+    var multiply: Double = 1
+    var higherIsWorse: Bool = false
+    var lowerIsWorse: Bool = false
+
+    var type: HKQuantityType? {
+        // Use the documented raw identifiers. HealthKit returns nil for a type
+        // unavailable on the installed OS rather than crashing older devices.
+        HKObjectType.quantityType(forIdentifier:
+            HKQuantityTypeIdentifier(rawValue: "HKQuantityTypeIdentifier" + identifier))
+    }
+}
+
+final class HCAppleHealthReader: ObservableObject {
+    @Published private(set) var metrics: [HCHealthMetric] = []
+    @Published private(set) var metricHistory: [HCHealthTrendSample] = []
+    @Published private(set) var status =
+        "Connect Apple Health to view available measurements, trends, and sources."
+    @Published private(set) var loading = false
+    private let store = HKHealthStore()
+    private var generation = 0
+
+    // Broad data catalog. Metrics are only displayed when samples actually exist;
+    // no empty data is replaced with a guess or artificial zero.
+    // Count/energy/distance values are shown as recorded daily sums.
+    private let catalog: [HCHealthCatalogItem] = [
+        .init(identifier:"HeartRate", name:"Heart rate", category:"Heart & Vitals",
+              unit:HKUnit.count().unitDivided(by:.minute()), suffix:"bpm", isDailySum:false),
+        .init(identifier:"RestingHeartRate", name:"Resting heart rate", category:"Heart & Vitals",
+              unit:HKUnit.count().unitDivided(by:.minute()), suffix:"bpm", isDailySum:false,
+              higherIsWorse:true),
+        .init(identifier:"HeartRateVariabilitySDNN", name:"HRV · SDNN", category:"Heart & Vitals",
+              unit:HKUnit.secondUnit(with:.milli), suffix:"ms", isDailySum:false,
+              lowerIsWorse:true),
+        .init(identifier:"WalkingHeartRateAverage", name:"Walking heart rate", category:"Heart & Vitals",
+              unit:HKUnit.count().unitDivided(by:.minute()), suffix:"bpm", isDailySum:false),
+        .init(identifier:"HeartRateRecoveryOneMinute", name:"1-min heart rate recovery", category:"Heart & Vitals",
+              unit:HKUnit.count().unitDivided(by:.minute()), suffix:"bpm", isDailySum:false),
+        .init(identifier:"RespiratoryRate", name:"Respiratory rate", category:"Heart & Vitals",
+              unit:HKUnit.count().unitDivided(by:.minute()), suffix:"breaths/min",
+              isDailySum:false,higherIsWorse:true),
+        .init(identifier:"OxygenSaturation", name:"Blood oxygen", category:"Heart & Vitals",
+              unit:HKUnit.percent(), suffix:"%", isDailySum:false, multiply:100),
+        .init(identifier:"BloodPressureSystolic", name:"Systolic BP", category:"Heart & Vitals",
+              unit:HKUnit.millimeterOfMercury(), suffix:"mmHg", isDailySum:false),
+        .init(identifier:"BloodPressureDiastolic", name:"Diastolic BP", category:"Heart & Vitals",
+              unit:HKUnit.millimeterOfMercury(), suffix:"mmHg", isDailySum:false),
+        .init(identifier:"VO2Max", name:"VO₂ max", category:"Heart & Vitals",
+              unit:HKUnit(from:"ml/kg*min"), suffix:"mL/kg/min", isDailySum:false),
+        .init(identifier:"BodyTemperature", name:"Body temperature", category:"Heart & Vitals",
+              unit:HKUnit.degreeCelsius(), suffix:"°C", isDailySum:false),
+        .init(identifier:"BasalBodyTemperature", name:"Basal temperature", category:"Heart & Vitals",
+              unit:HKUnit.degreeCelsius(), suffix:"°C", isDailySum:false),
+        .init(identifier:"AppleSleepingWristTemperature", name:"Wrist temperature", category:"Heart & Vitals",
+              unit:HKUnit.degreeCelsius(), suffix:"°C", isDailySum:false),
+
+        .init(identifier:"StepCount", name:"Steps", category:"Activity & Energy",
+              unit:HKUnit.count(), suffix:"steps", isDailySum:true),
+        .init(identifier:"DistanceWalkingRunning", name:"Walking + running distance",
+              category:"Activity & Energy",unit:HKUnit.mile(), suffix:"mi",isDailySum:true),
+        .init(identifier:"ActiveEnergyBurned",name:"Active energy",category:"Activity & Energy",
+              unit:HKUnit.kilocalorie(),suffix:"kcal",isDailySum:true),
+        .init(identifier:"BasalEnergyBurned",name:"Resting energy",category:"Activity & Energy",
+              unit:HKUnit.kilocalorie(),suffix:"kcal",isDailySum:true),
+        .init(identifier:"AppleExerciseTime",name:"Exercise",category:"Activity & Energy",
+              unit:HKUnit.minute(),suffix:"min",isDailySum:true),
+        .init(identifier:"AppleMoveTime",name:"Move time",category:"Activity & Energy",
+              unit:HKUnit.minute(),suffix:"min",isDailySum:true),
+        .init(identifier:"AppleStandTime",name:"Standing time",category:"Activity & Energy",
+              unit:HKUnit.minute(),suffix:"min",isDailySum:true),
+        .init(identifier:"FlightsClimbed",name:"Flights climbed",category:"Activity & Energy",
+              unit:HKUnit.count(),suffix:"flights",isDailySum:true),
+        .init(identifier:"PhysicalEffort",name:"Physical effort",category:"Activity & Energy",
+              unit:HKUnit(from:"kcal/hr*kg"),suffix:"MET",isDailySum:false),
+
+        .init(identifier:"RunningSpeed",name:"Running speed",category:"Running & Cycling",
+              unit:HKUnit.meter().unitDivided(by:.second()),suffix:"m/s",isDailySum:false),
+        .init(identifier:"RunningPower",name:"Running power",category:"Running & Cycling",
+              unit:HKUnit.watt(),suffix:"W",isDailySum:false),
+        .init(identifier:"RunningStrideLength",name:"Running stride",category:"Running & Cycling",
+              unit:HKUnit.meter(),suffix:"m",isDailySum:false),
+        .init(identifier:"RunningVerticalOscillation",name:"Vertical oscillation",
+              category:"Running & Cycling",unit:HKUnit.centimeter(),suffix:"cm",isDailySum:false),
+        .init(identifier:"RunningGroundContactTime",name:"Ground contact time",
+              category:"Running & Cycling",unit:HKUnit.secondUnit(with:.milli),
+              suffix:"ms",isDailySum:false),
+        .init(identifier:"DistanceCycling",name:"Cycling distance",category:"Running & Cycling",
+              unit:HKUnit.mile(),suffix:"mi",isDailySum:true),
+        .init(identifier:"CyclingPower",name:"Cycling power",category:"Running & Cycling",
+              unit:HKUnit.watt(),suffix:"W",isDailySum:false),
+        .init(identifier:"CyclingSpeed",name:"Cycling speed",category:"Running & Cycling",
+              unit:HKUnit.meter().unitDivided(by:.second()),suffix:"m/s",isDailySum:false),
+        .init(identifier:"CyclingCadence",name:"Cycling cadence",category:"Running & Cycling",
+              unit:HKUnit.count().unitDivided(by:.minute()),suffix:"rpm",isDailySum:false),
+        .init(identifier:"CyclingFunctionalThresholdPower",name:"Cycling FTP",
+              category:"Running & Cycling",unit:HKUnit.watt(),suffix:"W",isDailySum:false),
+        .init(identifier:"DistanceSwimming",name:"Swimming distance",category:"Running & Cycling",
+              unit:HKUnit.meter(),suffix:"m",isDailySum:true),
+        .init(identifier:"SwimmingStrokeCount",name:"Swim strokes",category:"Running & Cycling",
+              unit:HKUnit.count(),suffix:"strokes",isDailySum:true),
+
+        .init(identifier:"WalkingSpeed",name:"Walking speed",category:"Mobility",
+              unit:HKUnit.meter().unitDivided(by:.second()),suffix:"m/s",isDailySum:false),
+        .init(identifier:"WalkingStepLength",name:"Walking step length",category:"Mobility",
+              unit:HKUnit.meter(),suffix:"m",isDailySum:false),
+        .init(identifier:"WalkingAsymmetryPercentage",name:"Walking asymmetry",
+              category:"Mobility",unit:HKUnit.percent(),suffix:"%",isDailySum:false,multiply:100),
+        .init(identifier:"WalkingDoubleSupportPercentage",name:"Double support",
+              category:"Mobility",unit:HKUnit.percent(),suffix:"%",isDailySum:false,multiply:100),
+        .init(identifier:"AppleWalkingSteadiness",name:"Walking steadiness",
+              category:"Mobility",unit:HKUnit.percent(),suffix:"%",isDailySum:false,multiply:100),
+        .init(identifier:"SixMinuteWalkTestDistance",name:"Six-minute walk",
+              category:"Mobility",unit:HKUnit.meter(),suffix:"m",isDailySum:false),
+        .init(identifier:"StairAscentSpeed",name:"Stair ascent",category:"Mobility",
+              unit:HKUnit.meter().unitDivided(by:.second()),suffix:"m/s",isDailySum:false),
+        .init(identifier:"StairDescentSpeed",name:"Stair descent",category:"Mobility",
+              unit:HKUnit.meter().unitDivided(by:.second()),suffix:"m/s",isDailySum:false),
+
+        .init(identifier:"BodyMass",name:"Weight",category:"Body Measurements",
+              unit:HKUnit.pound(),suffix:"lb",isDailySum:false),
+        .init(identifier:"LeanBodyMass",name:"Lean mass",category:"Body Measurements",
+              unit:HKUnit.pound(),suffix:"lb",isDailySum:false),
+        .init(identifier:"BodyFatPercentage",name:"Body fat",category:"Body Measurements",
+              unit:HKUnit.percent(),suffix:"%",isDailySum:false,multiply:100),
+        .init(identifier:"BodyMassIndex",name:"BMI",category:"Body Measurements",
+              unit:HKUnit.count(),suffix:"",isDailySum:false),
+        .init(identifier:"Height",name:"Height",category:"Body Measurements",
+              unit:HKUnit.meter(),suffix:"m",isDailySum:false),
+        .init(identifier:"WaistCircumference",name:"Waist circumference",
+              category:"Body Measurements",unit:HKUnit.centimeter(),suffix:"cm",
+              isDailySum:false),
+        .init(identifier:"BloodGlucose",name:"Blood glucose",category:"Metabolic & Nutrition",
+              unit:HKUnit(from:"mg/dL"),suffix:"mg/dL",isDailySum:false),
+        .init(identifier:"DietaryEnergyConsumed",name:"Food energy",category:"Metabolic & Nutrition",
+              unit:HKUnit.kilocalorie(),suffix:"kcal",isDailySum:true),
+        .init(identifier:"DietaryWater",name:"Water",category:"Metabolic & Nutrition",
+              unit:HKUnit.liter(),suffix:"L",isDailySum:true),
+        .init(identifier:"DietaryProtein",name:"Protein",category:"Metabolic & Nutrition",
+              unit:HKUnit.gram(),suffix:"g",isDailySum:true),
+        .init(identifier:"DietaryCarbohydrates",name:"Carbohydrates",category:"Metabolic & Nutrition",
+              unit:HKUnit.gram(),suffix:"g",isDailySum:true),
+        .init(identifier:"DietaryFatTotal",name:"Dietary fat",category:"Metabolic & Nutrition",
+              unit:HKUnit.gram(),suffix:"g",isDailySum:true),
+        .init(identifier:"DietaryFiber",name:"Fiber",category:"Metabolic & Nutrition",
+              unit:HKUnit.gram(),suffix:"g",isDailySum:true),
+        .init(identifier:"DietarySodium",name:"Sodium",category:"Metabolic & Nutrition",
+              unit:HKUnit.gramUnit(with:.milli),suffix:"mg",isDailySum:true),
+        .init(identifier:"DietaryCaffeine",name:"Caffeine",category:"Metabolic & Nutrition",
+              unit:HKUnit.gramUnit(with:.milli),suffix:"mg",isDailySum:true)
     ]
 
     func connect() {
         guard HKHealthStore.isHealthDataAvailable() else {
-            status="Apple Health unavailable on this device.";return
+            status = "Apple Health isn't available on this device."
+            return
         }
-        var types=Set<HKObjectType>()
-        for entry in kinds {
-            if let quantity=HKObjectType.quantityType(forIdentifier:entry.0) {
-                types.insert(quantity)
-            }
+        var types = Set<HKObjectType>()
+        for metric in catalog {
+            if let type = metric.type { types.insert(type) }
         }
-        if let sleep=HKObjectType.categoryType(forIdentifier:.sleepAnalysis) {
+        if let sleep = HKObjectType.categoryType(forIdentifier: .sleepAnalysis) {
             types.insert(sleep)
         }
-        store.requestAuthorization(toShare:[],read:types) { [weak self] _, error in
+        types.insert(HKObjectType.workoutType())
+        store.requestAuthorization(toShare: [], read: types) { [weak self] _, error in
             DispatchQueue.main.async {
-                if let error {self?.status=error.localizedDescription;return}
-                self?.status="Reading available Apple Health measurements…"
-                self?.refresh()
+                guard let self else { return }
+                if let error {
+                    self.status = error.localizedDescription
+                    return
+                }
+                UserDefaults.standard.set(true, forKey: "hcHealthCatalogEnabled")
+                self.refresh()
             }
         }
     }
 
-    private func refresh() {
-        readSleep()
-        for (type,name,unit) in kinds {
-            guard let quantity=HKObjectType.quantityType(forIdentifier:type) else {continue}
-            let predicate=HKQuery.predicateForSamples(
-                withStart:Calendar.current.date(byAdding:.day,value:-35,to:Date()),
-                end:Date(),options:.strictStartDate)
-            let q=HKSampleQuery(sampleType:quantity,predicate:predicate,
-                                limit:HKObjectQueryNoLimit,
-                                sortDescriptors:[NSSortDescriptor(key:HKSampleSortIdentifierEndDate,ascending:false)])
-            { [weak self] _,samples,error in
-                guard error == nil,
-                      let quantities=samples as? [HKQuantitySample],
-                      let sample=quantities.first else {return}
-                let source=sample.sourceRevision.source.name
-                // Never average values from incompatible hardware/source pipelines.
-                let sameSource=quantities.filter{$0.sourceRevision.source.name==source}
-                let byDay=Dictionary(grouping:sameSource,by:{
-                    HCPlanBuilder.dateString($0.endDate)
+    func refreshIfAuthorized() {
+        if UserDefaults.standard.bool(forKey: "hcHealthCatalogEnabled") {
+            refresh()
+        }
+    }
+
+    func refresh() {
+        guard HKHealthStore.isHealthDataAvailable() else { return }
+        generation += 1
+        let activeGeneration = generation
+        metrics = []
+        metricHistory = []
+        loading = true
+        status = "Reading authorized data from Apple Health…"
+        let group = DispatchGroup()
+        for item in catalog {
+            guard let type = item.type else { continue }
+            group.enter()
+            let predicate = HKQuery.predicateForSamples(
+                withStart: Calendar.current.date(byAdding: .day, value: -35, to: Date()),
+                end: Date(), options: .strictStartDate)
+            // Bounded query: high-frequency streams can contain very many samples.
+            let query = HKSampleQuery(
+                sampleType: type, predicate: predicate, limit: 2400,
+                sortDescriptors: [NSSortDescriptor(key: HKSampleSortIdentifierEndDate,
+                                                   ascending: false)])
+            { [weak self] _, samples, error in
+                defer { group.leave() }
+                guard error == nil, let items = samples as? [HKQuantitySample],
+                      !items.isEmpty else { return }
+                // A metric may have multiple publishers; keep data grouped by source.
+                let grouped = Dictionary(grouping: items, by: {
+                    $0.sourceRevision.source.name
                 })
-                let series=byDay.map { day, values -> HCHealthTrendSample in
-                    let amounts=values.map{$0.quantity.doubleValue(for:unit)}.sorted()
-                    let middle=amounts.count/2
-                    let median=amounts.count.isMultiple(of:2)
-                        ? (amounts[middle-1]+amounts[middle])/2
-                        : amounts[middle]
-                    return HCHealthTrendSample(name:name,source:source,
-                                               date:day,value:median)
-                }.sorted{$0.date<$1.date}
-                let number=sample.quantity.doubleValue(for:unit)
-                let result=HCHealthMetric(name:name,value:String(format:"%.1f",number),
-                                          source:source,
-                                          date:HCPlanBuilder.dateString(sample.endDate))
-                DispatchQueue.main.async {
-                    self?.metrics.removeAll(where:{$0.name==name})
-                    self?.metrics.append(result)
-                    self?.metricHistory.removeAll(where:{$0.name==name})
-                    self?.metricHistory.append(contentsOf:series)
-                    self?.status="Showing source-specific Apple Health trends."
+                for (source, readings) in grouped {
+                    let perDay = Dictionary(grouping: readings, by: {
+                        HCPlanBuilder.dateString($0.endDate)
+                    })
+                    let points: [HCHealthTrendSample] = perDay.compactMap { date, dayItems in
+                        guard !dayItems.isEmpty else { return nil }
+                        let values = dayItems.map {
+                            $0.quantity.doubleValue(for: item.unit) * item.multiply
+                        }.filter { $0.isFinite }.sorted()
+                        guard !values.isEmpty else { return nil }
+                        let center = values.count / 2
+                        let median = values.count.isMultiple(of: 2) ?
+                            (values[center - 1] + values[center]) / 2 : values[center]
+                        let calculated = item.isDailySum ?
+                            values.reduce(0, +) : median
+                        return HCHealthTrendSample(name: item.name, source: source,
+                                                   date: date, value: calculated)
+                    }.sorted { $0.date < $1.date }
+                    guard let latest = points.last else { continue }
+                    let display: String = {
+                        if item.suffix.isEmpty { return String(format: "%.1f", latest.value) }
+                        return (abs(latest.value) >= 1000 ?
+                            String(format: "%.0f", latest.value) :
+                            String(format: "%.1f", latest.value)) + " " + item.suffix
+                    }()
+                    let metric = HCHealthMetric(
+                        name: item.name, value: display, source: source,
+                        date: latest.date, category: item.category,
+                        unit: item.suffix, numericValue: latest.value,
+                        higherIsWorse: item.higherIsWorse,
+                        lowerIsWorse: item.lowerIsWorse)
+                    DispatchQueue.main.async {
+                        guard self?.generation == activeGeneration else { return }
+                        self?.metrics.append(metric)
+                        self?.metricHistory.append(contentsOf: points)
+                    }
                 }
             }
-            store.execute(q)
+            store.execute(query)
+        }
+        group.enter()
+        readSleep(group: group, generation: activeGeneration)
+        group.enter()
+        readWorkouts(group: group, generation: activeGeneration)
+        group.notify(queue: .main) { [weak self] in
+            guard let self, self.generation == activeGeneration else { return }
+            self.loading = false
+            self.metrics.sort {
+                if $0.category == $1.category { return $0.name < $1.name }
+                return $0.category < $1.category
+            }
+            self.status = self.metrics.isEmpty ?
+                "No readable samples found. Review Health permissions and device sync." :
+                "\(self.metrics.count) source-specific measurements loaded."
         }
     }
 
-    private func readSleep() {
-        guard let sleep=HKObjectType.categoryType(forIdentifier:.sleepAnalysis) else{return}
-        let predicate=HKQuery.predicateForSamples(withStart:
-            Calendar.current.date(byAdding:.hour,value:-40,to:Date()),
-            end:Date(),options:.strictEndDate)
-        let query=HKSampleQuery(sampleType:sleep,predicate:predicate,
-            limit:HKObjectQueryNoLimit,sortDescriptors:nil) { [weak self] _, samples, error in
-            guard error == nil,let items=samples as? [HKCategorySample], !items.isEmpty else{return}
-            let accepted:Set<Int>=[
-                HKCategoryValueSleepAnalysis.asleepUnspecified.rawValue,
-                HKCategoryValueSleepAnalysis.asleepCore.rawValue,
-                HKCategoryValueSleepAnalysis.asleepDeep.rawValue,
-                HKCategoryValueSleepAnalysis.asleepREM.rawValue
+    private func readSleep(group: DispatchGroup, generation: Int) {
+        guard let type = HKObjectType.categoryType(forIdentifier: .sleepAnalysis) else {
+            group.leave()
+            return
+        }
+        let predicate = HKQuery.predicateForSamples(
+            withStart: Calendar.current.date(byAdding: .day, value: -35, to: Date()),
+            end: Date(), options: .strictStartDate)
+        let query = HKSampleQuery(sampleType: type, predicate: predicate, limit: 2500,
+                                  sortDescriptors: nil) { [weak self] _, samples, error in
+            defer { group.leave() }
+            guard error == nil, let items = samples as? [HKCategorySample] else { return }
+            let stages: [(Int, String)] = [
+                (HKCategoryValueSleepAnalysis.asleepUnspecified.rawValue, "Asleep · unspecified"),
+                (HKCategoryValueSleepAnalysis.asleepCore.rawValue, "Core sleep"),
+                (HKCategoryValueSleepAnalysis.asleepDeep.rawValue, "Deep sleep"),
+                (HKCategoryValueSleepAnalysis.asleepREM.rawValue, "REM sleep")
             ]
-            let sleepItems=items.filter{accepted.contains($0.value)}
-            // Apple Health can contain duplicate uploads from multiple devices.
-            // Choose one source (prefer WHOOP if present) rather than summing
-            // sources and inflating total sleep time.
-            let grouped=Dictionary(grouping:sleepItems,by:{$0.sourceRevision.source.name})
-            let source=grouped.keys.first(where:{$0.localizedCaseInsensitiveContains("whoop")})
-                ?? grouped.keys.first(where:{$0.localizedCaseInsensitiveContains("apple")})
-                ?? grouped.keys.sorted().first
-            guard let name=source,let selected=grouped[name], !selected.isEmpty else{return}
-            // Only count one night's latest samples from the selected source.
-            let lastEnd=selected.map(\.endDate).max() ?? Date()
-            let subset=selected.filter{lastEnd.timeIntervalSince($0.endDate) < 20*3600}
-            let seconds=subset.reduce(0.0){$0+$1.endDate.timeIntervalSince($1.startDate)}
-            let result=HCHealthMetric(name:"Sleep (asleep time)",
-                value:String(format:"%.1f h",seconds/3600),
-                source:name,date:HCPlanBuilder.dateString(lastEnd))
-            DispatchQueue.main.async {
-                self?.metrics.removeAll(where:{$0.name=="Sleep (asleep time)"})
-                self?.metrics.append(result)
+            for (code, name) in stages + [(-1, "Total asleep")] {
+                let actual = code == -1 ?
+                    items.filter { sample in stages.contains(where: { $0.0 == sample.value }) } :
+                    items.filter { $0.value == code }
+                guard !actual.isEmpty else { continue }
+                let grouped = Dictionary(grouping: actual, by: { $0.sourceRevision.source.name })
+                for (source, bySource) in grouped {
+                    // Assign overnight segments to the night they end.
+                    let days = Dictionary(grouping: bySource, by: {
+                        HCPlanBuilder.dateString($0.endDate)
+                    })
+                    let points: [HCHealthTrendSample] = days.map { date, entries in
+                        let seconds = entries.reduce(0.0) {
+                            $0 + $1.endDate.timeIntervalSince($1.startDate)
+                        }
+                        return HCHealthTrendSample(name: name, source: source,
+                                                   date: date, value: seconds / 3600)
+                    }.sorted { $0.date < $1.date }
+                    guard let latest = points.last else { continue }
+                    let metric = HCHealthMetric(name: name,
+                        value: String(format: "%.1f h", latest.value),
+                        source: source, date: latest.date,
+                        category: "Sleep", unit: "h",
+                        numericValue: latest.value, lowerIsWorse: code == -1)
+                    DispatchQueue.main.async {
+                        guard self?.generation == generation else { return }
+                        self?.metrics.append(metric)
+                        self?.metricHistory.append(contentsOf: points)
+                    }
+                }
+            }
+        }
+        store.execute(query)
+    }
+
+    private func readWorkouts(group: DispatchGroup, generation: Int) {
+        let type = HKObjectType.workoutType()
+        let start = Calendar.current.date(byAdding: .day, value: -35, to: Date())
+        let predicate = HKQuery.predicateForSamples(withStart: start, end: Date())
+        let query = HKSampleQuery(sampleType: type, predicate: predicate, limit: 500,
+                                  sortDescriptors: [NSSortDescriptor(
+                                    key: HKSampleSortIdentifierEndDate, ascending: false)])
+        { [weak self] _, samples, error in
+            defer { group.leave() }
+            guard error == nil, let workouts = samples as? [HKWorkout],
+                  !workouts.isEmpty else { return }
+            let bySource = Dictionary(grouping: workouts, by: {
+                $0.sourceRevision.source.name
+            })
+            for (source, items) in bySource {
+                let countPoints = Dictionary(grouping: items, by: {
+                    HCPlanBuilder.dateString($0.endDate)
+                }).map { date, list in
+                    HCHealthTrendSample(name: "Workout sessions", source: source,
+                                        date: date, value: Double(list.count))
+                }.sorted { $0.date < $1.date }
+                guard let latest = countPoints.last else { continue }
+                let metric = HCHealthMetric(name: "Workout sessions",
+                                            value: String(format: "%.0f",latest.value),
+                                            source: source, date: latest.date,
+                                            category: "Workouts",unit:"sessions",
+                                            numericValue: latest.value)
+                DispatchQueue.main.async {
+                    guard self?.generation == generation else { return }
+                    self?.metrics.append(metric)
+                    self?.metricHistory.append(contentsOf: countPoints)
+                }
             }
         }
         store.execute(query)
