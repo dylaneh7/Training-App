@@ -26,6 +26,41 @@ jobs:
           assert info.get("WKCompanionAppBundleIdentifier"), "Companion app ID is required"
           print("Modern watchOS single-target Info.plist metadata verified")
           PY
+      - name: Verify IMUN name and app icon integrity
+        run: |
+          python3 - <<'PY'
+          import json, plistlib, struct, zlib
+          from pathlib import Path
+
+          for target in ("iPhone", "Watch"):
+              base = Path("AppleWatch") / target
+              with (base / "Info.plist").open("rb") as source:
+                  assert plistlib.load(source)["CFBundleDisplayName"] == "imun"
+              folder = base / "Assets.xcassets" / "AppIcon.appiconset"
+              manifest = json.loads((folder / "Contents.json").read_text())
+              names = {item.get("filename") for item in manifest["images"]}
+              assert "IMUNIcon.png" in names, "Missing IMUN app icon declaration"
+              data = (folder / "IMUNIcon.png").read_bytes()
+              assert data[:8] == b"\\x89PNG\\r\\n\\x1a\\n"
+              position, compressed, chunks = 8, [], []
+              while position < len(data):
+                  size = struct.unpack(">I", data[position:position+4])[0]
+                  kind = data[position+4:position+8]
+                  payload = data[position+8:position+8+size]
+                  stored = struct.unpack(">I", data[position+8+size:position+12+size])[0]
+                  assert stored == zlib.crc32(kind + payload), "Corrupt PNG checksum"
+                  chunks.append(kind)
+                  if kind == b"IDAT":
+                      compressed.append(payload)
+                  position += 12 + size
+                  if kind == b"IEND":
+                      break
+              assert b"IHDR" in chunks and b"IEND" in chunks
+              width, height = struct.unpack(">II", data[16:24])
+              assert (width, height) == (1024, 1024)
+              assert zlib.decompress(b"".join(compressed)), "Invalid PNG compression"
+              print(target, "IMUN Home Screen icon verified")
+          PY
       - name: Test exercise progression
         run: |
           swiftc AppleWatch/Shared/WorkoutModels.swift AppleWatch/Shared/ProgramCatalog.swift AppleWatch/Tests/main.swift -o /tmp/hc-progression
