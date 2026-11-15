@@ -120,71 +120,73 @@ private struct PremiumTrainingPage: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            VStack(alignment: .leading, spacing: 14) {
-                HStack(alignment: .firstTextBaseline) {
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text("IMUN / YOUR SESSIONS")
+            VStack(alignment: .leading, spacing: 13) {
+                HCPremiumHero(eyebrow: "YOUR PERFORMANCE SPACE",
+                              title: "Train with intention.",
+                              subtitle: Date().formatted(.dateTime.weekday(.wide).month(.wide).day()),
+                              icon: "figure.run.circle",
+                              tint: HCDesign.electric) {
+                    HStack(spacing: 9) {
+                        HCInsightChip(title: coach.signedIn ? "PLAN CONNECTED" : "SIGN IN TO SYNC",
+                                      symbol: coach.signedIn ? "checkmark.icloud" : "icloud.slash",
+                                      tint: coach.signedIn ? HCDesign.good : HCDesign.amber)
+                        Spacer()
+                        Text("IMUN / 01")
                             .font(HCDesign.label(10))
-                            .tracking(1.8)
-                            .foregroundStyle(HCDesign.aqua)
-                        Text("Training")
-                            .font(HCDesign.display(32))
-                            .foregroundStyle(HCDesign.ink)
+                            .foregroundStyle(HCDesign.secondary)
                     }
-                    Spacer()
-                    Text(Date().formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day()))
-                        .font(HCDesign.label(11))
-                        .foregroundStyle(HCDesign.secondary)
                 }
 
                 HStack(spacing: 9) {
                     ForEach(IMUNTrainingActivity.allCases) { activity in
                         let active = selected == activity
                         Button {
-                            withAnimation(.easeInOut(duration: 0.18)) {
+                            withAnimation(.easeInOut(duration: 0.2)) {
                                 chosenActivity = activity.rawValue
                             }
                         } label: {
-                            Label(activity.title, systemImage: activity.symbol)
-                                .font(.system(size: 13, weight: .semibold, design: .rounded))
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, 13)
-                                .foregroundStyle(active ? HCDesign.onAccent : HCDesign.secondary)
-                                .background(active ? HCDesign.electric : HCDesign.raised,
-                                            in: RoundedRectangle(cornerRadius: 13, style: .continuous))
-                                .overlay {
-                                    RoundedRectangle(cornerRadius: 13, style: .continuous)
-                                        .strokeBorder(active ? HCDesign.electric : HCDesign.outline,
-                                                      lineWidth: 1)
-                                }
+                            VStack(spacing: 7) {
+                                Image(systemName: activity.symbol)
+                                    .font(.system(size: 21, weight: .medium))
+                                Text(activity.title.uppercased())
+                                    .font(HCDesign.label(11))
+                                    .tracking(0.6)
+                            }
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 14)
+                            .foregroundStyle(active ? HCDesign.onAccent : HCDesign.secondary)
+                            .background(active ? HCDesign.electric : HCDesign.raised,
+                                        in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                            .overlay {
+                                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                                    .strokeBorder(active ? HCDesign.electric : HCDesign.outline, lineWidth: 1)
+                            }
                         }
                         .buttonStyle(.plain)
                         .accessibilityAddTraits(active ? [.isSelected] : [])
                     }
                 }
-                .accessibilityLabel("Training activity")
+                .accessibilityLabel("Choose training activity")
 
-                HStack(spacing: 9) {
-                    Image(systemName: "calendar")
-                        .foregroundStyle(HCDesign.aqua)
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text("TODAY'S PLAN")
-                            .font(HCDesign.label(9))
-                            .tracking(1.2)
-                            .foregroundStyle(HCDesign.secondary)
-                        Text(plannedTitle)
-                            .font(.system(size: 14, weight: .semibold, design: .rounded))
-                            .foregroundStyle(HCDesign.ink)
-                            .lineLimit(1)
+                HCCard(accent: HCDesign.aqua) {
+                    HStack(spacing: 13) {
+                        Image(systemName: "calendar.badge.clock")
+                            .font(.system(size: 20))
+                            .foregroundStyle(HCDesign.aqua)
+                            .frame(width: 37)
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("TODAY'S PLANNED \(selected.title.uppercased())")
+                                .font(HCDesign.label(9))
+                                .tracking(1.3)
+                                .foregroundStyle(HCDesign.secondary)
+                            Text(plannedTitle)
+                                .font(.system(size: 17, weight: .bold, design: .rounded))
+                                .foregroundStyle(HCDesign.ink)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        Spacer(minLength: 0)
                     }
-                    Spacer()
-                    Image(systemName: "chevron.down")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(HCDesign.secondary)
                 }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 10)
-                .background(HCDesign.card, in: RoundedRectangle(cornerRadius: 12))
             }
             .padding(.horizontal, 18)
             .padding(.top, 12)
@@ -1261,9 +1263,23 @@ private struct PremiumProgressPage: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 19) {
-                PremiumHeader(eyebrow: "IMUN / PROGRESS",
-                              title: "Your training",
-                              subtitle: "Upcoming workouts and your actual history.")
+                HCPremiumHero(eyebrow: "PERFORMANCE / THE LONG GAME",
+                              title: "Every session counts.",
+                              subtitle: "Your history, your momentum, and the next milestone.",
+                              icon: "chart.line.uptrend.xyaxis",
+                              tint: HCDesign.aqua) {
+                    HStack(spacing: 18) {
+                        HCMetricBlock(label: "Recorded sets",
+                                      value: "\(coach.performanceHistory.count)",
+                                      tint: HCDesign.ink)
+                        HCMetricBlock(label: "Recorded runs",
+                                      value: "\(coach.runHistory.count)",
+                                      tint: HCDesign.aqua)
+                        HCMetricBlock(label: "Upcoming",
+                                      value: "\(upcoming.count)",
+                                      tint: HCDesign.ink)
+                    }
+                }
                 HStack(spacing: 11) {
                     HCCard {
                         HCMetricBlock(label: "Strength sets",
@@ -1589,9 +1605,21 @@ private struct PremiumCoachPage: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 19) {
-                PremiumHeader(eyebrow: "IMUN / COACH",
-                              title: "Train with purpose.",
-                              subtitle: "One plan. Clear progress. Better decisions.")
+                HCPremiumHero(eyebrow: "IMUN / COACH",
+                              title: "Your edge, explained.",
+                              subtitle: "Daily guidance shaped by your real sessions.",
+                              icon: "sparkles",
+                              tint: HCDesign.electric) {
+                    HStack(spacing: 10) {
+                        HCInsightChip(title: "TODAY'S BRIEFING",
+                                      symbol: "waveform.path.ecg",
+                                      tint: HCDesign.good)
+                        Spacer()
+                        Text(Date().formatted(.dateTime.weekday(.abbreviated).day()))
+                            .font(HCDesign.label(11))
+                            .foregroundStyle(HCDesign.secondary)
+                    }
+                }
                 if !coach.signedIn { PremiumLogin() }
 
                 HCCard(accent: HCDesign.electric) {
