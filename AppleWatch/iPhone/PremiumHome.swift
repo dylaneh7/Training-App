@@ -589,8 +589,10 @@ private struct PremiumExerciseSession: View {
         .onAppear {
             if let ex {
                 reps = ex.repMin
-                if let target = ex.suggestedWeightLb ??
-                    coach.workout.map({ coach.suggestion(for: ex, on: $0.date, aggressive: aggressive).weightLb }) ?? nil {
+                let target = ex.suggestedWeightLb ?? coach.workout.flatMap {
+                    coach.suggestion(for: ex, on: $0.date, aggressive: aggressive).weightLb
+                }
+                if let target {
                     weight = target
                     hasWeight = true
                 }
