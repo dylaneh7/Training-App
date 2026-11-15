@@ -10,6 +10,9 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
     @Published private(set) var loggedSets: [HCLoggedSet] = []
     @Published private(set) var completedWatchRuns: [HCRunFinished] = []
     @Published private(set) var runHistory: [HCProgressRun] = []
+    // Apple Health running results stay on device unless user elects to share them.
+    private var importedHealthRuns: [HCProgressRun] = []
+    private var remoteRunHistory: [HCProgressRun] = []
     @Published private(set) var recoveryHistory: [HCRecoveryDatum] = []
     @Published private(set) var performanceHistory: [HCPerformanceSet] = []
     @Published private(set) var status = "Preparing Health Coach…"
@@ -49,6 +52,8 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
     override init() {
         super.init()
         loggedSets = read("health-coach-watch-sets.json") ?? []
+        importedHealthRuns = read("apple-health-imported-runs.json") ?? []
+        runHistory = importedHealthRuns
         completedWatchRuns = read("health-coach-native-runs.json") ?? []
         uploadedIDs = Set(read("uploaded-watch-set-ids.json") ?? [])
         pendingEditedWorkout = read("pending-edited-workout.json")
@@ -161,7 +166,8 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
                     self.workout = active
                     self.runPlan = run
                     self.performanceHistory = history
-                    self.runHistory = priorRuns
+                    self.remoteRunHistory = priorRuns
+                    self.mergeRunHistory()
                     self.recoveryHistory = recovery
                     self.loading = false
                     self.status = active == nil ? "No strength session on this date." :
@@ -226,6 +232,52 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
         }
     }
 
+    /// A matching Apple Health workout marks the planned run complete in the
+    /// native interface. Imports remain local (and visible offline).
+    func updateHealthRuns(_ imported: [HCProgressRun]) {
+        importedHealthRuns = imported
+        save(imported, name: "apple-health-imported-runs.json")
+        mergeRunHistory()
+        if WCSession.isSupported(), WCSession.default.activationState == .activated,
+           WCSession.default.isPaired, WCSession.default.isWatchAppInstalled {
+            sendToWatch()
+        }
+    }
+
+    private func mergeRunHistory() {
+        let all = (importedHealthRuns + remoteRunHistory).sorted {
+            ($0.startedAt ?? HCPlanBuilder.startOfDate($0.date) ?? .distantPast) >
+            ($1.startedAt ?? HCPlanBuilder.startOfDate($1.date) ?? .distantPast)
+        }
+        var unique: [HCProgressRun] = []
+        for candidate in all {
+            let same = unique.contains { previous in
+                guard previous.date == candidate.date else { return false }
+                if previous.id == candidate.id { return true }
+                if let first = previous.startedAt, let second = candidate.startedAt,
+                   abs(first.timeIntervalSince(second)) < 180 {
+                    return true
+                }
+                // Legacy/connected activity logs don't always include precise
+                // start times; compare known distance AND duration together.
+                if let pMeters = previous.distanceMeters, let cMeters = candidate.distanceMeters,
+                   let pTime = previous.durationSeconds, let cTime = candidate.durationSeconds {
+                    return abs(pMeters - cMeters) < 120 && abs(pTime - cTime) < 90
+                }
+                return false
+            }
+            if !same { unique.append(candidate) }
+        }
+        runHistory = unique
+        if let plan = runPlan, !plan.isCompleted,
+           unique.contains(where: { $0.date == plan.date }) {
+            runPlan = HCRunPlan(id: plan.id, date: plan.date,
+                                title: plan.title, notes: plan.notes,
+                                targetDistanceMiles: plan.targetDistanceMiles,
+                                isCompleted: true)
+        }
+    }
+
     func sendToWatch() {
         guard WCSession.isSupported() else { return }
         let connection = WCSession.default
@@ -238,6 +290,7 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
             var context:[String:Any] = [:]
             if let workout {context[HCPayload.workout] = try encoder.encode(workout)}
             if let runPlan {context[HCPayload.runPlan] = try encoder.encode(runPlan)}
+            context[HCPayload.runHistory] = try encoder.encode(Array(runHistory.prefix(12)))
             if !context.isEmpty {
                 try connection.updateApplicationContext(context)
                 status = "Workout and run sent or queued for watch."
