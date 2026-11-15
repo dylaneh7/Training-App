@@ -27,6 +27,7 @@ struct HCTrainingClock: Codable {
 final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
     @Published private(set) var workout: HCWorkout = .preview
     @Published private(set) var runPlan: HCRunPlan?
+    @Published private(set) var runHistory: [HCProgressRun] = []
     @Published private(set) var sets: [HCLoggedSet] = []
     @Published private(set) var completedRuns: [HCRunFinished] = []
     @Published private(set) var liftClock: HCTrainingClock?
@@ -49,6 +50,7 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
         if let s: HCTrainingClock = load("lifting-clock.json") { liftClock = s }
         if let s: HCTrainingClock = load("running-clock.json") { runClock = s }
         if let s: HCRunPlan = load("run-plan.json") { runPlan = s }
+        if let s: [HCProgressRun] = load("run-history.json") { runHistory = s }
         if let s: [HCRunFinished] = load("completed-runs.json") { completedRuns = s }
 
         if WCSession.isSupported() {
@@ -270,6 +272,14 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
                     self.save(next, name: "workout.json")
                     self.status = "Workout updated from iPhone"
                 }
+            }
+        }
+        if let data = context[HCPayload.runHistory] as? Data,
+           let history = try? decoder.decode([HCProgressRun].self, from: data) {
+            DispatchQueue.main.async {
+                self.runHistory = Array(history.prefix(12))
+                self.save(self.runHistory, name: "run-history.json")
+                self.status = "Run history updated from iPhone"
             }
         }
         if let data = context[HCPayload.runPlan] as? Data,
