@@ -11,6 +11,7 @@ struct PremiumHomeView: View {
     @StateObject private var tredictImporter = HCTredictImporter()
     @AppStorage("hcAccentStyle") private var accentStyle = "crimson"
     @Environment(\.scenePhase) private var scenePhase
+    private let scheduleRefresh = Timer.publish(every: 60, on: .main, in: .common).autoconnect()
 
     var body: some View {
         TabView {
@@ -41,6 +42,13 @@ struct PremiumHomeView: View {
             if phase == .active {
                 runImporter.startIfAuthorized()
                 if coach.signedIn { coach.refresh(date: Date()) }
+            }
+        }
+        .onReceive(scheduleRefresh) { _ in
+            // Poll the Command Center calendar while the iPhone app is open.
+            // watchOS cannot independently invent or reschedule a session.
+            if scenePhase == .active && coach.signedIn && !coach.loading {
+                coach.refreshTodaySchedule()
             }
         }
         .onChange(of: accentStyle) { _, _ in

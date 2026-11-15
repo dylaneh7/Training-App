@@ -27,6 +27,11 @@ struct HCWorkout: Codable, Identifiable {
 
     var prescribedSetCount: Int { exercises.reduce(0) { $0 + $1.prescribedSets } }
 
+    static func unscheduled(date: String) -> HCWorkout {
+        HCWorkout(id: "rest-" + date, date: date, sessionKey: "none-" + date,
+                  title: "No strength workout scheduled", exercises: [], isPreview: false)
+    }
+
     static let preview = HCProgramCatalog.makeWorkout(date: "2026-11-14",
                                                      sessionKey: "2-SatUpper",
                                                      title: "Full Upper — Return to Training",
@@ -175,6 +180,8 @@ struct HCRecoveryDatum: Codable, Identifiable {
 }
 
 enum HCPayload {
+    static let schedule = "scheduleSnapshotV2"
+    static let requestSchedule = "requestScheduleV2"
     static let workout = "workout"
     static let runPlan = "runPlan"
     static let runHistory = "runHistory"
@@ -186,4 +193,16 @@ enum HCPayload {
     static let loggedSet = "loggedSet"
     static let kind = "kind"
     static let data = "payload"
+}
+
+
+/// Date-scoped, atomic schedule sent by the iPhone to its Watch companion.
+/// An absent workout/run is intentional, never an instruction to keep yesterday's plan.
+struct HCWatchSchedule: Codable {
+    let date: String
+    let workout: HCWorkout?
+    let runPlan: HCRunPlan?
+    let generatedAt: Date
+    /// "ready", "loading", or "signedOut". Only "ready" confirms a rest day.
+    let state: String
 }

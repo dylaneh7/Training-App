@@ -164,3 +164,38 @@ To publish via TestFlight/App Store later, you will need appropriate Apple Devel
 - [Apple: Setting up a watchOS project](https://developer.apple.com/documentation/watchos-apps/setting-up-a-watchos-project)
 - [Apple: Watch Connectivity](https://developer.apple.com/documentation/watchconnectivity/transferring-data-with-watch-connectivity)
 - [Apple: Running workout sessions](https://developer.apple.com/documentation/healthkit/running-workout-sessions)
+
+## Watch/iPhone schedule consistency (sync update, Nov 2026)
+
+The iPhone is the source of truth for the **current date's** plan. The Watch is
+an extension of that app, not an independent scheduler:
+
+- The phone sends one date-stamped `HCWatchSchedule` object through
+  `WCSession.updateApplicationContext`; it explicitly includes `nil` when
+  there is no strength workout or run. An empty plan is a valid rest day.
+- The watch never starts with the old November 14 sample lift. Cached plans
+  must match the **current local date** to appear. Yesterday's workout cannot
+  appear as today's scheduled session.
+- Opening the Watch app requests its latest schedule from the paired iPhone.
+  The iPhone sends its current state and, when online, refreshes the cloud
+  calendar and pushes a subsequent update.
+- While the iPhone app is foregrounded, it checks the Command Center every
+  minute. Edits made on the iPhone are pushed immediately. watchOS/iOS may
+  delay delivery while the iPhone is offline, suspended, or out of reach.
+- Set and run completion records use an immediate WatchConnectivity message
+  when reachable *and* a durable background transfer for eventual delivery;
+  the iPhone deduplicates by UUID.
+- Active strength sessions remain available through temporary connection
+  loss and are not discarded when another device edits the day's plan.
+
+**To install the fix:** update **both** the `HealthCoach` iPhone app and the
+`HealthCoachWatch` Watch app from the same Xcode project. Updating the Watch
+alone does not give the old iPhone app the new dated schedule protocol.
+The source ZIP does not install or update apps on devices by itself.
+
+**Validation checklist:** On a rest day, iPhone Strength and Watch Strength
+must both say no workout is scheduled. Move a planned session onto today on
+iPhone and reopen/refresh the Watch: it should appear. Move it off today:
+the Watch should remove it. Record a set on Watch and verify the iPhone's
+log reflects the same set without duplicating it. Test offline and date
+rollover separately; background delivery is not guaranteed to be instantaneous.
