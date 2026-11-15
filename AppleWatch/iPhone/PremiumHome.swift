@@ -2092,7 +2092,8 @@ private struct PremiumCoachPage: View {
                     }
                 }
 
-                HCSectionTitle(title: "Ask imun", detail: "Secure AI coaching")
+                PremiumCoachQuickChat()
+                HCSectionTitle(title: "More coaching", detail: "Full-screen view")
                 NavigationLink {
                     PremiumAskCoachPage()
                 } label: {
@@ -2191,6 +2192,149 @@ private struct PremiumCoachPage: View {
 }
 
 // All original settings, exports and integrations are preserved here.
+// Real on-screen AI conversation. The model is called only on explicit Send.
+// The server uses the signed-in user's JWT; provider credentials stay server-side.
+private struct IMUNCoachTurn: Identifiable {
+    let id = UUID()
+    let role: String
+    let text: String
+}
+
+private struct PremiumCoachQuickChat: View {
+    @EnvironmentObject private var coach: PhoneWorkoutBridge
+    @AppStorage("hcAIShareRecovery") private var shareRecovery = false
+    @State private var question = ""
+    @State private var turns: [IMUNCoachTurn] = []
+    @State private var waiting = false
+    @State private var serviceStatus = "Checking the AI service…"
+    @State private var serviceError: String?
+    private var priorContext: String {
+        turns.suffix(6).map { ($0.role == "user" ? "Athlete: " : "Coach: ") + $0.text }
+            .joined(separator: "\n")
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HCSectionTitle(title: "AI Coach", detail: "Ask about your training")
+            HCCard(accent: HCDesign.aqua) {
+                VStack(alignment: .leading, spacing: 13) {
+                    HStack {
+                        Label("ASK IMUN", systemImage: "sparkles")
+                            .font(HCDesign.label(11))
+                            .tracking(1.2)
+                            .foregroundStyle(HCDesign.aqua)
+                        Spacer()
+                        Text(serviceStatus)
+                            .font(HCDesign.label(10))
+                            .foregroundStyle(serviceError == nil ?
+                                             HCDesign.good : HCDesign.caution)
+                            .lineLimit(2)
+                            .multilineTextAlignment(.trailing)
+                    }
+                    if !turns.isEmpty {
+                        ForEach(turns.suffix(8)) { turn in
+                            VStack(alignment: .leading, spacing: 5) {
+                                Text(turn.role == "user" ? "YOU" : "IMUN COACH · AI")
+                                    .font(HCDesign.label(9))
+                                    .tracking(1)
+                                    .foregroundStyle(turn.role == "user" ?
+                                                     HCDesign.secondary : HCDesign.aqua)
+                                Text(turn.text)
+                                    .font(.system(size: 14))
+                                    .foregroundStyle(HCDesign.ink)
+                                    .textSelection(.enabled)
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(11)
+                            .background(turn.role == "user" ?
+                                        HCDesign.raised : HCDesign.canvas.opacity(0.68),
+                                        in: RoundedRectangle(cornerRadius: 12))
+                        }
+                    } else {
+                        Text("Ask about today's workout, your running progress, or how to balance training with recovery.")
+                            .font(.system(size: 14))
+                            .foregroundStyle(HCDesign.secondary)
+                    }
+                    TextField("Ask your coach a question…",
+                              text: $question, axis: .vertical)
+                        .lineLimit(2...4)
+                        .font(.system(size: 14))
+                        .padding(12)
+                        .background(HCDesign.raised, in: RoundedRectangle(cornerRadius: 11))
+                    Toggle("Include recovery data in this question", isOn: $shareRecovery)
+                        .font(.system(size: 12))
+                        .tint(HCDesign.aqua)
+                    HStack(alignment: .center) {
+                        Text("Training context is shared only when you send.")
+                            .font(.caption2)
+                            .foregroundStyle(HCDesign.secondary)
+                        Spacer(minLength: 10)
+                        Button {
+                            send()
+                        } label: {
+                            Label(waiting ? "ASKING…" : "SEND", systemImage: "arrow.up")
+                                .font(.system(size: 12, weight: .bold))
+                                .foregroundStyle(HCDesign.canvas)
+                                .padding(.horizontal, 15)
+                                .padding(.vertical, 10)
+                                .background(HCDesign.aqua, in: Capsule())
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(waiting || !coach.signedIn ||
+                                  question.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    }
+                    if waiting { ProgressView().tint(HCDesign.aqua) }
+                    if let serviceError {
+                        HCStatusLine(text: serviceError,
+                                     symbol: "exclamationmark.triangle",
+                                     tint: HCDesign.caution)
+                    }
+                }
+            }
+        }
+        .task(id: coach.signedIn) {
+            if coach.signedIn {
+                let status = await coach.checkCoachAIConnection()
+                serviceStatus = status.hasPrefix("Secure AI") ? "CONNECTED" : "SETUP NEEDED"
+                serviceError = status.hasPrefix("Secure AI") ? nil : status
+            } else {
+                serviceStatus = "SIGN IN REQUIRED"
+                serviceError = nil
+            }
+        }
+    }
+
+    private func send() {
+        let ask = question.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !waiting, !ask.isEmpty, coach.signedIn else { return }
+        let context = priorContext
+        question = ""
+        turns.append(IMUNCoachTurn(role: "user", text: ask))
+        waiting = true
+        serviceError = nil
+        Task {
+            do {
+                let response = try await coach.askIMUNCoach(
+                    question: ask, shareRecovery: shareRecovery,
+                    recentConversation: context)
+                await MainActor.run {
+                    turns.append(IMUNCoachTurn(role: "assistant", text: response))
+                    waiting = false
+                    serviceStatus = "CONNECTED"
+                }
+            } catch {
+                await MainActor.run {
+                    turns.append(IMUNCoachTurn(role: "assistant",
+                                               text: "I couldn't answer that request."))
+                    serviceError = error.localizedDescription
+                    serviceStatus = "CONNECTION ISSUE"
+                    waiting = false
+                }
+            }
+        }
+    }
+}
+
 // User-initiated AI, no continuous health upload and no client-side provider keys.
 private struct PremiumAskCoachPage: View {
     @EnvironmentObject private var coach: PhoneWorkoutBridge
