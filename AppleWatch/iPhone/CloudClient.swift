@@ -335,7 +335,7 @@ actor HCCloudClient {
             "set_index": set.index,
             "reps": set.reps,
             "completed_at": stamp.string(from: set.completedAt),
-            "source": "Apple Watch"
+            "source": set.source ?? "Apple Watch"
         ]
         body["weight_lb"] = set.weightLb.map { $0 as Any } ?? NSNull()
         body["rir"] = set.rir.map { $0 as Any } ?? NSNull()
