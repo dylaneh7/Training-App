@@ -95,8 +95,13 @@ export default {
       }
       if (!response.ok) {
         console.error("imun-ai-coach upstream status", response.status);
-        return Response.json({ error: "AI service temporarily unavailable" },
-          { status: 503, headers });
+        const reason = response.status === 401 ?
+          "AI provider credentials are invalid" : response.status === 429 ?
+          "AI provider is rate-limited or out of API credits" : response.status === 404 ?
+          "The configured AI model is not available" : response.status === 400 ?
+          "The AI model or request configuration was rejected" :
+          "AI service temporarily unavailable";
+        return Response.json({ error: reason }, { status: 503, headers });
       }
       const data = await response.json();
       const reply = textFromResponse(data);
