@@ -5,6 +5,16 @@
 	};
 	objectVersion = 56;
 	objects = {
+		00000000000000000000004B = {
+			isa = PBXFileReference;
+			lastKnownFileType = "sourcecode.swift";
+			path = "TredictImporter.swift";
+			sourceTree = "<group>";
+		};
+		00000000000000000000004C = {
+			isa = PBXBuildFile;
+			fileRef = 00000000000000000000004B;
+		};
 		000000000000000000000047 = {
 			isa = PBXFileReference;
 			lastKnownFileType = folder.assetcatalog;
@@ -125,6 +135,7 @@
 				000000000000000000000042,
 				000000000000000000000045,
 				000000000000000000000047,
+				00000000000000000000004B,
 			);
 			path = iPhone;
 			sourceTree = "<group>";
@@ -285,6 +296,7 @@
 				000000000000000000000043,
 				000000000000000000000044,
 				000000000000000000000046,
+				00000000000000000000004C,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
