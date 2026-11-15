@@ -13,6 +13,8 @@ struct HCTrainingClock: Codable {
     var setExerciseID: String?
     var setStartedAt: Date?
     var restEndsAt: Date?
+    var splits: [HCRunSplit]? = nil
+    var lastLapDistance: Double? = nil
 
     var isActive: Bool { finishedAt == nil }
     var isPaused: Bool { isActive && pausedAt != nil }
@@ -200,6 +202,24 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
         save(clock, name: "running-clock.json")
     }
 
+    func addRunSplit(currentDistanceMeters: Double?) {
+        guard var clock=runClock, clock.isActive, !clock.isPaused else { return }
+        let elapsed=clock.duration()
+        let accumulated=(clock.splits ?? []).reduce(0) { $0+$1.elapsedSeconds }
+        let lapTime=elapsed-accumulated
+        guard lapTime > 1 else { return }
+        let dist=currentDistanceMeters.flatMap { now -> Double? in
+            let delta=now-(clock.lastLapDistance ?? 0)
+            return delta >= 0 ? delta : nil
+        }
+        var splits=clock.splits ?? []
+        splits.append(HCRunSplit(index:splits.count+1,elapsedSeconds:lapTime,distanceMeters:dist))
+        clock.splits=splits
+        clock.lastLapDistance=currentDistanceMeters
+        runClock=clock
+        save(clock,name:"running-clock.json")
+    }
+
     func finishRun(distanceMeters: Double?, heartRateBPM: Double?) {
         guard var clock = runClock, clock.isActive else { return }
         let now = Date()
@@ -219,7 +239,20 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
             distanceMeters: distanceMeters,
             averageHeartRate: heartRateBPM
         )
-        completedRuns.append(result)
+        let completedTime=clock.duration(at:now)
+        let splitSeconds=(clock.splits ?? []).reduce(0) { $0+$1.elapsedSeconds }
+        let tail=max(0,completedTime-splitSeconds)
+        var splits=clock.splits ?? []
+        if tail >= 1 {
+            let tailDistance=distanceMeters.flatMap { now -> Double? in
+                let value=now-(clock.lastLapDistance ?? 0)
+                return value >= 0 ? value : nil
+            }
+            splits.append(HCRunSplit(index:splits.count+1,elapsedSeconds:tail,distanceMeters:tailDistance))
+        }
+        var finished=result
+        finished.splits=splits
+        completedRuns.append(finished)
         save(completedRuns, name: "completed-runs.json")
         sendPending()
     }
