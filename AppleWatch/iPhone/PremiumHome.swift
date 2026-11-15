@@ -306,11 +306,23 @@ private struct PremiumStrengthPage: View {
                     HCCard(accent: HCDesign.electric) {
                         VStack(alignment: .leading, spacing: 17) {
                             HCAccentTag(title: "TODAY'S PROGRAM", color: HCDesign.electric)
-                            Text(plan.title)
-                                .font(HCDesign.display(29))
-                                .tracking(-0.8)
-                            Text("\(plan.exercises.count) movements  /  \(plan.prescribedSetCount) working sets")
-                                .font(.subheadline).foregroundStyle(HCDesign.secondary)
+                            HStack(alignment: .center, spacing: 18) {
+                                VStack(alignment: .leading, spacing: 8) {
+                                    Text(plan.title)
+                                        .font(HCDesign.display(25))
+                                        .tracking(-0.7)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                    Text("\(plan.exercises.count) movements · \(plan.prescribedSetCount) working sets")
+                                        .font(.subheadline).foregroundStyle(HCDesign.secondary)
+                                }
+                                Spacer(minLength: 0)
+                                HCProgressRing(
+                                    progress: plan.prescribedSetCount > 0 ?
+                                        Double(doneSets.count) / Double(plan.prescribedSetCount) : 0,
+                                    value: "\(min(doneSets.count,plan.prescribedSetCount))",
+                                    subtitle: "Sets done",
+                                    tint: HCDesign.electric, diameter: 91)
+                            }
 
                             HStack(spacing: 7) {
                                 HCMetricBlock(label: "Sets logged",
@@ -764,6 +776,27 @@ private struct PremiumRunPage: View {
     private var actual: HCProgressRun? {
         coach.runHistory.first { $0.date == HCPlanBuilder.dateString(date) }
     }
+    private var comparablePrevious: HCProgressRun? {
+        guard let actual, let meters = actual.distanceMeters, meters > 1000 else { return nil }
+        return coach.runHistory.first {
+            $0.id != actual.id && $0.date < actual.date &&
+            $0.distanceMeters.map { abs($0 - meters) / meters <= 0.15 } == true &&
+            $0.durationSeconds.map { $0 > 0 } == true
+        }
+    }
+    private var paceComparison: String? {
+        guard let actual, let past = comparablePrevious,
+              let currentDistance = actual.distanceMeters, currentDistance > 0,
+              let previousDistance = past.distanceMeters, previousDistance > 0,
+              let currentTime = actual.durationSeconds, currentTime > 0,
+              let previousTime = past.durationSeconds, previousTime > 0 else { return nil }
+        let currentPace = currentTime * 1609.344 / currentDistance
+        let previousPace = previousTime * 1609.344 / previousDistance
+        let change = Int(abs(currentPace - previousPace).rounded())
+        return "\(change / 60):\(String(format: "%02d", change % 60)) " +
+               (currentPace <= previousPace ? "faster" : "slower") +
+               " per mile than \(past.date)'s comparable run"
+    }
 
     var body: some View {
         ScrollView {
@@ -802,6 +835,23 @@ private struct PremiumRunPage: View {
                     }
                 }
                 if let actual {
+                    if let distance = actual.distanceMeters,
+                       let target = coach.runPlan?.targetDistanceMiles,
+                       target > 0 {
+                        HCCard(accent: HCDesign.aqua) {
+                            HCMetricGauge(title: "Today's distance",
+                                          value: String(format: "%.2f mi", distance / 1609.344),
+                                          progress: distance / (target * 1609.344),
+                                          detail: String(format: "%.1f-mile planned target", target),
+                                          tint: HCDesign.aqua,
+                                          symbol: "figure.run")
+                        }
+                    }
+                    if let paceComparison {
+                        HCStatusLine(text: paceComparison,
+                                     symbol: "arrow.left.arrow.right",
+                                     tint: HCDesign.aqua)
+                    }
                     HCSectionTitle(title: "Completed run", detail: actual.source)
                     HCCard {
                         VStack(alignment: .leading, spacing: 15) {
