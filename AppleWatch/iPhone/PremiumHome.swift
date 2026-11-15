@@ -1,5 +1,6 @@
 import SwiftUI
 import Charts
+import MapKit
 
 // MARK: - Health Coach 2.0 navigation
 
@@ -805,6 +806,46 @@ private struct PremiumRunDetails: View {
                             HCMetricBlock(label: "Cadence", value: number(run.averageCadenceSPM, unit: " spm"))
                         }
                         HCMetricBlock(label: "Elevation gained", value: number(run.elevationGainMeters, unit: " m"))
+                    }
+                }
+                if !run.heartRateTrace.isEmpty {
+                    HCSectionTitle(title: "Heart rate over time", detail: run.source)
+                    HCCard {
+                        Chart(run.heartRateTrace) { item in
+                            LineMark(x: .value("Time", item.at),
+                                     y: .value("Heart rate", item.bpm))
+                                .foregroundStyle(HCDesign.aqua)
+                                .interpolationMethod(.linear)
+                        }
+                        .chartYAxisLabel("bpm")
+                        .frame(height: 205)
+                    }
+                }
+                if !run.routePoints.isEmpty {
+                    HCSectionTitle(title: "Recorded GPS route", detail: run.source)
+                    HCCard {
+                        let points = run.routePoints.map {
+                            CLLocationCoordinate2D(latitude: $0.latitude, longitude: $0.longitude)
+                        }
+                        let latitudes = run.routePoints.map(\.latitude)
+                        let longitudes = run.routePoints.map(\.longitude)
+                        let latMin = latitudes.min() ?? 0
+                        let latMax = latitudes.max() ?? 0
+                        let lonMin = longitudes.min() ?? 0
+                        let lonMax = longitudes.max() ?? 0
+                        let center = CLLocationCoordinate2D(latitude: (latMin + latMax) / 2,
+                                                             longitude: (lonMin + lonMax) / 2)
+                        let span = MKCoordinateSpan(latitudeDelta: max(0.007, (latMax - latMin) * 1.5),
+                                                    longitudeDelta: max(0.007, (lonMax - lonMin) * 1.5))
+                        Map(initialPosition: .region(MKCoordinateRegion(center: center, span: span))) {
+                            MapPolyline(coordinates: points)
+                                .stroke(HCDesign.aqua, lineWidth: 4)
+                        }
+                        .frame(height: 250)
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                        Text("GPS locations remain stored on this iPhone.")
+                            .font(.caption2)
+                            .foregroundStyle(HCDesign.secondary)
                     }
                 }
                 HCSectionTitle(title: "Recorded lap events", detail: "\(run.splits.count)")
