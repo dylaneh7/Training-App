@@ -246,6 +246,35 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
         acceptSet(entry)
     }
 
+    func correctLoggedSet(id: UUID, weightLb: Double?, reps: Int, rir: Double?) {
+        guard reps > 0, reps <= 300, let index=loggedSets.firstIndex(where:{$0.id==id}),
+              weightLb == nil || (weightLb! >= 0 && weightLb! <= 3000),
+              rir == nil || (rir! >= 0 && rir! <= 10)
+        else { return }
+        let previous=loggedSets[index]
+        var corrected=HCLoggedSet(id:previous.id,workoutID:previous.workoutID,
+            workoutDate:previous.workoutDate,sessionKey:previous.sessionKey,
+            workoutTitle:previous.workoutTitle,exerciseID:previous.exerciseID,
+            exerciseName:previous.exerciseName,exerciseIndex:previous.exerciseIndex,
+            index:previous.index,weightLb:weightLb,reps:reps,rir:rir,
+            completedAt:previous.completedAt)
+        corrected.startedAt=previous.startedAt
+        corrected.durationSeconds=previous.durationSeconds
+        corrected.source=previous.source
+        loggedSets[index]=corrected
+        save(loggedSets,name:"health-coach-watch-sets.json")
+        uploadedIDs.remove(id)
+        save(Array(uploadedIDs),name:"uploaded-watch-set-ids.json")
+        updatePendingCount()
+        if WCSession.isSupported(), WCSession.default.activationState == .activated,
+           let bytes=try? encoder.encode(corrected) {
+            WCSession.default.transferUserInfo([HCPayload.kind:"correctedSet",
+                                                HCPayload.data:bytes])
+        }
+        status="Updated set saved locally; syncing correction…"
+        retryPendingCloudSets()
+    }
+
     private func updatePendingCount() {
         cloudPendingCount = loggedSets.filter { !uploadedIDs.contains($0.id) }.count +
             completedWatchRuns.filter { !uploadedIDs.contains($0.id) }.count
