@@ -19,6 +19,8 @@ targets:
       - path: Shared
     info:
       path: iPhone/Info.plist
+    entitlements:
+      path: iPhone/HealthCoachPhone.entitlements
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: "$(HC_IOS_BUNDLE_ID)"
