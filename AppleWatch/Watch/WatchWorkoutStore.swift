@@ -312,4 +312,17 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
     func session(_ session: WCSession, didReceiveApplicationContext context: [String: Any]) {
         applyContext(context)
     }
+
+    func session(_ session: WCSession, didReceiveUserInfo userInfo: [String: Any] = [:]) {
+        guard userInfo[HCPayload.kind] as? String == "correctedSet",
+              let bytes = userInfo[HCPayload.data] as? Data,
+              let corrected = try? decoder.decode(HCLoggedSet.self, from: bytes) else { return }
+        DispatchQueue.main.async {
+            if let index = self.sets.firstIndex(where: { $0.id == corrected.id }) {
+                self.sets[index] = corrected
+                self.save(self.sets, name: "sets.json")
+                self.status = "Set correction synced from iPhone"
+            }
+        }
+    }
 }
