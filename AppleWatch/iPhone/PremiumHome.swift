@@ -1398,6 +1398,19 @@ private struct PremiumCoachPage: View {
                         Text("Discipline in training. Purpose in every effort.")
                             .font(.caption)
                             .foregroundStyle(HCDesign.secondary)
+                        DisclosureGroup("READ THE PASSAGE · KJV") {
+                            VStack(alignment: .leading, spacing: 9) {
+                                Text("24 · Know ye not that they which run in a race run all, but one receiveth the prize? So run, that ye may obtain.")
+                                Text("25 · And every man that striveth for the mastery is temperate in all things. Now they do it to obtain a corruptible crown; but we an incorruptible.")
+                                Text("26 · I therefore so run, not as uncertainly; so fight I, not as one that beateth the air:")
+                                Text("27 · But I keep under my body, and bring it into subjection: lest that by any means, when I have preached to others, I myself should be a castaway.")
+                            }
+                            .font(.system(size: 12, design: .serif))
+                            .foregroundStyle(HCDesign.secondary)
+                            .padding(.vertical, 8)
+                        }
+                        .font(HCDesign.label(11))
+                        .tint(HCDesign.electric)
                     }
                 }
                 HCSectionTitle(title: "Appearance", detail: "Pick your accent")
