@@ -7,6 +7,8 @@ struct PremiumHomeView: View {
     @EnvironmentObject private var coach: PhoneWorkoutBridge
     @State private var selectedDate = Date()
     @StateObject private var appleHealth = HCAppleHealthReader()
+    @StateObject private var runImporter = HCRunHealthImporter()
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         TabView {
@@ -23,6 +25,13 @@ struct PremiumHomeView: View {
         }
         .tint(HCDesign.electric)
         .preferredColorScheme(.dark)
+        .environmentObject(runImporter)
+        .onReceive(runImporter.$runs) { imported in
+            coach.updateHealthRuns(imported)
+        }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active { runImporter.startIfAuthorized() }
+        }
         .onChange(of: selectedDate) { _, value in coach.refresh(date: value) }
         .onAppear {
             if coach.signedIn && coach.workout == nil { coach.refresh(date: selectedDate) }
@@ -605,6 +614,7 @@ private struct PremiumExerciseSession: View {
 
 private struct PremiumRunPage: View {
     @EnvironmentObject private var coach: PhoneWorkoutBridge
+    @EnvironmentObject private var importer: HCRunHealthImporter
     @Binding var date: Date
 
     private var actual: HCProgressRun? {
@@ -619,6 +629,24 @@ private struct PremiumRunPage: View {
                               subtitle: "The plan, the splits, and the real result.")
                 PremiumDatePicker(date: $date)
                 if !coach.signedIn { PremiumLogin() }
+                HCCard(accent: HCDesign.aqua) {
+                    VStack(alignment: .leading, spacing: 12) {
+                        HCAccentTag(title: "AUTO-IMPORT / APPLE HEALTH", color: HCDesign.aqua)
+                        Text(importer.enabled ? "Runs sync automatically" : "Connect completed workouts")
+                            .font(.system(size: 17, weight: .bold, design: .rounded))
+                        Text("Bring in running workouts from Apple Workout and WHOOP when they appear in Apple Health. Individual metrics depend on what each source shares.")
+                            .font(.system(size: 12))
+                            .foregroundStyle(HCDesign.secondary)
+                        if importer.enabled {
+                            HCOutlineButton(title: importer.refreshing ? "Checking Health…" : "Check new runs",
+                                            icon: "arrow.clockwise") { importer.refresh() }
+                        } else {
+                            HCFilledButton(title: "CONNECT APPLE HEALTH", icon: "heart.fill",
+                                           tint: HCDesign.aqua) { importer.connect() }
+                        }
+                        Text(importer.status).font(.caption2).foregroundStyle(HCDesign.secondary)
+                    }
+                }
                 HCCard(accent: HCDesign.aqua) {
                     VStack(alignment: .leading, spacing: 17) {
                         HCAccentTag(title: "TODAY'S RUN", color: HCDesign.aqua)
@@ -644,7 +672,7 @@ private struct PremiumRunPage: View {
                     }
                 }
                 if let actual {
-                    HCSectionTitle(title: "Last recorded result", detail: actual.source)
+                    HCSectionTitle(title: "Completed run", detail: actual.source)
                     HCCard {
                         VStack(alignment: .leading, spacing: 15) {
                             HStack {
@@ -662,6 +690,25 @@ private struct PremiumRunPage: View {
                                 Text("AVG PACE · \(hcDuration(perMile)) /mi")
                                     .font(HCDesign.label(12))
                                     .foregroundStyle(HCDesign.aqua)
+                            }
+                            HStack(spacing: 12) {
+                                HCMetricBlock(label: "Average HR",
+                                              value: actual.averageBPM.map { "\(Int($0)) bpm" } ?? "—",
+                                              tint: HCDesign.aqua)
+                                HCMetricBlock(label: "Calories",
+                                              value: actual.activeCalories.map { "\(Int($0)) kcal" } ?? "—")
+                            }
+                            NavigationLink {
+                                PremiumRunDetails(run: actual)
+                            } label: {
+                                HStack {
+                                    Text("VIEW ALL RECORDED RUN DATA")
+                                        .font(HCDesign.label(11))
+                                    Spacer()
+                                    Image(systemName: "arrow.up.right")
+                                }
+                                .foregroundStyle(HCDesign.electric)
+                                .padding(.vertical, 6)
                             }
                             if !actual.splits.isEmpty {
                                 HCSectionTitle(title: "Measured laps")
@@ -682,19 +729,26 @@ private struct PremiumRunPage: View {
                 }
                 HCSectionTitle(title: "Previous runs", detail: "Recorded only")
                 ForEach(Array(coach.runHistory.prefix(15))) { run in
-                    HCCard {
-                        HStack {
-                            VStack(alignment: .leading, spacing: 5) {
-                                Text(run.date).font(HCDesign.label(11)).foregroundStyle(HCDesign.aqua)
-                                Text(run.title).font(.system(size: 15, weight: .bold))
-                                Text(run.source).font(.caption2).foregroundStyle(HCDesign.secondary)
+                    NavigationLink {
+                        PremiumRunDetails(run: run)
+                    } label: {
+                        HCCard {
+                            HStack {
+                                VStack(alignment: .leading, spacing: 5) {
+                                    Text(run.date).font(HCDesign.label(11)).foregroundStyle(HCDesign.aqua)
+                                    Text(run.title).font(.system(size: 15, weight: .bold))
+                                    Text(run.source).font(.caption2).foregroundStyle(HCDesign.secondary)
+                                }
+                                Spacer()
+                                Text(run.distanceMeters.map { String(format: "%.2f", $0 / 1609.344) } ?? "—")
+                                    .font(HCDesign.metric(20))
+                                Text("mi").font(.caption).foregroundStyle(HCDesign.secondary)
+                                Image(systemName: "chevron.right")
+                                    .font(.caption2).foregroundStyle(HCDesign.secondary)
                             }
-                            Spacer()
-                            Text(run.distanceMeters.map { String(format: "%.2f", $0 / 1609.344) } ?? "—")
-                                .font(HCDesign.metric(20))
-                            Text("mi").font(.caption).foregroundStyle(HCDesign.secondary)
                         }
                     }
+                    .buttonStyle(.plain)
                 }
                 if coach.runHistory.isEmpty {
                     HCCard {
@@ -705,6 +759,89 @@ private struct PremiumRunPage: View {
                 Spacer(minLength: 26)
             }
             .padding(.horizontal, 18)
+        }
+        .scrollIndicators(.hidden)
+        .hcPage()
+        .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+private struct PremiumRunDetails: View {
+    let run: HCProgressRun
+
+    private func number(_ v: Double?, unit: String = "", digits: Int = 0) -> String {
+        guard let v else { return "Not shared" }
+        return v.formatted(.number.precision(.fractionLength(digits))) + unit
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 17) {
+                PremiumHeader(eyebrow: "RUN / RECORDED", title: run.title,
+                              subtitle: run.date + " · " + run.source,
+                              badge: run.fromAppleHealth ? "APPLE HEALTH" : "CONNECTED")
+                HCCard(accent: HCDesign.aqua) {
+                    VStack(spacing: 17) {
+                        HStack {
+                            HCMetricBlock(label: "Distance", value: run.distanceMeters.map {
+                                String(format: "%.2f mi", $0 / 1609.344)
+                            } ?? "Not shared", tint: HCDesign.aqua)
+                            HCMetricBlock(label: "Elapsed", value: run.durationSeconds.map(hcDuration) ?? "—")
+                        }
+                        HStack {
+                            HCMetricBlock(label: "Average pace", value: {
+                                guard let meters = run.distanceMeters, meters > 0,
+                                      let seconds = run.durationSeconds else { return "—" }
+                                return hcDuration(seconds * 1609.344 / meters) + "/mi"
+                            }())
+                            HCMetricBlock(label: "Active energy", value: number(run.activeCalories, unit: " kcal"))
+                        }
+                        HStack {
+                            HCMetricBlock(label: "Average heart rate", value: number(run.averageBPM, unit: " bpm"))
+                            HCMetricBlock(label: "Maximum heart rate", value: number(run.maxBPM, unit: " bpm"))
+                        }
+                        HStack {
+                            HCMetricBlock(label: "Average run power", value: number(run.averagePowerWatts, unit: " W"))
+                            HCMetricBlock(label: "Cadence", value: number(run.averageCadenceSPM, unit: " spm"))
+                        }
+                        HCMetricBlock(label: "Elevation gained", value: number(run.elevationGainMeters, unit: " m"))
+                    }
+                }
+                HCSectionTitle(title: "Recorded lap events", detail: "\(run.splits.count)")
+                if run.splits.isEmpty {
+                    HCCard {
+                        Text("This recorder did not share lap splits. Distance and total elapsed time may still be available.")
+                            .font(.subheadline).foregroundStyle(HCDesign.secondary)
+                    }
+                } else {
+                    ForEach(run.splits) { lap in
+                        HCCard {
+                            HStack {
+                                Text("LAP \(lap.index)").font(HCDesign.label(12))
+                                Spacer()
+                                Text(hcDuration(lap.elapsedSeconds)).font(HCDesign.metric(19))
+                                if let meters = lap.distanceMeters {
+                                    Text(String(format: "%.2f mi", meters / 1609.344))
+                                        .font(.caption).foregroundStyle(HCDesign.secondary)
+                                }
+                            }
+                        }
+                    }
+                }
+                HCCard {
+                    VStack(alignment: .leading, spacing: 7) {
+                        HCSectionTitle(title: "Provenance")
+                        Text("Recorded by: \(run.source)")
+                            .font(.system(size: 13, weight: .medium))
+                        if let bundleID = run.sourceBundleID {
+                            Text(bundleID).font(.caption2).foregroundStyle(HCDesign.secondary)
+                        }
+                        Text("Only data actually shared by the originating app appears here. Missing values and lap distances are not fabricated.")
+                            .font(.caption).foregroundStyle(HCDesign.secondary)
+                    }
+                }
+            }
+            .padding(18)
         }
         .scrollIndicators(.hidden)
         .hcPage()
