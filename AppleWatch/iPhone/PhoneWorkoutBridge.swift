@@ -213,7 +213,7 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
                 DispatchQueue.main.async {
                     self.workout = active
                     self.runPlan = run
-                    self.plannedSessions = HCPlanBuilder.plannedSessions(from: snapshot.planner)
+                    self.plannedSessions = HCPlanBuilder.upcomingWithRotation(from: snapshot.planner)
                     self.trainingActivities = activities
                     self.save(self.plannedSessions, name: "imun-planned-workouts.json")
                     self.save(activities, name: "imun-training-activity-history.json")
@@ -257,7 +257,13 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
         status = "Moving \(entry.title)…"
         Task {
             do {
-                try await cloud.movePlannedWorkout(id: entry.id, to: day)
+                if entry.id.hasPrefix("rotation-") {
+                    try await cloud.moveRotationWorkout(
+                        originalDate: entry.originalDate ?? entry.date,
+                        to: day, title: entry.title)
+                } else {
+                    try await cloud.movePlannedWorkout(id: entry.id, to: day)
+                }
                 DispatchQueue.main.async {
                     self.movingWorkoutID = nil
                     self.status = "Moved \(entry.title) to \(day)."
