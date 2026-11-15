@@ -12,6 +12,9 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
     @Published private(set) var runHistory: [HCProgressRun] = []
     @Published private(set) var plannedSessions: [HCPlannedSession] = []
     @Published private(set) var trainingActivities: [HCTrainingActivity] = []
+    private var cloudTrainingActivities: [HCTrainingActivity] = []
+    private var cloudRecoveryHistory: [HCRecoveryDatum] = []
+    private var tredictSnapshot = HCTredictSnapshot()
     @Published private(set) var movingWorkoutID: String?
     @Published private(set) var lastArchiveAt: Date?
     // Apple Health running results stay on device unless user elects to share them.
@@ -98,7 +101,8 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
         loggedSets = read("health-coach-watch-sets.json") ?? []
         lastArchiveAt = read("imun-source-archive-date.json")
         plannedSessions = read("imun-planned-workouts.json") ?? []
-        trainingActivities = read("imun-training-activity-history.json") ?? []
+        cloudTrainingActivities = read("imun-training-activity-history.json") ?? []
+        trainingActivities = cloudTrainingActivities
         importedHealthRuns = read("apple-health-imported-runs.json") ?? []
         runHistory = importedHealthRuns
         completedWatchRuns = read("health-coach-native-runs.json") ?? []
@@ -214,7 +218,8 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
                     self.workout = active
                     self.runPlan = run
                     self.plannedSessions = HCPlanBuilder.upcomingWithRotation(from: snapshot.planner)
-                    self.trainingActivities = activities
+                    self.cloudTrainingActivities = activities
+                    self.mergeHistoricalSources()
                     self.save(self.plannedSessions, name: "imun-planned-workouts.json")
                     self.save(activities, name: "imun-training-activity-history.json")
                     self.saveOriginalSources(planner: snapshot.planner,
@@ -226,7 +231,8 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
                     self.performanceHistory = history
                     self.remoteRunHistory = priorRuns
                     self.mergeRunHistory()
-                    self.recoveryHistory = recovery
+                    self.cloudRecoveryHistory = recovery
+                    self.mergeHistoricalSources()
                     self.loading = false
                     self.status = active == nil ? "No strength session on this date." :
                         "Workout ready: \(active!.title)"
@@ -324,6 +330,48 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
         }
     }
 
+    /// No private Tredict credential or raw data ever leaves the iPhone.
+    /// Parsed measurements are combined with the other on-device histories.
+    func updateTredictSnapshot(_ snapshot: HCTredictSnapshot) {
+        tredictSnapshot = snapshot
+        mergeHistoricalSources()
+        mergeRunHistory()
+        sendToWatch()
+    }
+
+    private func mergeHistoricalSources() {
+        let all = tredictSnapshot.activities + cloudTrainingActivities
+        var unique: [HCTrainingActivity] = []
+        for entry in all.sorted(by: { $0.date > $1.date }) {
+            let duplicate = unique.contains { other in
+                if other.id == entry.id { return true }
+                guard other.date == entry.date, other.kind == entry.kind else { return false }
+                if let a = other.durationSeconds, let b = entry.durationSeconds,
+                   abs(a - b) < 90 {
+                    if let d1 = other.distanceMeters, let d2 = entry.distanceMeters {
+                        return abs(d1 - d2) < 150
+                    }
+                    return other.title.caseInsensitiveCompare(entry.title) == .orderedSame
+                }
+                return false
+            }
+            if !duplicate { unique.append(entry) }
+        }
+        trainingActivities = unique
+
+        // Avoid merging dissimilar raw RMSSD and SDNN measurements. Tredict
+        // recovery entries are preferred on duplicate dates when connected.
+        var days = Set<String>()
+        var combined: [HCRecoveryDatum] = []
+        for measurement in (tredictSnapshot.recovery + cloudRecoveryHistory)
+            .sorted(by: { $0.date > $1.date }) {
+            if days.insert(measurement.date).inserted {
+                combined.append(measurement)
+            }
+        }
+        recoveryHistory = combined
+    }
+
     /// A matching Apple Health workout marks the planned run complete in the
     /// native interface. Imports remain local (and visible offline).
     func updateHealthRuns(_ imported: [HCProgressRun]) {
@@ -337,7 +385,7 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
     }
 
     private func mergeRunHistory() {
-        let all = (importedHealthRuns + remoteRunHistory).sorted {
+        let all = (importedHealthRuns + tredictSnapshot.runs + remoteRunHistory).sorted {
             ($0.startedAt ?? HCPlanBuilder.startOfDate($0.date) ?? .distantPast) >
             ($1.startedAt ?? HCPlanBuilder.startOfDate($1.date) ?? .distantPast)
         }
