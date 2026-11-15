@@ -23,7 +23,13 @@ enum HCDesign {
     static var onAccent: Color {
         style == "crimson" ? .white : canvas
     }
-    static let aqua = Color(red: 0.41, green: 0.85, blue: 0.82)
+    static var aqua: Color {
+        switch style {
+        case "crimson": return .white
+        case "white": return Color(red: 0.83, green: 0.88, blue: 0.94)
+        default: return Color(red: 0.41, green: 0.85, blue: 0.82)
+        }
+    }
     static let amber = Color(red: 1.0, green: 0.73, blue: 0.39)
 
     static func display(_ size: CGFloat = 34) -> Font {
