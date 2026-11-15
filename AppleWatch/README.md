@@ -1,4 +1,4 @@
-# Health Coach Native — iPhone + Apple Watch
+# imun — iPhone + Apple Watch
 
 A standalone **native SwiftUI iPhone/watchOS companion** for the existing Health Coach web app. This folder is kept separate from the web app, so nothing here replaces your PWA or its workout history.
 
