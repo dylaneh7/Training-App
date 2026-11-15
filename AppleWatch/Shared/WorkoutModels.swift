@@ -49,6 +49,7 @@ struct HCLoggedSet: Codable, Identifiable, Hashable {
     let completedAt: Date
     var startedAt: Date? = nil
     var durationSeconds: Double? = nil
+    var source: String? = nil
 }
 
 /// A run from the Command Center calendar. Runs are separate from lifting
