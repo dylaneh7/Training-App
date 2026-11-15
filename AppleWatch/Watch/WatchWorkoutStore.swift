@@ -15,6 +15,8 @@ struct HCTrainingClock: Codable {
     var restEndsAt: Date?
     var splits: [HCRunSplit]? = nil
     var lastLapDistance: Double? = nil
+    // Optional so existing persisted clocks from older versions still decode.
+    var automaticMilesCompleted: Int? = nil
 
     var isActive: Bool { finishedAt == nil }
     var isPaused: Bool { isActive && pausedAt != nil }
@@ -31,6 +33,7 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
     @Published private(set) var hasScheduledLift = false
     @Published private(set) var runPlan: HCRunPlan?
     @Published private(set) var runHistory: [HCProgressRun] = []
+    @Published private(set) var recoverySummary: HCRecoveryDatum?
     @Published private(set) var sets: [HCLoggedSet] = []
     @Published private(set) var completedRuns: [HCRunFinished] = []
     @Published private(set) var liftClock: HCTrainingClock?
@@ -312,6 +315,27 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
         save(clock,name:"running-clock.json")
     }
 
+    /// Records a measured split at each whole mile. If HealthKit distance has
+    /// not arrived, no distance or pace is invented; manual laps still work.
+    @discardableResult
+    func autoLapIfNeeded(currentDistanceMeters: Double?) -> HCRunSplit? {
+        guard let distance = currentDistanceMeters, distance.isFinite,
+              distance > 0, var clock = runClock,
+              clock.isActive, !clock.isPaused else { return nil }
+        let crossed = Int(distance / 1609.344)
+        guard crossed > (clock.automaticMilesCompleted ?? 0) else { return nil }
+        let previous = clock.splits?.count ?? 0
+        // Persist the crossing before the spoken cue so background/foreground
+        // transitions never repeat the same mile announcement.
+        clock.automaticMilesCompleted = crossed
+        runClock = clock
+        save(clock, name: "running-clock.json")
+        addRunSplit(currentDistanceMeters: distance)
+        guard let latest = runClock?.splits?.last,
+              latest.index > previous else { return nil }
+        return latest
+    }
+
     func finishRun(distanceMeters: Double?, heartRateBPM: Double?) {
         guard var clock = runClock, clock.isActive else { return }
         let now = Date()
@@ -444,9 +468,26 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
         if let haptics = context[HCPayload.watchHaptics] as? Bool {
             UserDefaults.standard.set(haptics, forKey: "hcWatchHaptics")
         }
+        if let voice = context["hcRunVoiceCues"] as? Bool {
+            UserDefaults.standard.set(voice, forKey: "hcRunVoiceCues")
+        }
+        if let laps = context["hcRunAutoLaps"] as? Bool {
+            UserDefaults.standard.set(laps, forKey: "hcRunAutoLaps")
+        }
+        if let intervals = context["hcRunIntervals"] as? Bool {
+            UserDefaults.standard.set(intervals, forKey: "hcRunIntervals")
+        }
+        if let cadence = context["hcRunCueMinutes"] as? Int,
+           [0, 1, 2, 5, 10].contains(cadence) {
+            UserDefaults.standard.set(cadence, forKey: "hcRunCueMinutes")
+        }
         if let data = context[HCPayload.schedule] as? Data,
            let snapshot = try? decoder.decode(HCWatchSchedule.self, from: data) {
             DispatchQueue.main.async { self.applySchedule(snapshot) }
+        }
+        if let data = context["hcRecoverySnapshot"] as? Data,
+           let reading = try? decoder.decode(HCRecoveryDatum.self, from: data) {
+            DispatchQueue.main.async { self.recoverySummary = reading }
         }
         if let data = context[HCPayload.runHistory] as? Data,
            let history = try? decoder.decode([HCProgressRun].self, from: data) {

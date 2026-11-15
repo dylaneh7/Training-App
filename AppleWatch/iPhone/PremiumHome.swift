@@ -120,71 +120,73 @@ private struct PremiumTrainingPage: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            VStack(alignment: .leading, spacing: 14) {
-                HStack(alignment: .firstTextBaseline) {
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text("IMUN / YOUR SESSIONS")
+            VStack(alignment: .leading, spacing: 13) {
+                HCPremiumHero(eyebrow: "YOUR PERFORMANCE SPACE",
+                              title: "Train with intention.",
+                              subtitle: Date().formatted(.dateTime.weekday(.wide).month(.wide).day()),
+                              icon: "figure.run.circle",
+                              tint: HCDesign.electric) {
+                    HStack(spacing: 9) {
+                        HCInsightChip(title: coach.signedIn ? "PLAN CONNECTED" : "SIGN IN TO SYNC",
+                                      symbol: coach.signedIn ? "checkmark.icloud" : "icloud.slash",
+                                      tint: coach.signedIn ? HCDesign.good : HCDesign.amber)
+                        Spacer()
+                        Text("IMUN / 01")
                             .font(HCDesign.label(10))
-                            .tracking(1.8)
-                            .foregroundStyle(HCDesign.aqua)
-                        Text("Training")
-                            .font(HCDesign.display(32))
-                            .foregroundStyle(HCDesign.ink)
+                            .foregroundStyle(HCDesign.secondary)
                     }
-                    Spacer()
-                    Text(Date().formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day()))
-                        .font(HCDesign.label(11))
-                        .foregroundStyle(HCDesign.secondary)
                 }
 
                 HStack(spacing: 9) {
                     ForEach(IMUNTrainingActivity.allCases) { activity in
                         let active = selected == activity
                         Button {
-                            withAnimation(.easeInOut(duration: 0.18)) {
+                            withAnimation(.easeInOut(duration: 0.2)) {
                                 chosenActivity = activity.rawValue
                             }
                         } label: {
-                            Label(activity.title, systemImage: activity.symbol)
-                                .font(.system(size: 13, weight: .semibold, design: .rounded))
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, 13)
-                                .foregroundStyle(active ? HCDesign.onAccent : HCDesign.secondary)
-                                .background(active ? HCDesign.electric : HCDesign.raised,
-                                            in: RoundedRectangle(cornerRadius: 13, style: .continuous))
-                                .overlay {
-                                    RoundedRectangle(cornerRadius: 13, style: .continuous)
-                                        .strokeBorder(active ? HCDesign.electric : HCDesign.outline,
-                                                      lineWidth: 1)
-                                }
+                            VStack(spacing: 7) {
+                                Image(systemName: activity.symbol)
+                                    .font(.system(size: 21, weight: .medium))
+                                Text(activity.title.uppercased())
+                                    .font(HCDesign.label(11))
+                                    .tracking(0.6)
+                            }
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 14)
+                            .foregroundStyle(active ? HCDesign.onAccent : HCDesign.secondary)
+                            .background(active ? HCDesign.electric : HCDesign.raised,
+                                        in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                            .overlay {
+                                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                                    .strokeBorder(active ? HCDesign.electric : HCDesign.outline, lineWidth: 1)
+                            }
                         }
                         .buttonStyle(.plain)
                         .accessibilityAddTraits(active ? [.isSelected] : [])
                     }
                 }
-                .accessibilityLabel("Training activity")
+                .accessibilityLabel("Choose training activity")
 
-                HStack(spacing: 9) {
-                    Image(systemName: "calendar")
-                        .foregroundStyle(HCDesign.aqua)
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text("TODAY'S PLAN")
-                            .font(HCDesign.label(9))
-                            .tracking(1.2)
-                            .foregroundStyle(HCDesign.secondary)
-                        Text(plannedTitle)
-                            .font(.system(size: 14, weight: .semibold, design: .rounded))
-                            .foregroundStyle(HCDesign.ink)
-                            .lineLimit(1)
+                HCCard(accent: HCDesign.aqua) {
+                    HStack(spacing: 13) {
+                        Image(systemName: "calendar.badge.clock")
+                            .font(.system(size: 20))
+                            .foregroundStyle(HCDesign.aqua)
+                            .frame(width: 37)
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("TODAY'S PLANNED \(selected.title.uppercased())")
+                                .font(HCDesign.label(9))
+                                .tracking(1.3)
+                                .foregroundStyle(HCDesign.secondary)
+                            Text(plannedTitle)
+                                .font(.system(size: 17, weight: .bold, design: .rounded))
+                                .foregroundStyle(HCDesign.ink)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        Spacer(minLength: 0)
                     }
-                    Spacer()
-                    Image(systemName: "chevron.down")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundStyle(HCDesign.secondary)
                 }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 10)
-                .background(HCDesign.card, in: RoundedRectangle(cornerRadius: 12))
             }
             .padding(.horizontal, 18)
             .padding(.top, 12)
@@ -304,11 +306,23 @@ private struct PremiumStrengthPage: View {
                     HCCard(accent: HCDesign.electric) {
                         VStack(alignment: .leading, spacing: 17) {
                             HCAccentTag(title: "TODAY'S PROGRAM", color: HCDesign.electric)
-                            Text(plan.title)
-                                .font(HCDesign.display(29))
-                                .tracking(-0.8)
-                            Text("\(plan.exercises.count) movements  /  \(plan.prescribedSetCount) working sets")
-                                .font(.subheadline).foregroundStyle(HCDesign.secondary)
+                            HStack(alignment: .center, spacing: 18) {
+                                VStack(alignment: .leading, spacing: 8) {
+                                    Text(plan.title)
+                                        .font(HCDesign.display(25))
+                                        .tracking(-0.7)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                    Text("\(plan.exercises.count) movements · \(plan.prescribedSetCount) working sets")
+                                        .font(.subheadline).foregroundStyle(HCDesign.secondary)
+                                }
+                                Spacer(minLength: 0)
+                                HCProgressRing(
+                                    progress: plan.prescribedSetCount > 0 ?
+                                        Double(doneSets.count) / Double(plan.prescribedSetCount) : 0,
+                                    value: "\(min(doneSets.count,plan.prescribedSetCount))",
+                                    subtitle: "Sets done",
+                                    tint: HCDesign.electric, diameter: 91)
+                            }
 
                             HStack(spacing: 7) {
                                 HCMetricBlock(label: "Sets logged",
@@ -762,6 +776,27 @@ private struct PremiumRunPage: View {
     private var actual: HCProgressRun? {
         coach.runHistory.first { $0.date == HCPlanBuilder.dateString(date) }
     }
+    private var comparablePrevious: HCProgressRun? {
+        guard let actual, let meters = actual.distanceMeters, meters > 1000 else { return nil }
+        return coach.runHistory.first {
+            $0.id != actual.id && $0.date < actual.date &&
+            $0.distanceMeters.map { abs($0 - meters) / meters <= 0.15 } == true &&
+            $0.durationSeconds.map { $0 > 0 } == true
+        }
+    }
+    private var paceComparison: String? {
+        guard let actual, let past = comparablePrevious,
+              let currentDistance = actual.distanceMeters, currentDistance > 0,
+              let previousDistance = past.distanceMeters, previousDistance > 0,
+              let currentTime = actual.durationSeconds, currentTime > 0,
+              let previousTime = past.durationSeconds, previousTime > 0 else { return nil }
+        let currentPace = currentTime * 1609.344 / currentDistance
+        let previousPace = previousTime * 1609.344 / previousDistance
+        let change = Int(abs(currentPace - previousPace).rounded())
+        return "\(change / 60):\(String(format: "%02d", change % 60)) " +
+               (currentPace <= previousPace ? "faster" : "slower") +
+               " per mile than \(past.date)'s comparable run"
+    }
 
     var body: some View {
         ScrollView {
@@ -800,6 +835,23 @@ private struct PremiumRunPage: View {
                     }
                 }
                 if let actual {
+                    if let distance = actual.distanceMeters,
+                       let target = coach.runPlan?.targetDistanceMiles,
+                       target > 0 {
+                        HCCard(accent: HCDesign.aqua) {
+                            HCMetricGauge(title: "Today's distance",
+                                          value: String(format: "%.2f mi", distance / 1609.344),
+                                          progress: distance / (target * 1609.344),
+                                          detail: String(format: "%.1f-mile planned target", target),
+                                          tint: HCDesign.aqua,
+                                          symbol: "figure.run")
+                        }
+                    }
+                    if let paceComparison {
+                        HCStatusLine(text: paceComparison,
+                                     symbol: "arrow.left.arrow.right",
+                                     tint: HCDesign.aqua)
+                    }
                     HCSectionTitle(title: "Completed run", detail: actual.source)
                     HCCard {
                         VStack(alignment: .leading, spacing: 15) {
@@ -1261,9 +1313,23 @@ private struct PremiumProgressPage: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 19) {
-                PremiumHeader(eyebrow: "IMUN / PROGRESS",
-                              title: "Your training",
-                              subtitle: "Upcoming workouts and your actual history.")
+                HCPremiumHero(eyebrow: "PERFORMANCE / THE LONG GAME",
+                              title: "Every session counts.",
+                              subtitle: "Your history, your momentum, and the next milestone.",
+                              icon: "chart.line.uptrend.xyaxis",
+                              tint: HCDesign.aqua) {
+                    HStack(spacing: 18) {
+                        HCMetricBlock(label: "Recorded sets",
+                                      value: "\(coach.performanceHistory.count)",
+                                      tint: HCDesign.ink)
+                        HCMetricBlock(label: "Recorded runs",
+                                      value: "\(coach.runHistory.count)",
+                                      tint: HCDesign.aqua)
+                        HCMetricBlock(label: "Upcoming",
+                                      value: "\(upcoming.count)",
+                                      tint: HCDesign.ink)
+                    }
+                }
                 HStack(spacing: 11) {
                     HCCard {
                         HCMetricBlock(label: "Strength sets",
@@ -1456,90 +1522,319 @@ private struct PremiumProgressPage: View {
 
 // MARK: - Recovery: no invented WHOOP readiness
 
+// MARK: - Recovery: personal baselines without invented clinical claims
+private struct HCRecoverySignal: Identifiable {
+    let id: String
+    let label: String
+    let symbol: String
+    let source: String
+    let date: String
+    let current: Double
+    let baseline: Double?
+    let baselineLabel: String
+    let unit: String
+    let lowerIsWorse: Bool
+    let points: [HCPlotMark]
+
+    var formattedValue: String {
+        unit == "h" ? String(format: "%.1f h", current) :
+        String(format: "%.0f %@", current, unit)
+    }
+    var percent: Double? {
+        guard let baseline, baseline > 0 else { return nil }
+        return (current - baseline) * 100 / baseline
+    }
+    var unfavorableMagnitude: Double? {
+        guard let percent else { return nil }
+        return lowerIsWorse ? -percent : percent
+    }
+    // Conservative *display thresholds*, not diagnostic ranges.
+    var severity: Int {
+        guard let delta = unfavorableMagnitude else { return 0 }
+        if delta > 25 { return 2 }
+        if delta > 12 { return 1 }
+        return 0
+    }
+    var color: Color {
+        guard baseline != nil else { return HCDesign.secondary }
+        return severity == 2 ? HCDesign.danger :
+            severity == 1 ? HCDesign.caution : HCDesign.good
+    }
+    var comparison: String {
+        guard let percent, let baseline else {
+            return "More same-source history is needed for a reliable comparison."
+        }
+        let direction = percent < 0 ? "below" : "above"
+        return "\(Int(abs(percent).rounded()))% \(direction) your \(baselineLabel) baseline " +
+               "(\(String(format: "%.1f", baseline)) \(unit))"
+    }
+    var status: String {
+        baseline == nil ? "BASELINE PENDING" :
+        severity == 2 ? "OUTSIDE RECENT PATTERN" :
+        severity == 1 ? "WORTH WATCHING" : "NEAR YOUR BASELINE"
+    }
+    // A baseline-normalized display ring, NOT an invented recovery score.
+    var ringProgress: Double {
+        guard let baseline, baseline > 0 else { return 0 }
+        let ratio = lowerIsWorse ? current / baseline : baseline / max(0.01, current)
+        return min(1, max(0, ratio))
+    }
+
+    static func build(label: String, symbol: String, source: String,
+                      unit: String, lowerIsWorse: Bool,
+                      rows: [(String, Double)], suppliedBaseline: Double? = nil)
+        -> HCRecoverySignal? {
+        let unique = Dictionary(grouping: rows, by: { $0.0 })
+            .compactMap { date, readings -> (String, Double)? in
+                guard !readings.isEmpty else { return nil }
+                let values = readings.map { $0.1 }.sorted()
+                let middle = values.count / 2
+                let median = values.count.isMultiple(of: 2)
+                    ? (values[middle - 1] + values[middle]) / 2 : values[middle]
+                return (date, median)
+            }.sorted { $0.0 < $1.0 }
+        guard let latest = unique.last,
+              let anchor = HCPlanBuilder.startOfDate(latest.0) else { return nil }
+        let earlier = unique.dropLast().compactMap { row -> (Double, Int)? in
+            guard let day = HCPlanBuilder.startOfDate(row.0) else { return nil }
+            let delta = Calendar.current.dateComponents([.day], from: day, to: anchor).day ?? 999
+            return delta > 0 && delta <= 28 ? (row.1, delta) : nil
+        }
+        let seven = earlier.filter { $0.1 <= 7 }.map { $0.0 }
+        let month = earlier.map { $0.0 }
+        let baseline: Double? = {
+            if seven.count >= 5 { return seven.reduce(0,+) / Double(seven.count) }
+            if month.count >= 5 { return month.reduce(0,+) / Double(month.count) }
+            if let suppliedBaseline, suppliedBaseline > 0 { return suppliedBaseline }
+            return nil
+        }()
+        let baselineName = seven.count >= 5 ? "7-day" :
+            month.count >= 5 ? "28-day" : "provider-supplied"
+        return HCRecoverySignal(id: source + "-" + label, label: label, symbol: symbol,
+                                source: source, date: latest.0, current: latest.1,
+                                baseline: baseline, baselineLabel: baselineName,
+                                unit: unit, lowerIsWorse: lowerIsWorse,
+                                points: unique.suffix(30).compactMap { row in
+                                    HCPlanBuilder.startOfDate(row.0).map {
+                                        HCPlotMark(date: $0, value: row.1)
+                                    }
+                                })
+    }
+}
+
 private struct PremiumRecoveryPage: View {
     @EnvironmentObject private var coach: PhoneWorkoutBridge
     @ObservedObject var appleHealth: HCAppleHealthReader
+    @State private var showHistory = false
+
+    private var signals: [HCRecoverySignal] {
+        var result: [HCRecoverySignal] = []
+        let grouped = Dictionary(grouping: coach.recoveryHistory, by: \.source)
+        for source in grouped.keys.sorted() {
+            guard let items = grouped[source] else { continue }
+            let newest = items.sorted { $0.date > $1.date }.first
+            if let metric = HCRecoverySignal.build(
+                label: "HRV · RMSSD", symbol: "waveform.path.ecg",
+                source: source, unit: "ms", lowerIsWorse: true,
+                rows: items.compactMap { item in item.hrvMS.map { (item.date, $0) } },
+                suppliedBaseline: newest?.hrvBaselineMS) { result.append(metric) }
+            if let metric = HCRecoverySignal.build(
+                label: "Sleep", symbol: "moon.zzz.fill", source: source,
+                unit: "h", lowerIsWorse: true,
+                rows: items.compactMap { item in
+                    item.sleepSeconds.map { (item.date, $0 / 3600) }
+                }) { result.append(metric) }
+            if let metric = HCRecoverySignal.build(
+                label: "Daily low HR", symbol: "heart.fill", source: source,
+                unit: "bpm", lowerIsWorse: false,
+                rows: items.compactMap { item in item.dailyLowHR.map { (item.date, $0) } }
+            ) { result.append(metric) }
+        }
+        for metric in appleHealth.metrics where metric.name != "Sleep (asleep time)" {
+            let samples = appleHealth.metricHistory.filter {
+                $0.name == metric.name && $0.source == metric.source
+            }
+            if let signal = HCRecoverySignal.build(
+                label: metric.name,
+                symbol: metric.name.contains("HRV") ? "waveform.path.ecg" : "heart.fill",
+                source: metric.source,
+                unit: metric.name.contains("HRV") ? "ms" : "bpm",
+                lowerIsWorse: metric.name.contains("HRV"),
+                rows: samples.map { ($0.date, $0.value) }
+            ) { result.append(signal) }
+        }
+        return result.sorted { $0.date > $1.date }
+    }
+
+    private var flags: [HCRecoverySignal] {
+        signals.filter { $0.severity > 0 && $0.baseline != nil }
+    }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 19) {
-                PremiumHeader(eyebrow: "RECOVERY / SIGNALS",
-                              title: "Know your baseline.",
-                              subtitle: "Source-labeled recovery. No fictional metrics.")
-                HCCard(accent: HCDesign.aqua) {
+                HCPremiumHero(eyebrow: "RECOVERY / YOUR BASELINE",
+                              title: "Listen to the signals.",
+                              subtitle: "Trends that give today's numbers context.",
+                              icon: "waveform.path.ecg",
+                              tint: HCDesign.aqua) {
+                    HStack(alignment: .center, spacing: 15) {
+                        HCProgressRing(progress: signals.isEmpty ? 0 :
+                                       Double(signals.filter { $0.baseline != nil }.count) /
+                                       Double(max(1, signals.count)),
+                                       value: "\(signals.filter { $0.baseline != nil }.count)",
+                                       subtitle: "Baselines",
+                                       tint: HCDesign.aqua, diameter: 92)
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text(flags.isEmpty ? "YOUR BASELINE IS THE BENCHMARK" :
+                                 "\(flags.count) METRIC\(flags.count == 1 ? "" : "S") NEED ATTENTION")
+                                .font(.system(size: 14, weight: .bold, design: .rounded))
+                            Text("Ring shows available comparisons, not a made-up recovery score.")
+                                .font(.caption).foregroundStyle(HCDesign.secondary)
+                        }
+                    }
+                }
+
+                if !flags.isEmpty {
+                    HCSectionTitle(title: "Outside your recent pattern",
+                                   detail: "Personal comparisons")
+                    ForEach(flags) { metric in
+                        HCStatusLine(text: metric.label + " · " + metric.comparison,
+                                     symbol: "exclamationmark.triangle.fill",
+                                     tint: metric.color)
+                    }
+                    Text("These are training signals, not a medical diagnosis. Individual readings can be affected by device, illness, measurement time and sleep.")
+                        .font(.caption2).foregroundStyle(HCDesign.secondary)
+                } else if !signals.isEmpty {
+                    HCStatusLine(text: "No large unfavorable changes detected in metrics with sufficient same-source history.",
+                                 symbol: "checkmark.circle.fill", tint: HCDesign.good)
+                }
+
+                HCSectionTitle(title: "Your recovery signals",
+                               detail: "Previous 7 / 28 days")
+                if signals.isEmpty {
+                    HCCard {
+                        VStack(alignment: .leading, spacing: 12) {
+                            Text("Build your baseline")
+                                .font(HCDesign.display(22))
+                            Text("Connect Apple Health or import Tredict / Garmin history. We need repeated readings from the same source before showing an out-of-range comparison.")
+                                .font(.subheadline).foregroundStyle(HCDesign.secondary)
+                        }
+                    }
+                }
+                ForEach(Array(signals.prefix(9))) { metric in
+                    HCCard(accent: metric.color) {
+                        VStack(alignment: .leading, spacing: 13) {
+                            HCMetricGauge(title: metric.label,
+                                          value: metric.formattedValue,
+                                          progress: metric.ringProgress,
+                                          detail: metric.comparison,
+                                          tint: metric.color,
+                                          symbol: metric.symbol)
+                            HStack {
+                                HCInsightChip(title: metric.status,
+                                              symbol: metric.severity > 0 ?
+                                                  "exclamationmark.circle" : "chart.line.uptrend.xyaxis",
+                                              tint: metric.color)
+                                Spacer()
+                                Text(metric.source)
+                                    .font(HCDesign.label(10))
+                                    .foregroundStyle(HCDesign.secondary)
+                                    .lineLimit(1)
+                            }
+                            if metric.points.count >= 2 {
+                                Chart(metric.points) { point in
+                                    LineMark(x: .value("Date", point.date),
+                                             y: .value("Reading", point.value))
+                                        .interpolationMethod(.catmullRom)
+                                        .foregroundStyle(metric.color)
+                                    AreaMark(x: .value("Date", point.date),
+                                             y: .value("Reading", point.value))
+                                        .foregroundStyle(metric.color.opacity(0.07))
+                                    if let baseline = metric.baseline {
+                                        RuleMark(y: .value("Baseline", baseline))
+                                            .lineStyle(StrokeStyle(lineWidth: 1, dash: [3, 4]))
+                                            .foregroundStyle(HCDesign.secondary.opacity(0.5))
+                                    }
+                                }
+                                .chartYAxis(.hidden)
+                                .chartXAxis(.hidden)
+                                .frame(height: 64)
+                                .accessibilityLabel("Recent trend of \(metric.label)")
+                            }
+                            Text("Last reading \(metric.date) · \(metric.baselineLabel) comparison when available")
+                                .font(.caption2).foregroundStyle(HCDesign.secondary)
+                        }
+                    }
+                }
+
+                HCSectionTitle(title: "Apple Health",
+                               detail: "Latest authorized measurements")
+                HCCard {
                     VStack(alignment: .leading, spacing: 14) {
-                        HCAccentTag(title: "APPLE HEALTH", color: HCDesign.aqua)
-                        Text("Apple Watch + WHOOP")
-                            .font(HCDesign.display(23))
-                        Text("Measurements appear only after permission. WHOOP data shows here only if it has been shared to Apple Health.")
-                            .font(.subheadline).foregroundStyle(HCDesign.secondary)
-                        HCFilledButton(title: "READ HEALTH MEASUREMENTS",
-                                       icon: "heart.text.square", tint: HCDesign.aqua) {
-                            appleHealth.connect()
+                        HStack(alignment: .top) {
+                            VStack(alignment: .leading, spacing: 5) {
+                                Text("Connected readings")
+                                    .font(HCDesign.display(19))
+                                Text("Watch and WHOOP values appear only when shared to Apple Health.")
+                                    .font(.caption).foregroundStyle(HCDesign.secondary)
+                            }
+                            Spacer()
+                            Image(systemName: "heart.text.square.fill")
+                                .font(.title).foregroundStyle(HCDesign.aqua)
+                        }
+                        if appleHealth.metrics.isEmpty {
+                            HCFilledButton(title: "CONNECT APPLE HEALTH",
+                                           icon: "heart.fill", tint: HCDesign.aqua) {
+                                appleHealth.connect()
+                            }
+                        }
+                        ForEach(appleHealth.metrics) { metric in
+                            HStack {
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text(metric.name)
+                                        .font(.system(size: 13, weight: .semibold))
+                                    Text(metric.source + " · " + metric.date)
+                                        .font(.caption2).foregroundStyle(HCDesign.secondary)
+                                }
+                                Spacer()
+                                Text(metric.value)
+                                    .font(HCDesign.metric(20))
+                                    .foregroundStyle(HCDesign.ink)
+                            }
+                            Divider().overlay(HCDesign.outline)
                         }
                         Text(appleHealth.status)
                             .font(.caption2).foregroundStyle(HCDesign.secondary)
                     }
                 }
-                HCSectionTitle(title: "Latest device readings")
-                ForEach(appleHealth.metrics) { metric in
-                    HCCard {
+
+                DisclosureGroup(isExpanded: $showHistory) {
+                    ForEach(Array(coach.recoveryHistory.prefix(14))) { item in
                         HStack {
-                            VStack(alignment: .leading, spacing: 6) {
-                                Text(metric.name.uppercased())
-                                    .font(HCDesign.label()).tracking(1.2)
-                                    .foregroundStyle(HCDesign.secondary)
-                                Text(metric.source + " · " + metric.date)
-                                    .font(.caption2).foregroundStyle(HCDesign.secondary)
-                            }
+                            Text(item.date + " · " + item.source)
                             Spacer()
-                            Text(metric.value)
-                                .font(HCDesign.metric(25))
-                                .foregroundStyle(HCDesign.electric)
+                            Text(item.hrvMS.map { String(format: "%.0f ms", $0) } ?? "—")
                         }
+                        .font(.caption2)
+                        .padding(.vertical, 4)
                     }
+                } label: {
+                    Label("See source history", systemImage: "clock.arrow.circlepath")
+                        .font(.system(size: 13, weight: .semibold))
                 }
-                HCSectionTitle(title: "Tredict / Garmin recovery history",
-                               detail: "\(coach.recoveryHistory.count) days")
-                ForEach(coach.recoveryHistory, id: \.date) { result in
-                    HCCard {
-                        VStack(alignment: .leading, spacing: 12) {
-                            Text(result.date + " · " + result.source)
-                                .font(.caption)
-                                .foregroundStyle(HCDesign.secondary)
-                            HStack {
-                                HCMetricBlock(label: "Sleep",
-                                              value: result.sleepSeconds.map(hcDuration) ?? "—")
-                                HCMetricBlock(label: "HRV RMSSD",
-                                              value: result.hrvMS.map { "\($0.formatted()) ms" } ?? "—",
-                                              tint: HCDesign.aqua)
-                            }
-                            HStack {
-                                HCMetricBlock(label: "Daily low HR",
-                                              value: result.dailyLowHR.map { "\($0.formatted())" } ?? "—")
-                                HCMetricBlock(label: "14-day HRV baseline",
-                                              value: result.hrvBaselineMS.map { "\($0.formatted())" } ?? "—")
-                            }
-                        }
-                    }
-                }
-                if coach.recoveryHistory.isEmpty {
-                    HCCard {
-                        Text("Tredict recovery will appear when the connected service has synced.")
-                            .foregroundStyle(HCDesign.secondary)
-                    }
-                }
-                HCCard {
-                    Text("Apple Health HRV (SDNN), Tredict HRV (RMSSD), and WHOOP Recovery use different definitions. We show labels and sources rather than combining them into a misleading score.")
-                        .font(.caption)
-                        .foregroundStyle(HCDesign.secondary)
-                }
-                Spacer(minLength: 30)
+                .tint(HCDesign.aqua)
+
+                Text("Apple Health SDNN and Tredict RMSSD are separate HRV measurements. Comparisons use the same named source only. Baselines require at least five earlier daily observations unless the provider supplies one. No proprietary WHOOP recovery score is inferred.")
+                    .font(.caption2)
+                    .foregroundStyle(HCDesign.secondary)
+                    .padding(.bottom, 28)
             }
             .padding(18)
         }
         .scrollIndicators(.hidden)
         .hcPage()
+        .navigationBarTitleDisplayMode(.inline)
     }
 }
 
@@ -1589,9 +1884,21 @@ private struct PremiumCoachPage: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 19) {
-                PremiumHeader(eyebrow: "IMUN / COACH",
-                              title: "Train with purpose.",
-                              subtitle: "One plan. Clear progress. Better decisions.")
+                HCPremiumHero(eyebrow: "IMUN / COACH",
+                              title: "Your edge, explained.",
+                              subtitle: "Daily guidance shaped by your real sessions.",
+                              icon: "sparkles",
+                              tint: HCDesign.electric) {
+                    HStack(spacing: 10) {
+                        HCInsightChip(title: "TODAY'S BRIEFING",
+                                      symbol: "waveform.path.ecg",
+                                      tint: HCDesign.good)
+                        Spacer()
+                        Text(Date().formatted(.dateTime.weekday(.abbreviated).day()))
+                            .font(HCDesign.label(11))
+                            .foregroundStyle(HCDesign.secondary)
+                    }
+                }
                 if !coach.signedIn { PremiumLogin() }
 
                 HCCard(accent: HCDesign.electric) {
@@ -1644,11 +1951,37 @@ private struct PremiumCoachPage: View {
                             .font(.system(size: 15, weight: .medium))
                             .foregroundStyle(HCDesign.ink)
                             .fixedSize(horizontal: false, vertical: true)
-                        Text("This first version uses your real schedule, not generative AI or an invented recovery score.")
+                        Text("This briefing uses your real schedule. Open Ask Coach for optional AI-powered advice.")
                             .font(.caption2)
                             .foregroundStyle(HCDesign.secondary)
                     }
                 }
+
+                HCSectionTitle(title: "Ask imun", detail: "Secure AI coaching")
+                NavigationLink {
+                    PremiumAskCoachPage()
+                } label: {
+                    HCCard(accent: HCDesign.aqua) {
+                        HStack(spacing: 14) {
+                            Image(systemName: "sparkles.rectangle.stack.fill")
+                                .font(.system(size: 27))
+                                .foregroundStyle(HCDesign.aqua)
+                                .frame(width: 48, height: 48)
+                                .background(HCDesign.aqua.opacity(0.12),
+                                            in: RoundedRectangle(cornerRadius: 14))
+                            VStack(alignment: .leading, spacing: 5) {
+                                Text("Ask Coach")
+                                    .font(HCDesign.display(19))
+                                Text("Understand your progress, workouts and training choices")
+                                    .font(.caption).foregroundStyle(HCDesign.secondary)
+                            }
+                            Spacer(minLength: 5)
+                            Image(systemName: "arrow.up.right")
+                                .foregroundStyle(HCDesign.aqua)
+                        }
+                    }
+                }
+                .buttonStyle(.plain)
 
                 HCSectionTitle(title: "Coach & app controls")
                 NavigationLink {
@@ -1723,6 +2056,127 @@ private struct PremiumCoachPage: View {
 }
 
 // All original settings, exports and integrations are preserved here.
+// User-initiated AI, no continuous health upload and no client-side provider keys.
+private struct PremiumAskCoachPage: View {
+    @EnvironmentObject private var coach: PhoneWorkoutBridge
+    @AppStorage("hcAIShareRecovery") private var shareRecovery = false
+    @State private var question = ""
+    @State private var answer = ""
+    @State private var loading = false
+    @State private var errorMessage: String?
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                HCPremiumHero(eyebrow: "IMUN / ASK COACH",
+                              title: "Get perspective.",
+                              subtitle: "Ask about training, trends and your planned sessions.",
+                              icon: "sparkles", tint: HCDesign.aqua) {
+                    HCInsightChip(title: "AI GENERATED",
+                                  symbol: "sparkle.magnifyingglass",
+                                  tint: HCDesign.aqua)
+                }
+                HCCard {
+                    VStack(alignment: .leading, spacing: 13) {
+                        Text("WHAT'S ON YOUR MIND?")
+                            .font(HCDesign.label(11))
+                            .tracking(1.2)
+                            .foregroundStyle(HCDesign.secondary)
+                        TextField("Should I adjust today's session?", text: $question,
+                                  axis: .vertical)
+                            .lineLimit(3...6)
+                            .font(.system(size: 16))
+                            .padding(14)
+                            .background(HCDesign.raised,
+                                        in: RoundedRectangle(cornerRadius: 13))
+                        HStack(spacing: 7) {
+                            prompt("What should I focus on today?")
+                            prompt("How is my running progressing?")
+                        }
+                        Toggle(isOn: $shareRecovery) {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("Include recovery measurements")
+                                    .font(.subheadline)
+                                Text("Off by default. Shares only limited source-labeled recovery summaries for this question.")
+                                    .font(.caption2)
+                                    .foregroundStyle(HCDesign.secondary)
+                            }
+                        }
+                        .tint(HCDesign.aqua)
+                        Text("By pressing Ask, your question and a short training summary are sent securely to the AI service. No conversation is saved in imun's database.")
+                            .font(.caption2).foregroundStyle(HCDesign.secondary)
+                        HCFilledButton(title: loading ? "THINKING…" : "ASK COACH",
+                                       icon: "arrow.up.right", tint: HCDesign.aqua,
+                                       disabled: loading || question.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !coach.signedIn) {
+                            send()
+                        }
+                        if !coach.signedIn {
+                            Text("Sign in to your imun account before using the AI coach.")
+                                .font(.caption2).foregroundStyle(HCDesign.caution)
+                        }
+                    }
+                }
+                if loading { ProgressView("Analyzing your question…").tint(HCDesign.aqua) }
+                if let errorMessage {
+                    HCStatusLine(text: errorMessage, symbol: "exclamationmark.circle",
+                                 tint: HCDesign.caution)
+                }
+                if !answer.isEmpty {
+                    HCCard(accent: HCDesign.aqua) {
+                        VStack(alignment: .leading, spacing: 13) {
+                            HCInsightChip(title: "COACH RESPONSE · AI",
+                                          symbol: "sparkles", tint: HCDesign.aqua)
+                            Text(answer)
+                                .font(.system(size: 15))
+                                .foregroundStyle(HCDesign.ink)
+                                .textSelection(.enabled)
+                        }
+                    }
+                }
+                Text("Coach advice is training guidance, not medical care. Review suggested changes before making them to your calendar.")
+                    .font(.caption2).foregroundStyle(HCDesign.secondary)
+            }
+            .padding(18)
+        }
+        .hcPage()
+        .navigationTitle("Ask Coach")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private func prompt(_ phrase: String) -> some View {
+        Button(phrase) { question = phrase }
+            .font(.system(size: 11, weight: .medium))
+            .foregroundStyle(HCDesign.aqua)
+            .padding(9)
+            .frame(maxWidth: .infinity)
+            .background(HCDesign.raised, in: RoundedRectangle(cornerRadius: 10))
+            .buttonStyle(.plain)
+    }
+
+    private func send() {
+        let ask = question.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !ask.isEmpty, !loading else { return }
+        loading = true
+        errorMessage = nil
+        answer = ""
+        Task {
+            do {
+                let reply = try await coach.askIMUNCoach(
+                    question: ask, shareRecovery: shareRecovery)
+                await MainActor.run {
+                    answer = reply
+                    loading = false
+                }
+            } catch {
+                await MainActor.run {
+                    errorMessage = error.localizedDescription
+                    loading = false
+                }
+            }
+        }
+    }
+}
+
 private struct PremiumSettingsPage: View {
     @EnvironmentObject private var coach: PhoneWorkoutBridge
     @EnvironmentObject private var tredict: HCTredictImporter
@@ -1734,6 +2188,10 @@ private struct PremiumSettingsPage: View {
     @AppStorage("hcWeightIncrement") private var weightIncrement = 5.0
     @AppStorage("hcRestOverrideSeconds") private var restOverride = 0
     @AppStorage("hcWatchHaptics") private var watchHaptics = true
+    @AppStorage("hcRunVoiceCues") private var runVoiceCues = false
+    @AppStorage("hcRunAutoLaps") private var runAutoLaps = true
+    @AppStorage("hcRunIntervals") private var runIntervals = false
+    @AppStorage("hcRunCueMinutes") private var runCueMinutes = 5
 
     private var export: String {
         var lines = ["# IMUN Training Export",
@@ -1871,6 +2329,37 @@ private struct PremiumSettingsPage: View {
                 .onChange(of: weightIncrement) { _, _ in coach.sendToWatch() }
                 .onChange(of: restOverride) { _, _ in coach.sendToWatch() }
                 .onChange(of: watchHaptics) { _, _ in coach.sendToWatch() }
+                HCSectionTitle(title: "Run coaching & auto laps")
+                HCCard(accent: HCDesign.aqua) {
+                    VStack(alignment: .leading, spacing: 14) {
+                        Toggle("Spoken cues through Watch audio", isOn: $runVoiceCues)
+                            .tint(HCDesign.aqua)
+                        Divider().overlay(HCDesign.outline)
+                        Toggle("Automatic mile laps & split announcements", isOn: $runAutoLaps)
+                            .tint(HCDesign.aqua)
+                        Divider().overlay(HCDesign.outline)
+                        Toggle("Timed interval coaching", isOn: $runIntervals)
+                            .tint(HCDesign.aqua)
+                        if runIntervals {
+                            HCStatusLine(text: "5-min warm-up · 5 × (3-min effort / 2-min recovery) · cool-down",
+                                         symbol: "timer", tint: HCDesign.aqua)
+                        }
+                        Picker("Spoken pace & HR updates", selection: $runCueMinutes) {
+                            Text("Off").tag(0)
+                            Text("Every minute").tag(1)
+                            Text("Every 2 min").tag(2)
+                            Text("Every 5 min").tag(5)
+                            Text("Every 10 min").tag(10)
+                        }
+                        .tint(HCDesign.aqua)
+                        Text("Audio plays from the Apple Watch recording the run. Pair your headphones with that Watch. GPS/HealthKit data and watchOS playback availability determine which cues can be spoken. Haptics remain available when audio cannot play.")
+                            .font(.caption2).foregroundStyle(HCDesign.secondary)
+                    }
+                }
+                .onChange(of: runVoiceCues) { _, _ in coach.sendToWatch() }
+                .onChange(of: runAutoLaps) { _, _ in coach.sendToWatch() }
+                .onChange(of: runIntervals) { _, _ in coach.sendToWatch() }
+                .onChange(of: runCueMinutes) { _, _ in coach.sendToWatch() }
                 HCSectionTitle(title: "Your coaching notes")
                 HCCard {
                     VStack(alignment: .leading, spacing: 12) {

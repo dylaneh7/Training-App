@@ -84,6 +84,23 @@ actor HCCloudClient {
         return decoded.userID
     }
 
+    /// Authenticated call to a Supabase Edge Function. No AI provider key is
+    /// present in the app. Context is supplied by the user with clear consent.
+    func askIMUNCoach(question: String, context: String,
+                      shareRecovery: Bool) async throws -> String {
+        let authenticated = try await authorizedToken()
+        let data = try await send(path: "/functions/v1/imun-ai-coach",
+                                  method: "POST",
+                                  json: ["question": String(question.prefix(1500)),
+                                         "context": String(context.prefix(4500)),
+                                         "shareRecovery": shareRecovery],
+                                  bearer: authenticated.access)
+        guard let output = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let reply = output["reply"] as? String,
+              !reply.isEmpty else { throw HCCloudError.malformedResponse }
+        return reply
+    }
+
     func signOut() {
         token = nil
         HCTokenVault.remove()

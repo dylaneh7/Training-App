@@ -476,6 +476,43 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
         }
     }
 
+    /// No AI context is uploaded until a user explicitly taps Ask Coach.
+    /// A Health/Recovery snapshot is transmitted only with the extra opt-in.
+    func askIMUNCoach(question: String, shareRecovery: Bool) async throws -> String {
+        let today = HCPlanBuilder.dateString(Date())
+        var lines = ["Today: \(today)", "Source: IMUN training calendar and recorded workout history"]
+        if let lift = workout, lift.date == today {
+            lines.append("Planned weightlifting: \(lift.title), \(lift.exercises.count) exercises, \(lift.prescribedSetCount) sets")
+        } else {
+            lines.append("No strength workout scheduled today")
+        }
+        if let run = runPlan, run.date == today {
+            lines.append("Planned run: \(run.title), goal \(run.targetDistanceMiles.map { String(format: "%.1f miles", $0) } ?? "unspecified")")
+        } else {
+            lines.append("No run scheduled today")
+        }
+        for entry in performanceHistory.prefix(10) {
+            lines.append("Strength history: \(entry.date) \(entry.exercise) \(String(format: "%.1f", entry.weightLb)) lb x \(entry.reps)")
+        }
+        for run in runHistory.prefix(8) {
+            let distance = run.distanceMeters.map { String(format: "%.2f mi", $0 / 1609.344) }
+                ?? "distance unknown"
+            lines.append("Run: \(run.date) \(run.title), \(distance), source \(run.source)")
+        }
+        if shareRecovery {
+            for datum in recoveryHistory.prefix(12) {
+                let hrv = datum.hrvMS.map { String(format: "%.0f ms", $0) } ?? "missing"
+                let sleep = datum.sleepSeconds.map { String(format: "%.1f h", $0 / 3600) }
+                    ?? "missing"
+                let hr = datum.dailyLowHR.map { String(format: "%.0f bpm", $0) } ?? "missing"
+                lines.append("Recovery \(datum.source) \(datum.date): HRV RMSSD \(hrv), sleep \(sleep), low HR \(hr)")
+            }
+        }
+        return try await cloud.askIMUNCoach(question: question,
+                                            context: lines.joined(separator: "\n"),
+                                            shareRecovery: shareRecovery)
+    }
+
     /// Only one dated snapshot describes today's plan for BOTH devices.
     /// Never send a previously selected day's workout as today's Watch plan.
     private func watchContext() throws -> [String: Any] {
@@ -495,6 +532,10 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
         context[HCPayload.weightIncrement] = prefs.object(forKey:"hcWeightIncrement") as? Double ?? 5.0
         context[HCPayload.restOverride] = prefs.integer(forKey:"hcRestOverrideSeconds")
         context[HCPayload.watchHaptics] = prefs.object(forKey:"hcWatchHaptics") as? Bool ?? true
+        context["hcRunVoiceCues"] = prefs.object(forKey:"hcRunVoiceCues") as? Bool ?? false
+        context["hcRunAutoLaps"] = prefs.object(forKey:"hcRunAutoLaps") as? Bool ?? true
+        context["hcRunIntervals"] = prefs.object(forKey:"hcRunIntervals") as? Bool ?? false
+        context["hcRunCueMinutes"] = prefs.object(forKey:"hcRunCueMinutes") as? Int ?? 5
         // Only compact summaries go to Watch; raw HR traces and GPS stay on phone.
         let summaries = runHistory.prefix(12).map { source -> HCProgressRun in
             var result = source
@@ -503,6 +544,9 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
             return result
         }
         context[HCPayload.runHistory] = try encoder.encode(summaries)
+        if let recent = recoveryHistory.first {
+            context["hcRecoverySnapshot"] = try encoder.encode(recent)
+        }
         return context
     }
 

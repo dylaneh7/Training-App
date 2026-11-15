@@ -1,5 +1,7 @@
 import SwiftUI
 import WatchKit
+import AVFoundation
+import Combine
 
 private enum WTheme {
     static let bg = Color(red: 0.025, green: 0.047, blue: 0.065)
@@ -184,6 +186,30 @@ private struct WQuickEditor: View {
     }
 }
 
+private struct WProgressHalo: View {
+    let completed: Int
+    let planned: Int
+    var body: some View {
+        ZStack {
+            Circle().stroke(WTheme.panel, lineWidth: 8)
+            Circle()
+                .trim(from: 0, to: planned > 0 ?
+                      min(1, Double(completed) / Double(planned)) : 0)
+                .stroke(WTheme.lime, style: StrokeStyle(lineWidth: 8, lineCap: .round))
+                .rotationEffect(.degrees(-90))
+            VStack(spacing: 1) {
+                Text(planned > 0 ? "\(min(completed, planned))" : "—")
+                    .font(WTheme.metric(22))
+                    .foregroundStyle(.white)
+                Text(planned > 0 ? "OF \(planned)" : "SETS")
+                    .font(WTheme.label(8)).foregroundStyle(WTheme.muted)
+            }
+        }
+        .frame(width: 78, height: 78)
+        .accessibilityLabel("\(completed) of \(planned) planned strength sets completed")
+    }
+}
+
 /// A List-based navigation hub fixes the page-gesture / scrolling conflict on
 /// watchOS. Large Strength and Run targets are immediately reachable.
 struct WatchWorkoutView: View {
@@ -195,15 +221,34 @@ struct WatchWorkoutView: View {
         NavigationStack {
             List {
                 Section {
-                    VStack(alignment: .leading, spacing: 5) {
-                        Text("imun")
-                            .font(WTheme.label(10))
-                            .tracking(2)
-                            .foregroundStyle(WTheme.aqua)
-                        Text("TRAIN WITH PURPOSE")
-                            .font(.system(size: 18, weight: .heavy, design: .rounded))
+                    HStack(alignment: .center, spacing: 13) {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("I M U N")
+                                .font(WTheme.label(10))
+                                .tracking(3)
+                                .foregroundStyle(WTheme.aqua)
+                            Text("Make it\ncount.")
+                                .font(.system(size: 22, weight: .heavy, design: .rounded))
+                                .tracking(-0.6)
+                                .foregroundStyle(.white)
+                            Text(Date().formatted(.dateTime.weekday(.abbreviated).day()))
+                                .font(WTheme.label(10)).foregroundStyle(WTheme.muted)
+                        }
+                        Spacer(minLength: 0)
+                        WProgressHalo(
+                            completed: store.sets.filter {
+                                $0.workoutID == store.workout.id
+                            }.count,
+                            planned: store.hasScheduledLift ?
+                                store.workout.prescribedSetCount : 0)
                     }
-                    .listRowBackground(WTheme.bg)
+                    .padding(.vertical, 9)
+                    .listRowBackground(
+                        RoundedRectangle(cornerRadius: 18)
+                            .fill(LinearGradient(colors:
+                                [WTheme.lime.opacity(0.27), WTheme.panel],
+                                startPoint: .topLeading, endPoint: .bottomTrailing))
+                    )
 
                     NavigationLink {
                         WatchStrengthScreen()
@@ -235,6 +280,33 @@ struct WatchWorkoutView: View {
                         }
                         Button("Refresh from iPhone") { store.requestCurrentSchedule() }
                             .font(.system(size: 11))
+                    }
+                }
+                if let recovery = store.recoverySummary {
+                    Section("RECOVERY SIGNALS") {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text(recovery.source + " · " + recovery.date)
+                                .font(WTheme.label(10)).foregroundStyle(WTheme.muted)
+                            HStack(spacing: 14) {
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text("HRV · RMSSD")
+                                        .font(WTheme.label(9)).foregroundStyle(WTheme.muted)
+                                    Text(recovery.hrvMS.map { String(format: "%.0f", $0) } ?? "—")
+                                        .font(WTheme.metric(23)).foregroundStyle(WTheme.aqua)
+                                }
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text("SLEEP")
+                                        .font(WTheme.label(9)).foregroundStyle(WTheme.muted)
+                                    Text(recovery.sleepSeconds.map {
+                                        String(format: "%.1fh", $0 / 3600)
+                                    } ?? "—")
+                                        .font(WTheme.metric(23)).foregroundStyle(.white)
+                                }
+                            }
+                            Text("See personal baselines and alerts on iPhone.")
+                                .font(.system(size: 10)).foregroundStyle(WTheme.muted)
+                        }
+                        .listRowBackground(WTheme.panel)
                     }
                 }
                 Section("PREFERENCES") {
@@ -757,9 +829,114 @@ private struct WatchPreferences: View {
             }
             Toggle("Haptic feedback", isOn: $haptics)
                 .tint(WTheme.lime)
+            Text("Running voice cues and automatic miles are configured in the Run screen, or in Coach → Settings on iPhone.")
+                .font(.caption2).foregroundStyle(WTheme.muted)
         }
         .listStyle(.plain)
         .navigationTitle("Preferences")
+    }
+}
+
+// Watch is the recorder of record. All spoken cues come from Watch to avoid
+// hearing duplicate prompts from the iPhone companion.
+@MainActor
+private final class IMUNRunCueCoach: ObservableObject {
+    @Published private(set) var stage = "Free run"
+    @Published private(set) var lastCue = "Cues follow the Watch workout session."
+
+    private let speaker = AVSpeechSynthesizer()
+    private var previousPhase = ""
+    private var previousStart: Date?
+    private var lastSpokenMinute = -1
+
+    private func say(_ phrase: String, prominent: Bool = false) {
+        lastCue = phrase
+        if prominent { WKInterfaceDevice.current().play(.notification) }
+        guard UserDefaults.standard.object(forKey: "hcRunVoiceCues") as? Bool == true else { return }
+        let utterance = AVSpeechUtterance(string: phrase)
+        utterance.rate = 0.48
+        utterance.volume = 0.95
+        // Siri/headphone routing is owned by the operating system.
+        speaker.speak(utterance)
+    }
+
+    private func pace(_ secondsPerMile: Double) -> String {
+        guard secondsPerMile.isFinite, secondsPerMile > 0,
+              secondsPerMile < 3_600 else { return "not available" }
+        let rounded = Int(secondsPerMile.rounded())
+        return "\(rounded / 60) minutes \(rounded % 60) seconds per mile"
+    }
+
+    private func phase(for elapsed: Double) -> (String, String) {
+        guard UserDefaults.standard.bool(forKey: "hcRunIntervals") else {
+            return ("free", "Free run")
+        }
+        if elapsed < 300 { return ("warm", "Warm up · 5 min") }
+        let interval = elapsed - 300
+        if interval < 5 * 300 {
+            let cycle = Int(interval / 300) + 1
+            if interval.truncatingRemainder(dividingBy: 300) < 180 {
+                return ("work\(cycle)", "Effort \(cycle) of 5 · 3 min")
+            }
+            return ("recover\(cycle)", "Recovery \(cycle) of 5 · 2 min")
+        }
+        return ("cool", "Cool down")
+    }
+
+    func reset() {
+        previousStart = nil
+        previousPhase = ""
+        lastSpokenMinute = -1
+        stage = "Free run"
+    }
+
+    func tick(store: WatchWorkoutStore, health: WatchHealthSession) {
+        guard let clock = store.runClock, clock.isActive else {
+            if previousStart != nil { reset() }
+            return
+        }
+        if previousStart != clock.startedAt {
+            reset()
+            previousStart = clock.startedAt
+        }
+        guard !clock.isPaused else { return }
+        let elapsed = clock.duration()
+        let next = phase(for: elapsed)
+        stage = next.1
+        if next.0 != previousPhase {
+            previousPhase = next.0
+            if next.0 != "free" {
+                say(next.1 + " begins now.", prominent: true)
+            } else if elapsed < 12 {
+                say("Run started. Have a strong session.")
+            }
+        }
+
+        let autoLap = UserDefaults.standard.object(forKey: "hcRunAutoLaps") as? Bool ?? true
+        if autoLap, let lap = store.autoLapIfNeeded(currentDistanceMeters: health.distanceMeters) {
+            let paceText: String = {
+                guard let meters = lap.distanceMeters, meters > 0 else { return "pace unavailable" }
+                return pace(lap.elapsedSeconds * 1609.344 / meters)
+            }()
+            let miles = Int((health.distanceMeters ?? 0) / 1609.344)
+            say("Mile \(miles). Split pace \(paceText).", prominent: true)
+        }
+
+        let cadence = UserDefaults.standard.object(forKey: "hcRunCueMinutes") as? Int ?? 5
+        let minute = Int(elapsed / 60)
+        if cadence > 0 && minute > 0 && minute % cadence == 0 &&
+           minute != lastSpokenMinute {
+            lastSpokenMinute = minute
+            var parts = ["\(minute) minutes completed"]
+            if let distance = health.distanceMeters, distance > 100 {
+                parts.append(String(format: "%.2f miles", distance / 1609.344))
+                parts.append("Average pace " + pace(elapsed * 1609.344 / distance))
+            }
+            if let hr = health.heartRateBPM, hr > 0 {
+                parts.append("Heart rate \(Int(hr))")
+            }
+            say(parts.joined(separator: ". ") + ".")
+        }
     }
 }
 
@@ -768,6 +945,12 @@ private struct WatchPreferences: View {
 private struct WatchRunScreen: View {
     @EnvironmentObject private var store: WatchWorkoutStore
     @EnvironmentObject private var health: WatchHealthSession
+    @StateObject private var cueCoach = IMUNRunCueCoach()
+    @AppStorage("hcRunVoiceCues") private var voiceCues = false
+    @AppStorage("hcRunAutoLaps") private var autoLaps = true
+    @AppStorage("hcRunIntervals") private var intervals = false
+    @AppStorage("hcRunCueMinutes") private var cueMinutes = 5
+    private let cueTimer = Timer.publish(every: 2, on: .main, in: .common).autoconnect()
     @State private var confirmFinish = false
 
     var body: some View {
@@ -799,6 +982,62 @@ private struct WatchRunScreen: View {
                     }
                 }
                 .listRowBackground(WTheme.panel)
+            }
+
+            Section("LIVE PERFORMANCE") {
+                TimelineView(.periodic(from: .now, by: 1)) { tick in
+                    VStack(alignment: .leading, spacing: 12) {
+                        HStack {
+                            Text(cueCoach.stage.uppercased())
+                                .font(WTheme.label(11))
+                                .foregroundStyle(WTheme.aqua)
+                            Spacer()
+                            if store.runClock?.isActive == true {
+                                Circle().fill(WTheme.lime)
+                                    .frame(width: 8, height: 8)
+                            }
+                        }
+                        let elapsed = store.runClock?.duration(at: tick.date) ?? 0
+                        let distance = health.distanceMeters ?? 0
+                        let averagePace = distance > 50 ?
+                            wClock(elapsed * 1609.344 / distance) + "/mi" : "—"
+                        Text(averagePace)
+                            .font(WTheme.metric(29))
+                            .foregroundStyle(WTheme.lime)
+                        Text("AVERAGE PACE")
+                            .font(WTheme.label(9))
+                            .foregroundStyle(WTheme.muted)
+                        if distance > 0 {
+                            ProgressView(value: (distance / 1609.344).truncatingRemainder(dividingBy: 1))
+                                .tint(WTheme.lime)
+                            Text("Next mile · " + String(format: "%.2f / 1.00", (distance / 1609.344).truncatingRemainder(dividingBy: 1)))
+                                .font(WTheme.label(10)).foregroundStyle(WTheme.muted)
+                        }
+                    }
+                }
+                .listRowBackground(WTheme.panel)
+            }
+
+            Section("AUDIO & INTERVAL COACH") {
+                Toggle("Spoken headphone cues", isOn: $voiceCues)
+                    .tint(WTheme.lime)
+                Toggle("Automatic mile laps", isOn: $autoLaps)
+                    .tint(WTheme.lime)
+                Toggle("Timed intervals", isOn: $intervals)
+                    .tint(WTheme.lime)
+                if intervals {
+                    Text("Preset: warm up 5 min · 5 × (3 min effort / 2 min easy) · cool down")
+                        .font(.system(size: 11)).foregroundStyle(WTheme.muted)
+                }
+                Picker("Pace & HR cues", selection: $cueMinutes) {
+                    Text("Off").tag(0)
+                    Text("Every minute").tag(1)
+                    Text("Every 2 min").tag(2)
+                    Text("Every 5 min").tag(5)
+                    Text("Every 10 min").tag(10)
+                }
+                Text(cueCoach.lastCue)
+                    .font(.system(size: 11)).foregroundStyle(WTheme.muted)
             }
 
             Section("RUN CONTROLS") {
@@ -889,6 +1128,10 @@ private struct WatchRunScreen: View {
         .scrollIndicators(.hidden)
         .background(WTheme.bg.ignoresSafeArea())
         .navigationTitle("Run")
+        .onReceive(cueTimer) { _ in
+            cueCoach.tick(store: store, health: health)
+        }
+        .onAppear { cueCoach.tick(store: store, health: health) }
         .confirmationDialog("Finish run?", isPresented: $confirmFinish) {
             Button("Finish & Save") {
                 store.finishRun(distanceMeters: health.distanceMeters,
