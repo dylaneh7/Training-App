@@ -94,21 +94,22 @@ Deduplication compares HealthKit workout IDs and close matching dates/start time
 
 ## Health Coach 2.0 native redesign
 
-The iPhone entry point now loads **PremiumHomeView** with a unified premium dark palette and five deliberately designed tabs:
+The iPhone entry point loads **PremiumHomeView** with a premium dark design and **four** bottom tabs:
 
-- **Strength:** session overview, timer, completed-set/volume metrics, fast set weight/reps/RIR adjustments, personalized suggestions, workout editor and exercise library.
-- **Run:** today's planned run, optional completed splits, pace, distances and prior sessions.
-- **Progress:** per-exercise load and running mileage charts based on actual recorded data.
-- **Recovery:** Apple Health measurements (including WHOOP-sourced readings when available), plus source-labeled Tredict history. Incompatible HRV types are not mixed.
-- **Coach:** progression preference, private coaching notes, user-initiated AI export, sync visibility and account controls.
+- **Training:** a persistent activity selector across the top, currently **Run** and **Weightlifting**, followed by the date-matched planned workout and full original activity workflows (set logging, editors, run history, Health import). Other modalities such as cycling and mobility can join the Training selector in future without adding bottom tabs. The selected sport is remembered locally.
+- **Progress:** historical load/mileage charts and calendar scheduling.
+- **Recovery:** source-labeled Apple Health and Tredict measurements; incompatible HRV types are not combined into a fabricated readiness score.
+- **Coach:** a clean schedule-based daily briefing, actual strength-set completion **progress ring**, and a clearly visible **Settings** entry (both a card and top-right gear). The original appearance preferences, training controls, personal notes, AI export, integrations, account and Watch options live in **Coach → Settings**.
+
+Reusable SwiftUI **HCProgressRing** and **HCInsightChip** components are part of the visual foundation. The Coach briefing is currently **rule-based** and explicitly labeled as such; it is **not an AI model**, a medical assessment, or a recovery readiness algorithm. Future phases: evidence-based recovery trends/alerts, opt-in secure AI coach, interval coaching with headphone cues and auto-laps, and Watch UI polish. These are not implemented by this navigation release.
 
 The Apple Watch app now uses a separate wrist-optimized interface with prominent strength/run start controls, a persistent workout timer, per-set Start / Stop & Save, rest countdowns and haptic notification, and manual run laps. Offline event storage and cloud bridges are unchanged.
 
 ### Updating the Mac copy
 
-**If you previously downloaded a ZIP:** the files on your Mac do not auto-update. Download a new ZIP from the repository, unpack it and open the new \`AppleWatch/HealthCoachNative.xcodeproj\`. Select your signing team if prompted, and Run again to replace the installed build.
+**Use the GitHub-cloned Xcode project** at \`AppleWatch/HealthCoachNative.xcodeproj\`. After a new source update on \`main\`, choose **Integrate → Pull** in Xcode, then **Run** for the **HealthCoach** iPhone scheme and **HealthCoachWatch** Watch scheme to install the native changes. Keep existing signing and bundle IDs. Cloud-managed schedules can update without a native code reinstall.
 
-**For future edits:** clone this repository through Xcode Source Control or \`git clone\`. Then subsequent assistant commits can be received with \`git pull\` instead of redownloading the whole archive.
+A free Apple Developer Personal Team cannot use TestFlight, and installed development profiles are time-limited. Expect to periodically reinstall using Xcode. Avoid committing local \`.DS_Store\`, Xcode workspace settings or personal signing changes.
 
 A code commit or a successful simulator build is not proof of usability on a real Apple Watch. Check workout starts, set-saving, heart-rate permissions and watch-to-phone delivery on paired devices. If a new screen doesn't load, ensure Xcode is opening the latest copy of the repository.
 

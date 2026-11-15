@@ -2,6 +2,27 @@ import SwiftUI
 import Charts
 import MapKit
 
+// The bottom bar is organized by purpose; individual sports live inside Training.
+// Adding cycling, mobility or swimming later does not require another bottom tab.
+private enum IMUNTrainingActivity: String, CaseIterable, Identifiable {
+    case run
+    case weightlifting
+
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .run: return "Run"
+        case .weightlifting: return "Weightlifting"
+        }
+    }
+    var symbol: String {
+        switch self {
+        case .run: return "figure.run"
+        case .weightlifting: return "dumbbell.fill"
+        }
+    }
+}
+
 // MARK: - Health Coach 2.0 navigation
 
 struct PremiumHomeView: View {
@@ -15,10 +36,8 @@ struct PremiumHomeView: View {
 
     var body: some View {
         TabView {
-            NavigationStack { PremiumStrengthPage() }
-                .tabItem { Label("Strength", systemImage: "dumbbell.fill") }
-            NavigationStack { PremiumRunPage() }
-                .tabItem { Label("Run", systemImage: "figure.run") }
+            NavigationStack { PremiumTrainingPage() }
+                .tabItem { Label("Training", systemImage: "figure.run.circle.fill") }
             NavigationStack { PremiumProgressPage() }
                 .tabItem { Label("Progress", systemImage: "chart.xyaxis.line") }
             NavigationStack { PremiumRecoveryPage(appleHealth: appleHealth) }
@@ -71,6 +90,118 @@ struct PremiumHomeView: View {
         bar.stackedLayoutAppearance.selected.titleTextAttributes = [.foregroundColor: UIColor(HCDesign.electric)]
         UITabBar.appearance().standardAppearance = bar
         UITabBar.appearance().scrollEdgeAppearance = bar
+    }
+}
+
+
+// One Training destination. The picker controls the sport, not the daily plan:
+// each activity still reads its date-matched workout from the iPhone calendar.
+private struct PremiumTrainingPage: View {
+    @EnvironmentObject private var coach: PhoneWorkoutBridge
+    @AppStorage("hcTrainingActivity") private var chosenActivity = "weightlifting"
+
+    private var selected: IMUNTrainingActivity {
+        IMUNTrainingActivity(rawValue: chosenActivity) ?? .weightlifting
+    }
+
+    private var plannedTitle: String {
+        let today = HCPlanBuilder.dateString(Date())
+        switch selected {
+        case .run:
+            return coach.runPlan?.date == today
+                ? (coach.runPlan?.title ?? "No run planned")
+                : "No run planned today"
+        case .weightlifting:
+            return coach.workout?.date == today
+                ? (coach.workout?.title ?? "No lift planned")
+                : "No lift planned today"
+        }
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            VStack(alignment: .leading, spacing: 14) {
+                HStack(alignment: .firstTextBaseline) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("IMUN / YOUR SESSIONS")
+                            .font(HCDesign.label(10))
+                            .tracking(1.8)
+                            .foregroundStyle(HCDesign.aqua)
+                        Text("Training")
+                            .font(HCDesign.display(32))
+                            .foregroundStyle(HCDesign.ink)
+                    }
+                    Spacer()
+                    Text(Date().formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day()))
+                        .font(HCDesign.label(11))
+                        .foregroundStyle(HCDesign.secondary)
+                }
+
+                HStack(spacing: 9) {
+                    ForEach(IMUNTrainingActivity.allCases) { activity in
+                        let active = selected == activity
+                        Button {
+                            withAnimation(.easeInOut(duration: 0.18)) {
+                                chosenActivity = activity.rawValue
+                            }
+                        } label: {
+                            Label(activity.title, systemImage: activity.symbol)
+                                .font(.system(size: 13, weight: .semibold, design: .rounded))
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 13)
+                                .foregroundStyle(active ? HCDesign.onAccent : HCDesign.secondary)
+                                .background(active ? HCDesign.electric : HCDesign.raised,
+                                            in: RoundedRectangle(cornerRadius: 13, style: .continuous))
+                                .overlay {
+                                    RoundedRectangle(cornerRadius: 13, style: .continuous)
+                                        .strokeBorder(active ? HCDesign.electric : HCDesign.outline,
+                                                      lineWidth: 1)
+                                }
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityAddTraits(active ? [.isSelected] : [])
+                    }
+                }
+                .accessibilityLabel("Training activity")
+
+                HStack(spacing: 9) {
+                    Image(systemName: "calendar")
+                        .foregroundStyle(HCDesign.aqua)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("TODAY'S PLAN")
+                            .font(HCDesign.label(9))
+                            .tracking(1.2)
+                            .foregroundStyle(HCDesign.secondary)
+                        Text(plannedTitle)
+                            .font(.system(size: 14, weight: .semibold, design: .rounded))
+                            .foregroundStyle(HCDesign.ink)
+                            .lineLimit(1)
+                    }
+                    Spacer()
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(HCDesign.secondary)
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
+                .background(HCDesign.card, in: RoundedRectangle(cornerRadius: 12))
+            }
+            .padding(.horizontal, 18)
+            .padding(.top, 12)
+            .padding(.bottom, 14)
+
+            Rectangle()
+                .fill(HCDesign.outline.opacity(0.65))
+                .frame(height: 1)
+
+            Group {
+                switch selected {
+                case .run: PremiumRunPage()
+                case .weightlifting: PremiumStrengthPage()
+                }
+            }
+        }
+        .hcPage()
     }
 }
 
@@ -163,10 +294,7 @@ private struct PremiumStrengthPage: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 19) {
-                PremiumHeader(eyebrow: "IMUN / STRENGTH",
-                              title: "Today",
-                              subtitle: Date().formatted(.dateTime.weekday(.wide).month(.abbreviated).day()),
-                              badge: aggressive ? "COACHED" : nil)
+                HCSectionTitle(title: "Weightlifting", detail: aggressive ? "Coached session" : "Today's plan")
                 HCSyncStatus(pending: coach.cloudPendingCount,
                              saving: coach.savingPlan, connected: coach.signedIn)
 
@@ -638,9 +766,7 @@ private struct PremiumRunPage: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 19) {
-                PremiumHeader(eyebrow: "IMUN / RUN",
-                              title: "Today's run",
-                              subtitle: Date().formatted(.dateTime.weekday(.wide).month(.abbreviated).day()))
+                HCSectionTitle(title: "Running", detail: "Today's plan")
                 if !coach.signedIn { PremiumLogin() }
                 HCCard(accent: HCDesign.aqua) {
                     VStack(alignment: .leading, spacing: 17) {
@@ -1419,7 +1545,185 @@ private struct PremiumRecoveryPage: View {
 
 // MARK: - Coaching, export and settings
 
+// The Coach tab is a briefing and navigation hub; preferences live one tap deeper.
 private struct PremiumCoachPage: View {
+    @EnvironmentObject private var coach: PhoneWorkoutBridge
+
+    private var today: String { HCPlanBuilder.dateString(Date()) }
+    private var lift: HCWorkout? {
+        guard let plan = coach.workout, plan.date == today else { return nil }
+        return plan
+    }
+    private var run: HCRunPlan? {
+        guard let plan = coach.runPlan, plan.date == today else { return nil }
+        return plan
+    }
+    private var completedSets: Int {
+        guard let lift else { return 0 }
+        return coach.loggedSets.filter { $0.workoutID == lift.id }.count
+    }
+    private var plannedSets: Int { lift?.prescribedSetCount ?? 0 }
+    private var completion: Double {
+        plannedSets > 0 ? min(1, Double(completedSets) / Double(plannedSets)) : 0
+    }
+
+    private var coachBriefing: String {
+        if !coach.signedIn {
+            return "Connect your account to see the training calendar and the sessions you have planned."
+        }
+        if coach.loading {
+            return "Checking your connected training calendar. Your latest schedule will appear here."
+        }
+        switch (lift != nil, run != nil) {
+        case (true, true):
+            return "You have both weightlifting and running scheduled today. Review each session in Training and plan enough time between efforts."
+        case (true, false):
+            return "Today's weightlifting session is ready. Follow your planned sets and record your results for a clearer progression history."
+        case (false, true):
+            return "Your run is scheduled today. Check the session details in Training before starting on the Watch."
+        case (false, false):
+            return "No sessions are scheduled for today. Use Training to create a lift or review your connected calendar."
+        }
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 19) {
+                PremiumHeader(eyebrow: "IMUN / COACH",
+                              title: "Train with purpose.",
+                              subtitle: "One plan. Clear progress. Better decisions.")
+                if !coach.signedIn { PremiumLogin() }
+
+                HCCard(accent: HCDesign.electric) {
+                    HStack(spacing: 19) {
+                        HCProgressRing(progress: completion,
+                                       value: plannedSets > 0 ? "\(min(completedSets, plannedSets))/\(plannedSets)" : "—",
+                                       subtitle: "Sets done")
+                        VStack(alignment: .leading, spacing: 9) {
+                            HCInsightChip(title: "TODAY'S FOCUS",
+                                          symbol: "sparkle",
+                                          tint: HCDesign.electric)
+                            Text(lift?.title ?? run?.title ?? "Your next session")
+                                .font(HCDesign.display(20))
+                                .fixedSize(horizontal: false, vertical: true)
+                            Text(plannedSets > 0 ?
+                                 "Working-set progress is calculated from your recorded results." :
+                                 "Your schedule comes from the iPhone and Command Center.")
+                                .font(.system(size: 12))
+                                .foregroundStyle(HCDesign.secondary)
+                        }
+                        Spacer(minLength: 0)
+                    }
+                }
+
+                HCSectionTitle(title: "Today's schedule",
+                               detail: Date().formatted(.dateTime.weekday(.wide)))
+                HCCard {
+                    VStack(spacing: 13) {
+                        scheduleRow(title: "Weightlifting",
+                                    session: lift?.title ?? "Nothing scheduled",
+                                    symbol: "dumbbell.fill",
+                                    detail: lift.map { "\($0.exercises.count) exercises · \(plannedSets) sets" } ?? "Rest / unscheduled")
+                        Divider().overlay(HCDesign.outline)
+                        scheduleRow(title: "Run",
+                                    session: run?.title ?? "Nothing scheduled",
+                                    symbol: "figure.run",
+                                    detail: run?.targetDistanceMiles.map {
+                                        String(format: "%.1f miles targeted", $0)
+                                    } ?? "No distance target")
+                    }
+                }
+
+                HCSectionTitle(title: "Coach briefing", detail: "Schedule-based")
+                HCCard(accent: HCDesign.aqua) {
+                    VStack(alignment: .leading, spacing: 11) {
+                        HCInsightChip(title: "DAILY GUIDANCE",
+                                      symbol: "text.bubble",
+                                      tint: HCDesign.aqua)
+                        Text(coachBriefing)
+                            .font(.system(size: 15, weight: .medium))
+                            .foregroundStyle(HCDesign.ink)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Text("This first version uses your real schedule, not generative AI or an invented recovery score.")
+                            .font(.caption2)
+                            .foregroundStyle(HCDesign.secondary)
+                    }
+                }
+
+                HCSectionTitle(title: "Coach & app controls")
+                NavigationLink {
+                    PremiumSettingsPage()
+                } label: {
+                    HCCard {
+                        HStack(spacing: 14) {
+                            Image(systemName: "gearshape.fill")
+                                .font(.system(size: 22))
+                                .foregroundStyle(HCDesign.electric)
+                                .frame(width: 44, height: 44)
+                                .background(HCDesign.electric.opacity(0.11),
+                                            in: RoundedRectangle(cornerRadius: 13))
+                            VStack(alignment: .leading, spacing: 5) {
+                                Text("Settings")
+                                    .font(.system(size: 17, weight: .semibold, design: .rounded))
+                                Text("Appearance, coaching, connected apps and Watch")
+                                    .font(.caption)
+                                    .foregroundStyle(HCDesign.secondary)
+                            }
+                            Spacer(minLength: 6)
+                            Image(systemName: "chevron.right")
+                                .foregroundStyle(HCDesign.secondary)
+                        }
+                    }
+                }
+                .buttonStyle(.plain)
+                HCSyncStatus(pending: coach.cloudPendingCount,
+                             saving: coach.savingPlan,
+                             connected: coach.signedIn)
+                Spacer(minLength: 30)
+            }
+            .padding(18)
+        }
+        .scrollIndicators(.hidden)
+        .hcPage()
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                NavigationLink {
+                    PremiumSettingsPage()
+                } label: {
+                    Image(systemName: "gearshape")
+                        .foregroundStyle(HCDesign.electric)
+                }
+                .accessibilityLabel("Coach settings")
+            }
+        }
+    }
+
+    private func scheduleRow(title: String, session: String,
+                             symbol: String, detail: String) -> some View {
+        HStack(spacing: 13) {
+            Image(systemName: symbol)
+                .foregroundStyle(HCDesign.aqua)
+                .frame(width: 27)
+            VStack(alignment: .leading, spacing: 5) {
+                Text(title.uppercased())
+                    .font(HCDesign.label(10))
+                    .tracking(1)
+                    .foregroundStyle(HCDesign.secondary)
+                Text(session)
+                    .font(.system(size: 15, weight: .semibold))
+                Text(detail)
+                    .font(.caption2)
+                    .foregroundStyle(HCDesign.secondary)
+            }
+            Spacer(minLength: 0)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+// All original settings, exports and integrations are preserved here.
+private struct PremiumSettingsPage: View {
     @EnvironmentObject private var coach: PhoneWorkoutBridge
     @EnvironmentObject private var tredict: HCTredictImporter
     @State private var tredictToken = ""
@@ -1468,9 +1772,9 @@ private struct PremiumCoachPage: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 19) {
-                PremiumHeader(eyebrow: "IMUN / SETTINGS",
-                              title: "Train with purpose.",
-                              subtitle: "Your training, your settings, your direction.")
+                PremiumHeader(eyebrow: "COACH / SETTINGS",
+                              title: "Your preferences.",
+                              subtitle: "Fine-tune your coaching, appearance and connections.")
                 HCCard(accent: HCDesign.electric) {
                     VStack(alignment: .leading, spacing: 11) {
                         HCAccentTag(title: "TRAINING INTELLIGENCE")
@@ -1740,6 +2044,7 @@ private struct PremiumCoachPage: View {
         .scrollIndicators(.hidden)
         .hcPage()
         .navigationBarTitleDisplayMode(.inline)
+        .navigationTitle("Settings")
     }
     @ViewBuilder
     private func accentTile(id: String, name: String, tint: Color) -> some View {

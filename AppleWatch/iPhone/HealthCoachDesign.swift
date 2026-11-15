@@ -123,6 +123,62 @@ struct HCAccentTag: View {
     }
 }
 
+
+// Reusable progress treatment for measured completion, not an inferred health score.
+// Recovery readiness will use a separate evidence-based model in a later phase.
+struct HCProgressRing: View {
+    let progress: Double
+    let value: String
+    let subtitle: String
+    var tint: Color = HCDesign.electric
+    var diameter: CGFloat = 112
+
+    private var bounded: Double { min(1, max(0, progress)) }
+
+    var body: some View {
+        ZStack {
+            Circle()
+                .stroke(HCDesign.outline, lineWidth: 9)
+            Circle()
+                .trim(from: 0, to: bounded)
+                .stroke(tint, style: StrokeStyle(lineWidth: 9, lineCap: .round))
+                .rotationEffect(.degrees(-90))
+                .shadow(color: tint.opacity(0.17), radius: 8)
+            VStack(spacing: 3) {
+                Text(value)
+                    .font(HCDesign.metric(23))
+                    .minimumScaleFactor(0.65)
+                    .lineLimit(1)
+                    .foregroundStyle(HCDesign.ink)
+                Text(subtitle.uppercased())
+                    .font(HCDesign.label(9))
+                    .tracking(1.1)
+                    .foregroundStyle(HCDesign.secondary)
+            }
+        }
+        .frame(width: diameter, height: diameter)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(subtitle + ": " + value)
+    }
+}
+
+// Shared label for actionable, source-based trends and sync states.
+struct HCInsightChip: View {
+    let title: String
+    let symbol: String
+    var tint: Color = HCDesign.aqua
+
+    var body: some View {
+        Label(title, systemImage: symbol)
+            .font(HCDesign.label(11))
+            .foregroundStyle(tint)
+            .padding(.horizontal, 11)
+            .padding(.vertical, 8)
+            .background(tint.opacity(0.1), in: Capsule())
+            .overlay(Capsule().strokeBorder(tint.opacity(0.22)))
+    }
+}
+
 struct HCMetricBlock: View {
     let label: String
     let value: String
