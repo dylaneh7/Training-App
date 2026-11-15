@@ -44,3 +44,25 @@ let returnSuggestion=HCProgressionEngine.suggest(movement("Flat barbell bench pr
 check((returnSuggestion.weightLb ?? 999) < ready.weightLb,
       "Return-from-break recommendation must not force an increase")
 print("All evidence-aware progression smoke tests passed.")
+
+// The iPhone is the only authority for what was planned on a given date.
+// A successful empty snapshot is a real rest day, not a stale workout.
+let sundayRest = HCWatchSchedule(date: "2026-11-15", workout: nil, runPlan: nil,
+                                 generatedAt: Date(timeIntervalSince1970: 1_763_200_000),
+                                 state: "ready")
+let decodedRest = try JSONDecoder().decode(HCWatchSchedule.self,
+                                           from: JSONEncoder().encode(sundayRest))
+check(decodedRest.workout == nil && decodedRest.runPlan == nil,
+      "Rest days must round-trip as explicitly empty plans")
+check(decodedRest.date == "2026-11-15" && decodedRest.state == "ready",
+      "Rest day snapshot date and authority must be preserved")
+let sampleSaturday = HCWorkout.preview
+check(sampleSaturday.date == "2026-11-14", "Saturday preview remains Saturday only")
+let unscheduled = HCWorkout.unscheduled(date: "2026-11-15")
+check(unscheduled.date == "2026-11-15" && unscheduled.exercises.isEmpty && !unscheduled.isPreview,
+      "Watch must use an empty, dated rest-day placeholder in production")
+let saturdaySnapshot = HCWatchSchedule(date: "2026-11-14", workout: sampleSaturday,
+                                       runPlan: nil, generatedAt: Date(), state: "ready")
+check(saturdaySnapshot.date != decodedRest.date,
+      "Yesterday's snapshot must not be treated as today's plan")
+print("Dated schedule and rest-day serialization tests passed.")
