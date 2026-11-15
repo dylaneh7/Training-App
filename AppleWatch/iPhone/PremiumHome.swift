@@ -921,9 +921,8 @@ private struct PremiumCoachPage: View {
         }
         lines.append("## Running")
         for run in coach.runHistory.prefix(100) {
-            lines.append("\(run.date): \(run.title) · \(run.distanceMeters.map {
-                String(format: "%.2f mi", $0 / 1609.344)
-            } ?? "—") · \(run.source)")
+            let distance = run.distanceMeters.map { String(format: "%.2f mi", $0 / 1609.344) } ?? "—"
+            lines.append("\(run.date): \(run.title) · \(distance) · \(run.source)")
         }
         if includeRecovery {
             lines.append("## Recovery")
