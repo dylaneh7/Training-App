@@ -1975,219 +1975,219 @@ private struct PremiumRecoveryPage: View {
 
 // MARK: - Coaching, export and settings
 
-// The Coach tab is a briefing and navigation hub; preferences live one tap deeper.
+// Chat is the home of Coach. The training calendar and settings sit beneath it.
 private struct PremiumCoachPage: View {
     @EnvironmentObject private var coach: PhoneWorkoutBridge
+    @State private var movingSession: HCPlannedSession?
+    @FocusState private var isChatFocused: Bool
 
-    private var today: String { HCPlanBuilder.dateString(Date()) }
-    private var lift: HCWorkout? {
-        guard let plan = coach.workout, plan.date == today else { return nil }
-        return plan
-    }
-    private var run: HCRunPlan? {
-        guard let plan = coach.runPlan, plan.date == today else { return nil }
-        return plan
-    }
-    private var completedSets: Int {
-        guard let lift else { return 0 }
-        return coach.loggedSets.filter { $0.workoutID == lift.id }.count
-    }
-    private var plannedSets: Int { lift?.prescribedSetCount ?? 0 }
-    private var completion: Double {
-        plannedSets > 0 ? min(1, Double(completedSets) / Double(plannedSets)) : 0
-    }
-
-    private var coachBriefing: String {
-        if !coach.signedIn {
-            return "Connect your account to see the training calendar and the sessions you have planned."
+    private var days: [Date] {
+        let start = Calendar.current.startOfDay(for: Date())
+        return (0..<7).compactMap {
+            Calendar.current.date(byAdding: .day, value: $0, to: start)
         }
-        if coach.loading {
-            return "Checking your connected training calendar. Your latest schedule will appear here."
-        }
-        switch (lift != nil, run != nil) {
-        case (true, true):
-            return "You have both weightlifting and running scheduled today. Review each session in Training and plan enough time between efforts."
-        case (true, false):
-            return "Today's weightlifting session is ready. Follow your planned sets and record your results for a clearer progression history."
-        case (false, true):
-            return "Your run is scheduled today. Check the session details in Training before starting on the Watch."
-        case (false, false):
-            return "No sessions are scheduled for today. Use Training to create a lift or review your connected calendar."
-        }
+    }
+    private var sessionsThisWeek: Int {
+        let dates = Set(days.map { HCPlanBuilder.dateString($0) })
+        return coach.plannedSessions.filter { dates.contains($0.date) }.count
     }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 19) {
-                HCPremiumHero(eyebrow: "IMUN / COACH",
-                              title: "Your edge, explained.",
-                              subtitle: "Daily guidance shaped by your real sessions.",
-                              icon: "sparkles",
-                              tint: HCDesign.electric) {
-                    HStack(spacing: 10) {
-                        HCInsightChip(title: "TODAY'S BRIEFING",
-                                      symbol: "waveform.path.ecg",
-                                      tint: HCDesign.good)
+        ScrollViewReader { proxy in
+            ScrollView {
+                VStack(alignment: .leading, spacing: 20) {
+                    HStack(alignment: .center) {
+                        VStack(alignment: .leading, spacing: 5) {
+                            Text("I M U N  /  PERSONAL COACH")
+                                .font(HCDesign.label(10))
+                                .tracking(1.5)
+                                .foregroundStyle(HCDesign.aqua)
+                            Text("Your coach.")
+                                .font(HCDesign.display(32))
+                                .tracking(-1)
+                                .foregroundStyle(HCDesign.ink)
+                            Text("Ask anything about your training.")
+                                .font(.system(size: 13))
+                                .foregroundStyle(HCDesign.secondary)
+                        }
                         Spacer()
-                        Text(Date().formatted(.dateTime.weekday(.abbreviated).day()))
-                            .font(HCDesign.label(11))
-                            .foregroundStyle(HCDesign.secondary)
+                        Image(systemName: "bubble.left.and.text.bubble.right.fill")
+                            .font(.system(size: 22))
+                            .foregroundStyle(HCDesign.electric)
+                            .frame(width: 49, height: 49)
+                            .background(HCDesign.electric.opacity(0.11),
+                                        in: RoundedRectangle(cornerRadius: 15))
                     }
-                }
-                if !coach.signedIn { PremiumLogin() }
 
-                HCCard(accent: HCDesign.electric) {
-                    HStack(spacing: 19) {
-                        HCProgressRing(progress: completion,
-                                       value: plannedSets > 0 ? "\(min(completedSets, plannedSets))/\(plannedSets)" : "—",
-                                       subtitle: "Sets done")
-                        VStack(alignment: .leading, spacing: 9) {
-                            HCInsightChip(title: "TODAY'S FOCUS",
-                                          symbol: "sparkle",
-                                          tint: HCDesign.electric)
-                            Text(lift?.title ?? run?.title ?? "Your next session")
-                                .font(HCDesign.display(20))
-                                .fixedSize(horizontal: false, vertical: true)
-                            Text(plannedSets > 0 ?
-                                 "Working-set progress is calculated from your recorded results." :
-                                 "Your schedule comes from the iPhone and Command Center.")
+                    if !coach.signedIn {
+                        PremiumLogin()
+                    }
+
+                    PremiumCoachConversation()
+                        .id("imun-coach-chat")
+
+                    HStack(alignment: .firstTextBaseline) {
+                        VStack(alignment: .leading, spacing: 5) {
+                            Text("Your next 7 days")
+                                .font(HCDesign.display(24))
+                                .foregroundStyle(HCDesign.ink)
+                            Text("A look at the training ahead.")
                                 .font(.system(size: 12))
                                 .foregroundStyle(HCDesign.secondary)
                         }
-                        Spacer(minLength: 0)
+                        Spacer()
+                        Text("\(sessionsThisWeek) PLANNED")
+                            .font(HCDesign.label(10))
+                            .tracking(0.6)
+                            .foregroundStyle(HCDesign.aqua)
                     }
-                }
+                    .padding(.top, 4)
 
-                HCSectionTitle(title: "Today's schedule",
-                               detail: Date().formatted(.dateTime.weekday(.wide)))
-                HCCard {
-                    VStack(spacing: 13) {
-                        scheduleRow(title: "Weightlifting",
-                                    session: lift?.title ?? "Nothing scheduled",
-                                    symbol: "dumbbell.fill",
-                                    detail: lift.map { "\($0.exercises.count) exercises · \(plannedSets) sets" } ?? "Rest / unscheduled")
-                        Divider().overlay(HCDesign.outline)
-                        scheduleRow(title: "Run",
-                                    session: run?.title ?? "Nothing scheduled",
-                                    symbol: "figure.run",
-                                    detail: run?.targetDistanceMiles.map {
-                                        String(format: "%.1f miles targeted", $0)
-                                    } ?? "No distance target")
+                    VStack(spacing: 10) {
+                        ForEach(Array(days.enumerated()), id: \.element) { index, day in
+                            let dateKey = HCPlanBuilder.dateString(day)
+                            let sessions = coach.plannedSessions
+                                .filter { $0.date == dateKey }
+                            HStack(alignment: .top, spacing: 12) {
+                                VStack(spacing: 3) {
+                                    Text(day.formatted(.dateTime.weekday(.abbreviated)).uppercased())
+                                        .font(HCDesign.label(10))
+                                        .foregroundStyle(index == 0 ?
+                                                         HCDesign.electric : HCDesign.secondary)
+                                    Text(day.formatted(.dateTime.day()))
+                                        .font(HCDesign.metric(22))
+                                        .foregroundStyle(HCDesign.ink)
+                                }
+                                .frame(width: 45)
+                                .padding(.top, 4)
+
+                                Rectangle()
+                                    .fill(index == 0 ? HCDesign.electric : HCDesign.outline)
+                                    .frame(width: 2)
+
+                                VStack(alignment: .leading, spacing: 8) {
+                                    if sessions.isEmpty {
+                                        Text(!coach.signedIn ? "Sign in to see your plan" :
+                                             coach.loading ? "Loading your plan…" :
+                                             "No session planned")
+                                            .font(.system(size: 13, weight: .medium))
+                                            .foregroundStyle(HCDesign.secondary)
+                                            .padding(.vertical, 8)
+                                    } else {
+                                        ForEach(sessions) { session in
+                                            Button {
+                                                movingSession = session
+                                            } label: {
+                                                HStack(spacing: 10) {
+                                                    Image(systemName: sessionSymbol(session.kind))
+                                                        .font(.system(size: 16))
+                                                        .foregroundStyle(sessionColor(session.kind))
+                                                        .frame(width: 29)
+                                                    VStack(alignment: .leading, spacing: 4) {
+                                                        Text(session.title)
+                                                            .font(.system(size: 14, weight: .semibold))
+                                                            .foregroundStyle(HCDesign.ink)
+                                                            .multilineTextAlignment(.leading)
+                                                            .fixedSize(horizontal: false, vertical: true)
+                                                        Text(session.completed ? "Completed" :
+                                                             sessionLabel(session.kind))
+                                                            .font(.system(size: 11))
+                                                            .foregroundStyle(HCDesign.secondary)
+                                                    }
+                                                    Spacer(minLength: 4)
+                                                    Image(systemName: session.completed ?
+                                                        "checkmark.circle.fill" : "chevron.right")
+                                                        .font(.system(size: 12))
+                                                        .foregroundStyle(session.completed ?
+                                                                         HCDesign.good :
+                                                                         HCDesign.secondary)
+                                                }
+                                                .padding(.vertical, 6)
+                                            }
+                                            .buttonStyle(.plain)
+                                            .accessibilityLabel("\(session.title), \(day.formatted(date: .abbreviated, time: .omitted))")
+                                            if session.id != sessions.last?.id {
+                                                Divider().overlay(HCDesign.outline)
+                                            }
+                                        }
+                                    }
+                                }
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.leading, 2)
+                            }
+                            .padding(.horizontal, 13)
+                            .padding(.vertical, 13)
+                            .background(index == 0 ?
+                                HCDesign.electric.opacity(0.075) : HCDesign.card,
+                                in: RoundedRectangle(cornerRadius: 16))
+                            .overlay(RoundedRectangle(cornerRadius: 16)
+                                .strokeBorder(index == 0 ?
+                                    HCDesign.electric.opacity(0.3) :
+                                    HCDesign.outline.opacity(0.7), lineWidth: 1))
+                        }
                     }
-                }
 
-                HCSectionTitle(title: "Coach briefing", detail: "Schedule-based")
-                HCCard(accent: HCDesign.aqua) {
-                    VStack(alignment: .leading, spacing: 11) {
-                        HCInsightChip(title: "DAILY GUIDANCE",
-                                      symbol: "text.bubble",
-                                      tint: HCDesign.aqua)
-                        Text(coachBriefing)
-                            .font(.system(size: 15, weight: .medium))
-                            .foregroundStyle(HCDesign.ink)
-                            .fixedSize(horizontal: false, vertical: true)
-                        Text("This briefing uses your real schedule. Open Ask Coach for optional AI-powered advice.")
+                    HStack {
+                        Text("Tap a session to view or move its date.")
                             .font(.caption2)
                             .foregroundStyle(HCDesign.secondary)
+                        Spacer()
+                        Image(systemName: "calendar")
+                            .foregroundStyle(HCDesign.aqua)
                     }
-                }
 
-                PremiumCoachQuickChat()
-                HCSectionTitle(title: "More coaching", detail: "Full-screen view")
-                NavigationLink {
-                    PremiumAskCoachPage()
-                } label: {
-                    HCCard(accent: HCDesign.aqua) {
-                        HStack(spacing: 14) {
-                            Image(systemName: "sparkles.rectangle.stack.fill")
-                                .font(.system(size: 27))
-                                .foregroundStyle(HCDesign.aqua)
-                                .frame(width: 48, height: 48)
-                                .background(HCDesign.aqua.opacity(0.12),
-                                            in: RoundedRectangle(cornerRadius: 14))
-                            VStack(alignment: .leading, spacing: 5) {
-                                Text("Full-screen coaching")
-                                    .font(HCDesign.display(19))
-                                Text("Separate workspace for longer questions")
-                                    .font(.caption).foregroundStyle(HCDesign.secondary)
-                            }
-                            Spacer(minLength: 5)
-                            Image(systemName: "arrow.up.right")
-                                .foregroundStyle(HCDesign.aqua)
-                        }
-                    }
+                    HCSyncStatus(pending: coach.cloudPendingCount,
+                                 saving: coach.savingPlan,
+                                 connected: coach.signedIn)
+                    Spacer(minLength: 25)
                 }
-                .buttonStyle(.plain)
-
-                HCSectionTitle(title: "Coach & app controls")
-                NavigationLink {
-                    PremiumSettingsPage()
-                } label: {
-                    HCCard {
-                        HStack(spacing: 14) {
-                            Image(systemName: "gearshape.fill")
-                                .font(.system(size: 22))
-                                .foregroundStyle(HCDesign.electric)
-                                .frame(width: 44, height: 44)
-                                .background(HCDesign.electric.opacity(0.11),
-                                            in: RoundedRectangle(cornerRadius: 13))
-                            VStack(alignment: .leading, spacing: 5) {
-                                Text("Settings")
-                                    .font(.system(size: 17, weight: .semibold, design: .rounded))
-                                Text("Appearance, coaching, connected apps and Watch")
-                                    .font(.caption)
-                                    .foregroundStyle(HCDesign.secondary)
-                            }
-                            Spacer(minLength: 6)
-                            Image(systemName: "chevron.right")
-                                .foregroundStyle(HCDesign.secondary)
-                        }
-                    }
-                }
-                .buttonStyle(.plain)
-                HCSyncStatus(pending: coach.cloudPendingCount,
-                             saving: coach.savingPlan,
-                             connected: coach.signedIn)
-                Spacer(minLength: 30)
+                .padding(.horizontal, 18)
+                .padding(.top, 9)
+                .padding(.bottom, 24)
             }
-            .padding(18)
-        }
-        .scrollIndicators(.hidden)
-        .hcPage()
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                NavigationLink {
-                    PremiumSettingsPage()
-                } label: {
-                    Image(systemName: "gearshape")
-                        .foregroundStyle(HCDesign.electric)
+            .scrollIndicators(.hidden)
+            .scrollDismissesKeyboard(.interactively)
+            .hcPage()
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    NavigationLink {
+                        PremiumSettingsPage()
+                    } label: {
+                        Image(systemName: "gearshape")
+                            .foregroundStyle(HCDesign.electric)
+                    }
+                    .accessibilityLabel("Coach settings")
                 }
-                .accessibilityLabel("Coach settings")
+            }
+            .sheet(item: $movingSession) { session in
+                IMUNMoveWorkoutSheet(entry: session)
+                    .environmentObject(coach)
             }
         }
     }
 
-    private func scheduleRow(title: String, session: String,
-                             symbol: String, detail: String) -> some View {
-        HStack(spacing: 13) {
-            Image(systemName: symbol)
-                .foregroundStyle(HCDesign.aqua)
-                .frame(width: 27)
-            VStack(alignment: .leading, spacing: 5) {
-                Text(title.uppercased())
-                    .font(HCDesign.label(10))
-                    .tracking(1)
-                    .foregroundStyle(HCDesign.secondary)
-                Text(session)
-                    .font(.system(size: 15, weight: .semibold))
-                Text(detail)
-                    .font(.caption2)
-                    .foregroundStyle(HCDesign.secondary)
-            }
-            Spacer(minLength: 0)
+    private func sessionSymbol(_ kind: String) -> String {
+        let normalized = kind.lowercased()
+        if normalized.contains("run") { return "figure.run" }
+        if normalized.contains("lift") || normalized.contains("strength") {
+            return "dumbbell.fill"
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        if normalized.contains("cycl") || normalized.contains("bike") {
+            return "bicycle"
+        }
+        return "figure.mixed.cardio"
+    }
+    private func sessionColor(_ kind: String) -> Color {
+        kind.lowercased().contains("run") ? HCDesign.aqua : HCDesign.electric
+    }
+    private func sessionLabel(_ kind: String) -> String {
+        let normalized = kind.lowercased()
+        if normalized.contains("run") { return "Running" }
+        if normalized.contains("lift") || normalized.contains("strength") {
+            return "Weightlifting"
+        }
+        return kind.replacingOccurrences(of: "-", with: " ").capitalized
     }
 }
 
