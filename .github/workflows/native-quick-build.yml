@@ -15,6 +15,17 @@ jobs:
       - uses: actions/checkout@v4
       - name: Check Xcode version
         run: xcodebuild -version
+      - name: Validate modern single-target watch app metadata
+        run: |
+          python3 - <<'PY'
+          import plistlib
+          with open("AppleWatch/Watch/Info.plist", "rb") as file:
+              info = plistlib.load(file)
+          assert info.get("WKApplication") is True, "Modern watchOS app must have WKApplication=YES"
+          assert info.get("WKWatchKitApp") is not True, "Legacy WatchKit 1 key must be removed"
+          assert info.get("WKCompanionAppBundleIdentifier"), "Companion app ID is required"
+          print("Modern watchOS single-target Info.plist metadata verified")
+          PY
       - name: Test exercise progression
         run: |
           swiftc AppleWatch/Shared/WorkoutModels.swift AppleWatch/Shared/ProgramCatalog.swift AppleWatch/Tests/main.swift -o /tmp/hc-progression
