@@ -1,5 +1,23 @@
 # imun — iPhone + Apple Watch
 
+## Current IMUN workflow (native 2.2)
+
+**Today-only Strength and Run:** no daily date selector. These tabs show the current workout automatically. The Progress tab shows recorded progress and the next 30 days of saved Calendar entries and repeating Push/Pull/Upper/Legs program previews.
+
+**Move workouts yourself:** select a workout in Progress and tap **Move day** or **Today**. The authenticated `imun_move_planned_workout` / `imun_move_rotation_workout` RPCs update only the signed-in user's Command Center planner. Synthetic rotation previews become real dated events on a successful move; the old recurring occurrence is suppressed. Historical completed workouts and sets are not moved.
+
+**Recorded legacy data:** IMUN reads existing Health Coach workout sets, saved planner sessions, source-labeled Tredict/Hybrid Coach activities, running results, and Tredict recovery. It keeps the original legacy planner and workout state alongside normalized activity/recovery records in a private local archive, with user-triggered export in Coach.
+
+**Direct Tredict + Garmin history:** Coach → Tredict / Garmin accepts a *Personal API token* obtained in Tredict Settings → Personal API, with read-only `activityRead` and `bodyvaluesRead` scopes. The token stays in the iPhone Keychain, is never committed to GitHub, and is not forwarded to Command Center. Manual Sync All History downloads paginated activity summaries (up to 15,000 per sync), HRV, sleep, body measurements, capacities and equipment details where authorized; original response JSON stays on the iPhone. Users can disconnect/re-import, and missing permissions produce partial data rather than invented measurements. A valid token and Tredict subscription access are required; no unseen Tredict history is accessible until the owner connects.
+
+Official Tredict API: https://www.tredict.com/blog/oauth_docs/ 
+Official Tredict Garmin setup and older-history import: https://www.tredict.com/faq/garmin-connect---how-to-connect-and-synchronize-my-device/
+
+**Brand:** Home Screen display name **imun**; minimalist off-white “im” on charcoal with a crimson accent, with optional alternate accent palettes. The inspiration is 1 Corinthians 9:24–27, with a short quotation in Coach. Native bundle identifiers remain unchanged so upgrading replaces the prior app.
+
+**Limits:** Direct Garmin time-series details and exact Tredict data availability depend on the source API and what has been authorized. IMUN currently imports the activity-list summaries and archives other supported Tredict responses; it does not automatically fetch every raw FIT file, lap, or GPS point. A successful CI simulator build does not replace testing on the user's paired devices.
+
+
 A standalone **native SwiftUI iPhone/watchOS companion** for the existing Health Coach web app. This folder is kept separate from the web app, so nothing here replaces your PWA or its workout history.
 
 
