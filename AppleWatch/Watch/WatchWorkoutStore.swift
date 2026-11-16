@@ -71,6 +71,9 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
 
     override init() {
         super.init()
+        exerciseSwaps = load("watch-exercise-swaps.json") ?? []
+        // Restore offline swaps before loading cached schedule so old data cannot
+        // overwrite a substitution after a Watch restart.
         // Never revive the older hardcoded Saturday example or yesterday's cache.
         if let snapshot: HCWatchSchedule = load("latest-schedule.json"),
            snapshot.date == Self.today() {
@@ -83,7 +86,6 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
         guidedExerciseID = load("guided-exercise-id.json")
         selectedGuidedSet = load("guided-set-selection.json")
         queuedNextGuidedSet = load("queued-guided-set.json")
-        exerciseSwaps = load("watch-exercise-swaps.json") ?? []
         if let s: HCTrainingClock = load("running-clock.json") { runClock = s }
         if let s: HCRunPlan = load("run-plan.json") { runPlan = s }
         if let s: [HCProgressRun] = load("run-history.json") { runHistory = s }
