@@ -42,6 +42,8 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
     @Published private(set) var guidedExerciseID: String?
     @Published private(set) var selectedGuidedSet: HCGuidedSetChoice?
     @Published private(set) var queuedNextGuidedSet: HCGuidedSetChoice?
+    @Published private(set) var exerciseSwaps: [HCExerciseSwap] = []
+    @Published private(set) var lastSwappedExercise: HCExercise?
     @Published private(set) var runClock: HCTrainingClock?
     @Published private(set) var status = "Ready to train"
     @Published private(set) var isRequestingSchedule = false
@@ -81,6 +83,7 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
         guidedExerciseID = load("guided-exercise-id.json")
         selectedGuidedSet = load("guided-set-selection.json")
         queuedNextGuidedSet = load("queued-guided-set.json")
+        exerciseSwaps = load("watch-exercise-swaps.json") ?? []
         if let s: HCTrainingClock = load("running-clock.json") { runClock = s }
         if let s: HCRunPlan = load("run-plan.json") { runPlan = s }
         if let s: [HCProgressRun] = load("run-history.json") { runHistory = s }
@@ -189,6 +192,51 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
         workout.exercises.allSatisfy {
             completedSets(for: $0).count >= $0.prescribedSets
         }
+    }
+
+    /// Replaces the planned slot without changing previous completed set names.
+    func swapExercise(_ exercise: HCExercise, to alternative: HCLibraryExercise) {
+        guard workout.id == liftClock?.workoutID || liftClock?.isActive != true,
+              HCMuscleAlternatives.primaryMuscle(for: exercise.name) ==
+                  HCMuscleAlternatives.primaryMuscle(for: alternative.name),
+              HCMuscleAlternatives.primaryMuscle(for: exercise.name) != "Other",
+              let index = workout.exercises.firstIndex(where: { $0.id == exercise.id }),
+              workout.exercises[index].name == exercise.name else { return }
+        if liftClock?.setExerciseID == exercise.id,
+           liftClock?.setStartedAt != nil {
+            cancelSet() // Cancel only the unlogged stopwatch, not completed sets.
+        }
+        let revised = HCMuscleAlternatives.replacing(exercise, with: alternative)
+        var list = workout.exercises
+        list[index] = revised
+        workout = HCWorkout(id: workout.id, date: workout.date,
+                            sessionKey: workout.sessionKey, title: workout.title,
+                            exercises: list, isPreview: workout.isPreview)
+        let event = HCExerciseSwap(id: UUID(), workoutID: workout.id,
+                                   workoutDate: workout.date,
+                                   exerciseID: exercise.id, previousName: exercise.name,
+                                   replacement: revised, createdAt: Date())
+        exerciseSwaps.append(event)
+        save(exerciseSwaps, name: "watch-exercise-swaps.json")
+        lastSwappedExercise = exercise
+        status = "\(revised.name) replaces \(exercise.name) · syncing to iPhone"
+        sendPending()
+        if let clock = liftClock, clock.isActive, !clock.isPaused,
+           clock.restEndsAt == nil, guidedExerciseID == exercise.id {
+            startSet(for: revised)
+        }
+    }
+
+    func undoLastExerciseSwap() {
+        guard let previous = lastSwappedExercise,
+              let current = workout.exercises.first(where: { $0.id == previous.id }),
+              current.name != previous.name else { return }
+        let revert = HCLibraryExercise(name: previous.name,
+                                       group: HCMuscleAlternatives.primaryMuscle(for: previous.name),
+                                       equipment: "Original plan", instructions: previous.instructions ?? "")
+        lastSwappedExercise = nil
+        swapExercise(current, to: revert)
+        lastSwappedExercise = nil
     }
 
     func selectGuidedSet(_ exercise: HCExercise, setNumber: Int) {
@@ -557,6 +605,7 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
             } else {
                 workout = schedule.workout?.date == schedule.date
                     ? schedule.workout! : .unscheduled(date: schedule.date)
+                reconcileExerciseSwaps()
                 if let selected = guidedExerciseID,
                    !workout.exercises.contains(where: { $0.id == selected }) {
                     guidedExerciseID = workout.exercises.first?.id
@@ -576,6 +625,32 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
             }
         }
         save(schedule, name: "latest-schedule.json")
+    }
+
+    private func reconcileExerciseSwaps() {
+        var unresolved: [HCExerciseSwap] = []
+        var exercises = workout.exercises
+        for change in exerciseSwaps.sorted(by: { $0.createdAt < $1.createdAt }) {
+            guard change.workoutID == workout.id,
+                  let idx = exercises.firstIndex(where: { $0.id == change.exerciseID })
+            else { continue }
+            if exercises[idx].name == change.replacement.name { continue }
+            if exercises[idx].name == change.previousName {
+                exercises[idx] = change.replacement
+                unresolved.append(change)
+            } else {
+                status = "Workout updated on iPhone · review substitutions"
+            }
+        }
+        if exercises != workout.exercises {
+            workout = HCWorkout(id: workout.id, date: workout.date,
+                                sessionKey: workout.sessionKey, title: workout.title,
+                                exercises: exercises, isPreview: workout.isPreview)
+        }
+        if unresolved.count != exerciseSwaps.count {
+            exerciseSwaps = unresolved
+            save(exerciseSwaps, name: "watch-exercise-swaps.json")
+        }
     }
 
     /// A manual Refresh must request NEW calendar data, not merely echo the
@@ -756,6 +831,9 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
             } else if kind == HCPayload.completedRun,
                       let run = try? decoder.decode(HCRunFinished.self, from: bytes) {
                 inFlight.insert(run.id)
+            } else if kind == HCPayload.exerciseSwap,
+                      let change = try? decoder.decode(HCExerciseSwap.self, from: bytes) {
+                inFlight.insert(change.id)
             }
         }
         var newTransfers = 0
@@ -797,6 +875,24 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
                 }, errorHandler: { _ in /* reliable background transfer remains */ })
             }
             queuedIDs.insert(run.id)
+            newTransfers += 1
+        }
+        for change in exerciseSwaps where !confirmedIDs.contains(change.id) &&
+            (!queuedIDs.contains(change.id) || (forceResend && !inFlight.contains(change.id))) {
+            guard let bytes = try? encoder.encode(change) else { continue }
+            let packet: [String: Any] = [
+                HCPayload.kind: HCPayload.exerciseSwap,
+                HCPayload.data: bytes
+            ]
+            session.transferUserInfo(packet)
+            if session.isReachable {
+                session.sendMessage(packet, replyHandler: { [weak self] reply in
+                    if reply["saved"] as? Bool == true {
+                        DispatchQueue.main.async { self?.markConfirmed(change.id) }
+                    }
+                }, errorHandler: { _ in /* offline transfer retained */ })
+            }
+            queuedIDs.insert(change.id)
             newTransfers += 1
         }
         save(Array(queuedIDs), name: "queued-ids.json")
