@@ -516,6 +516,8 @@ private struct WatchGuidedSession: View {
     @State private var reps = 8
     @State private var rir = 2
     @State private var readyHapticSent = false
+    @State private var showSetPicker = false
+    private let restPulse = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
     let onFinish: () -> Void
 
     private var current: HCExercise? { store.guidedExercise }
@@ -532,7 +534,7 @@ private struct WatchGuidedSession: View {
         store.liftClock?.setStartedAt != nil && !active
     }
     private var nextSetToken: String {
-        (current?.id ?? "none") + ":" + String(setCount)
+        (current?.id ?? "none") + ":" + String(store.guidedSetNumber) + ":" + String(setCount)
     }
 
     var body: some View {
@@ -559,7 +561,7 @@ private struct WatchGuidedSession: View {
                             .minimumScaleFactor(0.8)
                             .foregroundStyle(.white)
                         Spacer(minLength: 2)
-                        Text("\(setCount + 1)/\(current.prescribedSets)")
+                        Text("\(store.guidedSetNumber)/\(current.prescribedSets)")
                             .font(WTheme.metric(16))
                             .foregroundStyle(WTheme.lime)
                     }
@@ -585,6 +587,10 @@ private struct WatchGuidedSession: View {
                         quickSetControls(current)
                     }
 
+                    ProgressView(value: Double(store.guidedCompletedSets),
+                                 total: Double(max(1, store.workout.prescribedSetCount)))
+                        .tint(WTheme.lime)
+                        .accessibilityLabel("Workout progress")
                     HStack(spacing: 5) {
                         Text("\(store.guidedCompletedSets) / \(store.workout.prescribedSetCount) COMPLETED")
                             .font(WTheme.label(9))
@@ -601,15 +607,101 @@ private struct WatchGuidedSession: View {
                     }
                     .padding(.top, 3)
 
-                    // Secondary options are intentionally *below* the critical
-                    // editor so the first view remains a one-tap workflow.
-                    NavigationLink {
-                        WatchMovementPicker()
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            showSetPicker.toggle()
+                        }
                     } label: {
-                        Label("CHOOSE DIFFERENT EXERCISE", systemImage: "arrow.left.arrow.right")
-                            .font(WTheme.label(11))
+                        HStack {
+                            Image(systemName: "square.grid.2x2")
+                            Text(showSetPicker ? "HIDE SETS" : "CHOOSE ANY SET")
+                            Spacer()
+                            Image(systemName: showSetPicker ? "chevron.up" : "chevron.down")
+                        }
+                        .font(WTheme.label(11))
+                        .foregroundStyle(WTheme.aqua)
+                        .padding(12)
+                        .background(WTheme.panel, in: RoundedRectangle(cornerRadius: 12))
                     }
-                    .disabled(active || otherActive)
+                    .buttonStyle(.plain)
+                    if let queued = store.queuedNextGuidedSet,
+                       let next = store.workout.exercises.first(where: { $0.id == queued.exerciseID }) {
+                        Text("UP NEXT: \(next.name) · SET \(queued.setNumber)")
+                            .font(WTheme.label(10))
+                            .foregroundStyle(WTheme.aqua)
+                            .fixedSize(horizontal: false, vertical: true)
+                        if active {
+                            Button {
+                                store.switchToQueuedSetNow()
+                                readyHapticSent = false
+                                wHaptic(.click)
+                            } label: {
+                                Label("SWITCH NOW · NO SET LOGGED",
+                                      systemImage: "arrow.triangle.2.circlepath")
+                                    .font(WTheme.label(10))
+                                    .foregroundStyle(WTheme.amber)
+                                    .frame(maxWidth: .infinity, minHeight: 40)
+                                    .background(WTheme.panel,
+                                                in: RoundedRectangle(cornerRadius: 10))
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    if showSetPicker {
+                        VStack(alignment: .leading, spacing: 13) {
+                            Text("Pick any unfinished set. During your current set, a choice is queued next.")
+                                .font(.system(size: 10))
+                                .foregroundStyle(WTheme.muted)
+                            ForEach(store.workout.exercises) { movement in
+                                VStack(alignment: .leading, spacing: 7) {
+                                    HStack {
+                                        Text(movement.name)
+                                            .font(.system(size: 12, weight: .semibold))
+                                            .lineLimit(2)
+                                        Spacer(minLength: 4)
+                                        Text("\(store.completedSets(for: movement).count)/\(movement.prescribedSets)")
+                                            .font(WTheme.label(10))
+                                            .foregroundStyle(WTheme.muted)
+                                    }
+                                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 35),
+                                                                 spacing: 5)], spacing: 5) {
+                                        ForEach(Array(1...max(1, movement.prescribedSets)),
+                                                id: \.self) { number in
+                                            let done = store.completedSets(for: movement,
+                                                                          setNumber: number)
+                                            let chosen = (store.queuedNextGuidedSet?.exerciseID == movement.id &&
+                                                          store.queuedNextGuidedSet?.setNumber == number) ||
+                                                (!active && store.guidedExercise?.id == movement.id &&
+                                                 store.guidedSetNumber == number)
+                                            Button {
+                                                store.selectGuidedSet(movement, setNumber: number)
+                                                showSetPicker = false
+                                                readyHapticSent = false
+                                                wHaptic(.click)
+                                            } label: {
+                                                Image(systemName: done ? "checkmark" :
+                                                      chosen ? "arrow.forward" : "\(number).circle")
+                                                    .font(.system(size: 15, weight: .semibold))
+                                                    .foregroundStyle(chosen && !done ?
+                                                        WTheme.onAccent : done ? WTheme.muted : .white)
+                                                    .frame(maxWidth: .infinity, minHeight: 37)
+                                                    .background(chosen && !done ?
+                                                        WTheme.lime : WTheme.panel,
+                                                        in: RoundedRectangle(cornerRadius: 9))
+                                            }
+                                            .buttonStyle(.plain)
+                                            .disabled(done || movement.prescribedSets < 1)
+                                            .accessibilityLabel("\(movement.name) set \(number)" +
+                                                                (done ? ", completed" : ", choose next"))
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        .padding(8)
+                        .background(WTheme.bg.opacity(0.9),
+                                    in: RoundedRectangle(cornerRadius: 12))
+                    }
 
                     WQuickEditor(title: "RIR", value: "\(rir)",
                                  decrease: { rir = max(0, rir - 1) },
@@ -620,14 +712,27 @@ private struct WatchGuidedSession: View {
                         .foregroundStyle(WTheme.muted)
                 }
 
-                NavigationLink {
-                    WatchSessionOptions(onFinish: onFinish)
-                } label: {
-                    Label("PAUSE OR FINISH WORKOUT", systemImage: "slider.horizontal.3")
-                        .font(WTheme.label(11))
+                if store.liftClock?.isPaused != true && !active {
+                    Button {
+                        store.pauseLifting()
+                        health.pause()
+                    } label: {
+                        Label("PAUSE WORKOUT", systemImage: "pause.fill")
+                            .font(WTheme.label(11))
+                            .foregroundStyle(WTheme.muted)
+                            .frame(maxWidth: .infinity, minHeight: 42)
+                    }
+                    .buttonStyle(.plain)
                 }
-                .tint(WTheme.muted)
-                .padding(.top, 5)
+                if !active {
+                    Button(action: onFinish) {
+                        Label("FINISH WORKOUT", systemImage: "flag.checkered")
+                            .font(WTheme.label(11))
+                            .foregroundStyle(WTheme.muted)
+                            .frame(maxWidth: .infinity, minHeight: 43)
+                    }
+                    .buttonStyle(.plain)
+                }
             }
             .padding(.horizontal, 5)
             .padding(.bottom, 12)
@@ -636,6 +741,18 @@ private struct WatchGuidedSession: View {
         .background(WTheme.bg.ignoresSafeArea())
         .task(id: nextSetToken) {
             loadNextTargets()
+        }
+        .onReceive(restPulse) { _ in
+            guard let until = store.liftClock?.restEndsAt,
+                  until <= Date(), store.liftClock?.isPaused == false else { return }
+            store.advanceAfterRestIfReady()
+            if store.liftClock?.setStartedAt != nil && !readyHapticSent {
+                readyHapticSent = true
+                wHaptic(.notification)
+            }
+        }
+        .onAppear {
+            store.advanceAfterRestIfReady()
         }
     }
 
@@ -686,7 +803,7 @@ private struct WatchGuidedSession: View {
             } label: {
                 HStack(spacing: 7) {
                     Image(systemName: active ? "checkmark.circle.fill" : "play.fill")
-                    Text(active ? "END SET & SAVE" : "START SET \(setCount + 1)")
+                    Text(active ? "NEXT · SAVE SET" : "START SET \(store.guidedSetNumber)")
                         .lineLimit(1).minimumScaleFactor(0.8)
                 }
                 .font(.system(size: 16, weight: .heavy, design: .rounded))
@@ -704,7 +821,7 @@ private struct WatchGuidedSession: View {
 
     private func restPanel(seconds: TimeInterval) -> some View {
         VStack(alignment: .center, spacing: 6) {
-            Text("REST · NEXT SET READY SOON")
+            Text("RECOVERY · NEXT SET AUTO-STARTS")
                 .font(WTheme.label(10))
                 .foregroundStyle(WTheme.aqua)
             Text(wClock(seconds))

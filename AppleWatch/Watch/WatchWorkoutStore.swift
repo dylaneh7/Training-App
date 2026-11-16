@@ -12,6 +12,8 @@ struct HCTrainingClock: Codable {
     var finishedAt: Date?
     var setExerciseID: String?
     var setStartedAt: Date?
+    // Optional for backward-compatible clocks recorded before guided set picking.
+    var setNumber: Int? = nil
     var restEndsAt: Date?
     var splits: [HCRunSplit]? = nil
     var lastLapDistance: Double? = nil
@@ -26,6 +28,11 @@ struct HCTrainingClock: Codable {
     }
 }
 
+struct HCGuidedSetChoice: Codable, Equatable {
+    let exerciseID: String
+    let setNumber: Int
+}
+
 final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
     @Published private(set) var workout: HCWorkout = .unscheduled(date: WatchWorkoutStore.today())
     @Published private(set) var scheduleState = "loading"
@@ -38,6 +45,8 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
     @Published private(set) var completedRuns: [HCRunFinished] = []
     @Published private(set) var liftClock: HCTrainingClock?
     @Published private(set) var guidedExerciseID: String?
+    @Published private(set) var selectedGuidedSet: HCGuidedSetChoice?
+    @Published private(set) var queuedNextGuidedSet: HCGuidedSetChoice?
     @Published private(set) var runClock: HCTrainingClock?
     @Published private(set) var status = "Ready to train"
     @Published private(set) var isRequestingSchedule = false
@@ -75,6 +84,8 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
         if let s: [UUID] = load("confirmed-ids.json") { confirmedIDs = Set(s) }
         if let s: HCTrainingClock = load("lifting-clock.json") { liftClock = s }
         guidedExerciseID = load("guided-exercise-id.json")
+        selectedGuidedSet = load("guided-set-selection.json")
+        queuedNextGuidedSet = load("queued-guided-set.json")
         if let s: HCTrainingClock = load("running-clock.json") { runClock = s }
         if let s: HCRunPlan = load("run-plan.json") { runPlan = s }
         if let s: [HCProgressRun] = load("run-history.json") { runHistory = s }
@@ -107,21 +118,71 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
             .sorted { $0.index < $1.index }
     }
 
-    // MARK: - Guided strength session
+    // MARK: - One-screen, set-by-set strength workflow
 
-    /// The first unfinished movement is the default. Manual selection takes
-    /// priority until the final prescribed set is saved.
+    func completedSets(for exercise: HCExercise, setNumber: Int) -> Bool {
+        completedSets(for: exercise).contains(where: { $0.index == setNumber })
+    }
+
+    private func firstUnfinishedSet(in exercise: HCExercise) -> Int? {
+        guard exercise.prescribedSets > 0 else { return nil }
+        return (1...exercise.prescribedSets).first {
+            !completedSets(for: exercise, setNumber: $0)
+        }
+    }
+
+    private func validChoice(_ choice: HCGuidedSetChoice?) -> HCGuidedSetChoice? {
+        guard let choice,
+              let exercise = workout.exercises.first(where: { $0.id == choice.exerciseID }),
+              choice.setNumber >= 1, choice.setNumber <= exercise.prescribedSets,
+              !completedSets(for: exercise, setNumber: choice.setNumber) else { return nil }
+        return choice
+    }
+
+    private func recommendedChoice(after exerciseID: String? = nil) -> HCGuidedSetChoice? {
+        if let exerciseID,
+           let same = workout.exercises.first(where: { $0.id == exerciseID }),
+           let number = firstUnfinishedSet(in: same) {
+            return HCGuidedSetChoice(exerciseID: same.id, setNumber: number)
+        }
+        guard !workout.exercises.isEmpty else { return nil }
+        let start = workout.exercises.firstIndex(where: { $0.id == exerciseID }) ?? -1
+        for offset in 1...workout.exercises.count {
+            let item = workout.exercises[
+                (start + offset + workout.exercises.count) % workout.exercises.count
+            ]
+            if let number = firstUnfinishedSet(in: item) {
+                return HCGuidedSetChoice(exerciseID: item.id, setNumber: number)
+            }
+        }
+        return nil
+    }
+
+    /// An exercise may be chosen out of order. Every prescribed set number stays
+    /// unique and tied to its original exercise even when equipment is occupied.
     var guidedExercise: HCExercise? {
         if let activeID = liftClock?.setExerciseID {
             return workout.exercises.first(where: { $0.id == activeID })
         }
+        if let choice = validChoice(selectedGuidedSet) {
+            return workout.exercises.first(where: { $0.id == choice.exerciseID })
+        }
         if let selected = workout.exercises.first(where: { $0.id == guidedExerciseID }),
-           completedSets(for: selected).count < selected.prescribedSets {
+           firstUnfinishedSet(in: selected) != nil {
             return selected
         }
-        return workout.exercises.first(where: {
-            completedSets(for: $0).count < $0.prescribedSets
-        })
+        guard let next = recommendedChoice() else { return nil }
+        return workout.exercises.first(where: { $0.id == next.exerciseID })
+    }
+
+    var guidedSetNumber: Int {
+        if liftClock?.setStartedAt != nil, let number = liftClock?.setNumber {
+            return number
+        }
+        if let choice = validChoice(selectedGuidedSet) { return choice.setNumber }
+        if let movement = guidedExercise,
+           let number = firstUnfinishedSet(in: movement) { return number }
+        return 1
     }
 
     var guidedCompletedSets: Int {
@@ -135,23 +196,55 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
         }
     }
 
+    func selectGuidedSet(_ exercise: HCExercise, setNumber: Int) {
+        let candidate = HCGuidedSetChoice(exerciseID: exercise.id, setNumber: setNumber)
+        guard validChoice(candidate) != nil else { return }
+        if liftClock?.setStartedAt != nil {
+            // Don't discard a set already being performed: queue the choice for
+            // immediately after Next saves the active set.
+            queuedNextGuidedSet = candidate
+            save(candidate, name: "queued-guided-set.json")
+            status = "Set \(setNumber) of \(exercise.name) selected next"
+        } else {
+            selectedGuidedSet = candidate
+            guidedExerciseID = exercise.id
+            save(candidate, name: "guided-set-selection.json")
+            save(exercise.id, name: "guided-exercise-id.json")
+            status = "Set \(setNumber) of \(exercise.name) is next"
+        }
+    }
+
+    /// A busy machine may require changing the active set before it is done.
+    /// This intentionally abandons only its unrecorded timer, never a logged set.
+    func switchToQueuedSetNow() {
+        guard let choice = validChoice(queuedNextGuidedSet),
+              let exercise = workout.exercises.first(where: {
+                  $0.id == choice.exerciseID
+              }) else { return }
+        if liftClock?.setStartedAt != nil { cancelSet() }
+        queuedNextGuidedSet = nil
+        try? FileManager.default.removeItem(at:
+            directory.appendingPathComponent("queued-guided-set.json"))
+        selectGuidedSet(exercise, setNumber: choice.setNumber)
+        if let rest = liftClock?.restEndsAt, rest > Date() {
+            skipRest()
+        } else {
+            startSet(for: exercise)
+        }
+        status = "Switched to \(exercise.name) set \(choice.setNumber) without logging the previous set"
+    }
+
     func selectGuidedExercise(_ exercise: HCExercise) {
-        guard liftClock?.setStartedAt == nil,
-              workout.exercises.contains(where: { $0.id == exercise.id }) else { return }
-        guidedExerciseID = exercise.id
-        save(exercise.id, name: "guided-exercise-id.json")
+        guard let number = firstUnfinishedSet(in: exercise) else { return }
+        selectGuidedSet(exercise, setNumber: number)
     }
 
     func moveToNextGuidedExercise() {
-        guard liftClock?.setStartedAt == nil, !workout.exercises.isEmpty else { return }
-        let index = workout.exercises.firstIndex(where: { $0.id == guidedExerciseID }) ?? -1
-        for offset in 1...workout.exercises.count {
-            let nextIndex = (index + offset + workout.exercises.count) % workout.exercises.count
-            let next = workout.exercises[nextIndex]
-            if completedSets(for: next).count < next.prescribedSets {
-                selectGuidedExercise(next)
-                return
-            }
+        guard liftClock?.setStartedAt == nil else { return }
+        if let next = recommendedChoice(after: guidedExerciseID) {
+            selectGuidedSet(
+                workout.exercises.first(where: { $0.id == next.exerciseID })!,
+                setNumber: next.setNumber)
         }
     }
 
@@ -166,8 +259,16 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
             completedSets(for: $0).count < $0.prescribedSets
         })
         guidedExerciseID = first?.id
-        if let first { save(first.id, name: "guided-exercise-id.json") }
+        selectedGuidedSet = nil
+        queuedNextGuidedSet = nil
+        try? FileManager.default.removeItem(at: directory.appendingPathComponent("guided-set-selection.json"))
+        try? FileManager.default.removeItem(at: directory.appendingPathComponent("queued-guided-set.json"))
+        if let first {
+            save(first.id, name: "guided-exercise-id.json")
+        }
         save(liftClock, name: "lifting-clock.json")
+        // Pressing START WORKOUT starts the first working set immediately.
+        if let first { startSet(for: first) }
     }
 
     func pauseLifting() {
@@ -180,7 +281,12 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
 
     func resumeLifting() {
         guard var clock = liftClock, clock.isPaused, let paused = clock.pausedAt else { return }
-        clock.pausedSeconds += Date().timeIntervalSince(paused)
+        let pausedTime = Date().timeIntervalSince(paused)
+        clock.pausedSeconds += pausedTime
+        // Pausing the workout also pauses its prescribed recovery countdown.
+        if let rest = clock.restEndsAt {
+            clock.restEndsAt = rest.addingTimeInterval(pausedTime)
+        }
         clock.pausedAt = nil
         liftClock = clock
         save(clock, name: "lifting-clock.json")
@@ -195,6 +301,10 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
         clock.finishedAt = Date()
         clock.restEndsAt = nil
         liftClock = clock
+        selectedGuidedSet = nil
+        queuedNextGuidedSet = nil
+        try? FileManager.default.removeItem(at: directory.appendingPathComponent("guided-set-selection.json"))
+        try? FileManager.default.removeItem(at: directory.appendingPathComponent("queued-guided-set.json"))
         save(clock, name: "lifting-clock.json")
         if let latestSchedule { applySchedule(latestSchedule) }
         invalidatePreviousDayIfNeeded()
@@ -204,8 +314,17 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
 
     func startSet(for exercise: HCExercise) {
         guard var clock = liftClock, clock.isActive, !clock.isPaused,
-              clock.setStartedAt == nil, clock.workoutID == workout.id else { return }
+              clock.setStartedAt == nil, clock.workoutID == workout.id,
+              !guidedAllFinished else { return }
+        if let until = clock.restEndsAt, until > Date() { return }
+        let choice: HCGuidedSetChoice
+        if let chosen = validChoice(selectedGuidedSet), chosen.exerciseID == exercise.id {
+            choice = chosen
+        } else if let number = firstUnfinishedSet(in: exercise) {
+            choice = HCGuidedSetChoice(exerciseID: exercise.id, setNumber: number)
+        } else { return }
         clock.setExerciseID = exercise.id
+        clock.setNumber = choice.setNumber
         guidedExerciseID = exercise.id
         save(exercise.id, name: "guided-exercise-id.json")
         clock.setStartedAt = Date()
@@ -214,21 +333,37 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
         save(clock, name: "lifting-clock.json")
     }
 
+    /// Rest uses wall-clock time so the next set can start after wrist-down
+    /// or an app re-launch. A timer drives this while the screen is visible.
+    func advanceAfterRestIfReady() {
+        guard let clock = liftClock, clock.isActive, !clock.isPaused,
+              clock.setStartedAt == nil, !guidedAllFinished,
+              (clock.restEndsAt == nil || clock.restEndsAt! <= Date()) else { return }
+        guard let next = guidedExercise else { return }
+        startSet(for: next)
+    }
+
     func cancelSet() {
         guard var clock = liftClock, clock.setStartedAt != nil else { return }
         clock.setStartedAt = nil
         clock.setExerciseID = nil
+        clock.setNumber = nil
         liftClock = clock
         save(clock, name: "lifting-clock.json")
     }
 
-    func stopSet(for exercise: HCExercise, weightLb: Double?, reps: Int, rir: Double?) -> Bool {
+    @discardableResult
+    func stopSet(for exercise: HCExercise, weightLb: Double?, reps: Int,
+                 rir: Double?) -> Bool {
         guard var clock = liftClock, clock.isActive, !clock.isPaused,
-              clock.setExerciseID == exercise.id, let started = clock.setStartedAt,
+              clock.setExerciseID == exercise.id,
+              let started = clock.setStartedAt,
               reps > 0, reps <= 300,
               weightLb == nil || (weightLb! >= 0 && weightLb! <= 3000),
-              rir == nil || ((rir! >= 0) && (rir! <= 10))
-        else { return false }
+              rir == nil || ((rir! >= 0) && (rir! <= 10)) else { return false }
+        let setNumber = clock.setNumber ?? guidedSetNumber
+        guard setNumber > 0, setNumber <= exercise.prescribedSets,
+              !completedSets(for: exercise, setNumber: setNumber) else { return false }
 
         let now = Date()
         var entry = HCLoggedSet(
@@ -240,7 +375,7 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
             exerciseID: exercise.id,
             exerciseName: exercise.name,
             exerciseIndex: exercise.exerciseIndex,
-            index: completedSets(for: exercise).count + 1,
+            index: setNumber,
             weightLb: weightLb,
             reps: reps,
             rir: rir,
@@ -253,21 +388,32 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
 
         clock.setExerciseID = nil
         clock.setStartedAt = nil
-        let remaining = workout.exercises.contains { movement in
-            let count = completedSets(for: movement).count
-            return count < movement.prescribedSets
+        clock.setNumber = nil
+
+        let queued = validChoice(queuedNextGuidedSet)
+        let next = queued ?? recommendedChoice(after: exercise.id)
+        queuedNextGuidedSet = nil
+        try? FileManager.default.removeItem(at: directory.appendingPathComponent("queued-guided-set.json"))
+        if let next {
+            selectedGuidedSet = next
+            guidedExerciseID = next.exerciseID
+            save(next, name: "guided-set-selection.json")
+            save(next.exerciseID, name: "guided-exercise-id.json")
+        } else {
+            selectedGuidedSet = nil
+            try? FileManager.default.removeItem(at:
+                directory.appendingPathComponent("guided-set-selection.json"))
         }
+
         let override = UserDefaults.standard.integer(forKey: "hcRestOverrideSeconds")
-        let restSeconds = override > 0 ? override : exercise.restSeconds
-        clock.restEndsAt = remaining ? now.addingTimeInterval(Double(restSeconds)) : nil
+        let seconds = override > 0 ? override : exercise.restSeconds
+        clock.restEndsAt = next != nil && seconds > 0 ?
+            now.addingTimeInterval(Double(seconds)) : nil
         liftClock = clock
-        // Present the next remaining set automatically when the rest expires.
-        // If this movement has more sets, it stays selected.
-        if completedSets(for: exercise).count >= exercise.prescribedSets {
-            moveToNextGuidedExercise()
-        }
         save(clock, name: "lifting-clock.json")
         sendPending()
+        // No second tap is needed when no rest was prescribed.
+        if seconds <= 0 { advanceAfterRestIfReady() }
         return true
     }
 
@@ -276,6 +422,7 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
         clock.restEndsAt = nil
         liftClock = clock
         save(clock, name: "lifting-clock.json")
+        advanceAfterRestIfReady()
     }
 
     // MARK: - Separate running clock and synced run summary
