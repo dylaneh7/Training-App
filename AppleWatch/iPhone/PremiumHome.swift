@@ -313,12 +313,15 @@ private struct PremiumStrengthPage: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 19) {
                 HCSectionTitle(title: "Weightlifting", detail: aggressive ? "Coached session" : "Today's plan")
-                HCSyncStatus(pending: coach.cloudPendingCount,
-                             saving: coach.savingPlan, connected: coach.signedIn)
+                if coach.phoneSessionStartedAt == nil {
+                    HCSyncStatus(pending: coach.cloudPendingCount,
+                                 saving: coach.savingPlan, connected: coach.signedIn)
+                }
 
                 if !coach.signedIn { PremiumLogin() }
 
                 if let plan {
+                    if coach.phoneSessionStartedAt == nil {
                     HCCard(accent: HCDesign.electric) {
                         VStack(alignment: .leading, spacing: 17) {
                             HCAccentTag(title: "TODAY'S PROGRAM", color: HCDesign.electric)
@@ -386,11 +389,12 @@ private struct PremiumStrengthPage: View {
                             }
                         }
                     }
-                    if coach.phoneSessionStartedAt != nil {
+                    } else {
                         PremiumPhoneGuidedWorkout()
                     }
+                    if coach.phoneSessionStartedAt == nil {
                     HCSectionTitle(title: "Workout lineup",
-                                   detail: "Choose a set or swap a movement")
+                                   detail: "Preview or swap movements before starting")
                     ForEach(plan.exercises.indices, id: \.self) { index in
                         let exercise = plan.exercises[index]
                         VStack(spacing: 5) {
@@ -423,6 +427,7 @@ private struct PremiumStrengthPage: View {
                     }
                     HCOutlineButton(title: "Add or rearrange exercises", icon: "plus") {
                         showEditor = true
+                    }
                     }
                 } else {
                     HCCard {
@@ -548,6 +553,7 @@ private struct PremiumPhoneGuidedWorkout: View {
     @State private var hasWeight = false
     @State private var showAllSets = false
     @State private var swapTarget: HCExercise?
+    @State private var confirmFinish = false
     private let pulse = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
 
     private var current: HCExercise? { coach.phoneGuidedExercise }
@@ -740,7 +746,20 @@ private struct PremiumPhoneGuidedWorkout: View {
                                     in: RoundedRectangle(cornerRadius: 13))
                     }
                 }
+                if !active {
+                    HCOutlineButton(title: "Finish workout",
+                                    icon: "flag.checkered") {
+                        confirmFinish = true
+                    }
+                }
             }
+        }
+        .confirmationDialog("Finish this workout?",
+                            isPresented: $confirmFinish) {
+            Button("Finish Workout") { coach.finishPhoneWorkout() }
+            Button("Keep Training", role: .cancel) {}
+        } message: {
+            Text("Completed sets remain in your history.")
         }
         .task(id: token) { loadTargets() }
         .onAppear { coach.advancePhoneAfterRestIfReady() }
