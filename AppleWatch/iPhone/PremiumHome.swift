@@ -49,8 +49,8 @@ struct PremiumHomeView: View {
                 .tabItem { Label("Health", systemImage: "heart.text.square.fill") }
             NavigationStack { PremiumCoachPage() }
                 .tabItem { Label("Coach", systemImage: "bubble.left.and.text.bubble.right") }
-            NavigationStack { IMUNMotivationPage() }
-                .tabItem { Label("Mindset", systemImage: "book.closed.fill") }
+            NavigationStack { IMUNDesignStudioPage() }
+                .tabItem { Label("Studio", systemImage: "paintpalette.fill") }
         }
         .tint(HCDesign.electric)
         .preferredColorScheme(IMUNStyle.preferredScheme)
