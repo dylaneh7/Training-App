@@ -2807,8 +2807,19 @@ private struct PremiumSettingsPage: View {
                             coach.retryPendingWorkout()
                             coach.retryPendingCloudSets()
                         }
-                        HCOutlineButton(title: "Send current plan to watch", icon: "applewatch") {
-                            coach.sendToWatch()
+                        HCOutlineButton(title: "Refresh & send workout to Watch",
+                                        icon: "applewatch") {
+                            coach.refreshAndSendToWatch()
+                        }
+                        Text(coach.watchSyncStatus)
+                            .font(.caption2)
+                            .foregroundStyle(HCDesign.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                        if let confirmed = coach.watchLastAcknowledgedAt {
+                            Text("Watch confirmed receipt " +
+                                 confirmed.formatted(date: .omitted, time: .shortened))
+                                .font(.caption2)
+                                .foregroundStyle(HCDesign.good)
                         }
                         if !coach.signedIn {
                             PremiumLogin()

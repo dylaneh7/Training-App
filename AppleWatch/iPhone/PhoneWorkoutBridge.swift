@@ -23,6 +23,10 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
     @Published private(set) var recoveryHistory: [HCRecoveryDatum] = []
     @Published private(set) var performanceHistory: [HCPerformanceSet] = []
     @Published private(set) var status = "Preparing Health Coach…"
+    @Published private(set) var watchSyncStatus = "Waiting for Watch connection"
+    @Published private(set) var watchLastAcknowledgedAt: Date?
+    private var sendAfterCalendarRefresh = false
+    private var sendWhenWatchActivated = false
     @Published private(set) var signedIn = false
     @Published private(set) var loading = false
     @Published private(set) var savingPlan = false
@@ -254,7 +258,9 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
                     self.loading = false
                     self.status = active == nil ? "No strength session on this date." :
                         "Workout ready: \(active!.title)"
-                    self.sendToWatch()
+                    let queueOnCompletion = self.sendAfterCalendarRefresh
+                    self.sendAfterCalendarRefresh = false
+                    self.sendToWatch(forceQueue: queueOnCompletion)
                     self.retryPendingCloudSets()
                     self.retryPendingWorkout()
                 }
@@ -272,9 +278,22 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
     /// Lightweight calendar check for interactive Watch refresh and foreground
     /// polling. Unlike full refresh, this does not re-download all historical
     /// runs, recovery and recorded sets every minute.
-    func refreshTodaySchedule() {
-        guard signedIn, !loading, !scheduleRefreshing else { return }
+    func refreshTodaySchedule(forceWatchDelivery: Bool = false) {
+        guard signedIn else {
+            if forceWatchDelivery { watchSyncStatus = "Sign in to sync today's workout" }
+            return
+        }
+        guard !loading, !scheduleRefreshing else {
+            if forceWatchDelivery {
+                sendAfterCalendarRefresh = true
+                watchSyncStatus = "Finishing current workout refresh…"
+            }
+            return
+        }
         scheduleRefreshing = true
+        if forceWatchDelivery {
+            watchSyncStatus = "Refreshing today's workout from Command Center…"
+        }
         let day = HCPlanBuilder.dateString(Date())
         Task {
             do {
@@ -294,15 +313,30 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
                     self.plannedSessions = HCPlanBuilder.upcomingWithRotation(from: snapshot.planner)
                     self.save(self.plannedSessions, name: "imun-planned-workouts.json")
                     self.confirmedScheduleDate = day
-                    self.sendToWatch()
+                    let manualDelivery = forceWatchDelivery || self.sendAfterCalendarRefresh
+                    self.sendAfterCalendarRefresh = false
+                    self.sendToWatch(forceQueue: manualDelivery)
                 }
             } catch {
                 DispatchQueue.main.async {
                     self.scheduleRefreshing = false
+                    if forceWatchDelivery || self.sendAfterCalendarRefresh {
+                        self.watchSyncStatus = "Couldn't refresh the training plan: " +
+                            error.localizedDescription
+                        self.sendAfterCalendarRefresh = false
+                    }
                     self.status = "Calendar refresh failed; last confirmed plan preserved."
                 }
             }
         }
+    }
+
+    func refreshAndSendToWatch() {
+        guard signedIn else {
+            watchSyncStatus = "Sign in to send your workout to Watch"
+            return
+        }
+        refreshTodaySchedule(forceWatchDelivery: true)
     }
 
     /// Move a scheduled workout without asking the coach. The RPC updates the
@@ -581,24 +615,91 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
             result.routePoints = []
             return result
         }
-        context[HCPayload.runHistory] = try encoder.encode(summaries)
-        if let recent = recoveryHistory.first {
-            context["hcRecoverySnapshot"] = try encoder.encode(recent)
+        // Optional history must never prevent delivery of today's actual workout.
+        // WCSession interactive messages also have tight payload size limits.
+        if let history = try? encoder.encode(summaries), history.count < 40_000 {
+            context[HCPayload.runHistory] = history
+        }
+        if let recent = recoveryHistory.first,
+           let snapshot = try? encoder.encode(recent), snapshot.count < 16_000 {
+            context["hcRecoverySnapshot"] = snapshot
         }
         return context
     }
 
-    func sendToWatch() {
-        guard WCSession.isSupported() else { return }
-        let connection = WCSession.default
-        guard connection.activationState == .activated,
-              connection.isPaired, connection.isWatchAppInstalled else { return }
-        do {
-            try connection.updateApplicationContext(watchContext())
-            status = "Today's iPhone schedule sent to Watch."
-        } catch {
-            status = "Watch transfer failed: \(error.localizedDescription)"
+    /// A context update is a *pending delivery*, not proof of Watch receipt.
+    /// Live messages get a reply; manual sends fall back to a reliable background
+    /// transfer. All forms carry the same date-scoped schedule snapshot.
+    func sendToWatch(forceQueue: Bool = false) {
+        guard WCSession.isSupported() else {
+            watchSyncStatus = "Watch connectivity unavailable on this iPhone"
+            return
         }
+        let connection = WCSession.default
+        guard connection.activationState == .activated else {
+            sendWhenWatchActivated = true
+            if forceQueue { sendAfterCalendarRefresh = true }
+            watchSyncStatus = "Preparing the Watch connection…"
+            connection.activate()
+            return
+        }
+        guard connection.isPaired, connection.isWatchAppInstalled else {
+            watchSyncStatus = "Install and open imun on your paired Apple Watch"
+            return
+        }
+        do {
+            let current = try watchContext()
+            try connection.updateApplicationContext(current)
+            var packet = current
+            packet[HCPayload.kind] = HCPayload.pushSchedule
+            if connection.isReachable {
+                connection.sendMessage(packet, replyHandler: { [weak self] reply in
+                    DispatchQueue.main.async {
+                        guard let self else { return }
+                        if reply["received"] as? Bool == true {
+                            self.watchLastAcknowledgedAt = Date()
+                            self.watchSyncStatus = "Watch received today's plan"
+                        } else if forceQueue {
+                            self.queueWatchDelivery(packet)
+                        } else {
+                            self.watchSyncStatus = "Watch sync pending"
+                        }
+                    }
+                }, errorHandler: { [weak self] error in
+                    DispatchQueue.main.async {
+                        guard let self else { return }
+                        if forceQueue {
+                            self.queueWatchDelivery(packet)
+                        } else {
+                            self.watchSyncStatus = "Saved for Watch: " + error.localizedDescription
+                        }
+                    }
+                })
+                watchSyncStatus = "Sending today's plan to Watch…"
+            } else if forceQueue {
+                queueWatchDelivery(packet)
+            } else {
+                watchSyncStatus = "Plan ready · waiting for Watch to connect"
+            }
+        } catch {
+            watchSyncStatus = "Couldn't prepare Watch sync: " + error.localizedDescription
+        }
+    }
+
+    private func queueWatchDelivery(_ packet: [String: Any]) {
+        let connection = WCSession.default
+        guard connection.activationState == .activated else { return }
+        // A manual queue is used only on demand; regular calendar polling
+        // uses replaceable application context instead of accumulating events.
+        let hasIdenticalPending = connection.outstandingUserInfoTransfers.contains {
+            transfer in
+            guard (transfer.userInfo[HCPayload.kind] as? String) == HCPayload.pushSchedule,
+                  let queued = transfer.userInfo[HCPayload.schedule] as? Data,
+                  let next = packet[HCPayload.schedule] as? Data else { return false }
+            return queued == next
+        }
+        if !hasIdenticalPending { connection.transferUserInfo(packet) }
+        watchSyncStatus = "Queued for Watch · open imun on both devices"
     }
 
     func startPhoneWorkout() {
@@ -742,12 +843,29 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
         }
     }
 
+    private func confirmWatchRecord(_ id: UUID) {
+        guard WCSession.isSupported(),
+              WCSession.default.activationState == .activated,
+              WCSession.default.isPaired,
+              WCSession.default.isWatchAppInstalled else { return }
+        WCSession.default.transferUserInfo([
+            HCPayload.kind: HCPayload.syncReceipt,
+            "recordID": id.uuidString
+        ])
+    }
+
     // MARK: - Watch Connectivity
 
     func session(_ session: WCSession, activationDidCompleteWith state: WCSessionActivationState, error: Error?) {
         DispatchQueue.main.async {
             if state == .activated {
-                self.sendToWatch()
+                let queuePending = self.sendAfterCalendarRefresh
+                self.sendAfterCalendarRefresh = false
+                self.sendWhenWatchActivated = false
+                self.sendToWatch(forceQueue: queuePending)
+                if self.signedIn && self.confirmedScheduleDate != HCPlanBuilder.dateString(Date()) {
+                    self.refreshTodaySchedule(forceWatchDelivery: queuePending)
+                }
                 self.retryPendingCloudSets()
             } else if let error {
                 self.status = "Watch not ready: \(error.localizedDescription)"
@@ -762,10 +880,22 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
         }
         if kind == HCPayload.requestSchedule {
             DispatchQueue.main.async {
-                // A quick reply repairs the Watch UI; the cloud refresh that follows
-                // sends a new application context if the schedule changed elsewhere.
-                replyHandler((try? self.watchContext()) ?? [:])
-                if self.signedIn && !self.loading { self.refreshTodaySchedule() }
+                // Reply promptly with the last confirmed date-scoped snapshot,
+                // then push a *fresh* cloud result as soon as it loads.
+                var reply = (try? self.watchContext()) ?? [:]
+                reply["refreshing"] = self.signedIn
+                replyHandler(reply)
+                if self.signedIn {
+                    self.refreshTodaySchedule(forceWatchDelivery:
+                        message["forceRefresh"] as? Bool ?? false)
+                }
+            }
+            return
+        }
+        if kind == HCPayload.syncRequest {
+            DispatchQueue.main.async {
+                self.retryPendingCloudSets()
+                replyHandler(["saved": true])
             }
             return
         }
@@ -799,15 +929,27 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
     func sessionDidDeactivate(_ session: WCSession) { session.activate() }
 
     func session(_ session: WCSession, didReceiveUserInfo userInfo: [String: Any] = [:]) {
+        if userInfo[HCPayload.kind] as? String == HCPayload.requestSchedule {
+            DispatchQueue.main.async {
+                self.refreshTodaySchedule(forceWatchDelivery: true)
+            }
+            return
+        }
         guard let kind = userInfo[HCPayload.kind] as? String,
               let payload = userInfo[HCPayload.data] as? Data else { return }
         switch kind {
         case HCPayload.loggedSet:
             guard let item = try? decoder.decode(HCLoggedSet.self,from:payload) else { return }
-            DispatchQueue.main.async { self.acceptSet(item) }
+            DispatchQueue.main.async {
+                self.acceptSet(item)
+                self.confirmWatchRecord(item.id)
+            }
         case HCPayload.completedRun:
             guard let item = try? decoder.decode(HCRunFinished.self,from:payload) else { return }
-            DispatchQueue.main.async { self.acceptRun(item) }
+            DispatchQueue.main.async {
+                self.acceptRun(item)
+                self.confirmWatchRecord(item.id)
+            }
         default: break
         }
     }

@@ -40,10 +40,14 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
     @Published private(set) var guidedExerciseID: String?
     @Published private(set) var runClock: HCTrainingClock?
     @Published private(set) var status = "Ready to train"
+    @Published private(set) var isRequestingSchedule = false
+    @Published private(set) var lastPhoneAcknowledgement: Date?
+    private var pendingManualScheduleRequest = false
 
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
     private var queuedIDs: Set<UUID> = []
+    private var confirmedIDs: Set<UUID> = []
     private var latestSchedule: HCWatchSchedule?
 
     static func today() -> String {
@@ -68,6 +72,7 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
         }
         if let s: [HCLoggedSet] = load("sets.json") { sets = s }
         if let s: [UUID] = load("queued-ids.json") { queuedIDs = Set(s) }
+        if let s: [UUID] = load("confirmed-ids.json") { confirmedIDs = Set(s) }
         if let s: HCTrainingClock = load("lifting-clock.json") { liftClock = s }
         guidedExerciseID = load("guided-exercise-id.json")
         if let s: HCTrainingClock = load("running-clock.json") { runClock = s }
@@ -398,6 +403,7 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
         if let previous = latestSchedule, previous.date == schedule.date,
            previous.generatedAt > schedule.generatedAt { return }
         latestSchedule = schedule
+        isRequestingSchedule = false
         scheduleState = schedule.state
         scheduleUpdatedAt = schedule.generatedAt
         if schedule.state == "ready" {
@@ -430,24 +436,120 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
         save(schedule, name: "latest-schedule.json")
     }
 
-    func requestCurrentSchedule() {
+    /// A manual Refresh must request NEW calendar data, not merely echo the
+    /// last context. Queue an offline request when live messaging is unavailable.
+    func requestCurrentSchedule(manual: Bool = false) {
         invalidatePreviousDayIfNeeded()
-        guard WCSession.isSupported(),
-              WCSession.default.activationState == .activated else { return }
+        guard WCSession.isSupported() else {
+            status = "iPhone sync isn't supported on this Watch."
+            isRequestingSchedule = false
+            return
+        }
         let session = WCSession.default
+        if manual {
+            isRequestingSchedule = true
+            status = "Checking iPhone for your latest workout…"
+        }
+        guard session.activationState == .activated else {
+            if manual { pendingManualScheduleRequest = true }
+            status = "Connecting to iPhone…"
+            session.activate()
+            return
+        }
+        let request: [String: Any] = [
+            HCPayload.kind: HCPayload.requestSchedule,
+            "forceRefresh": manual
+        ]
         if session.isReachable {
-            session.sendMessage([HCPayload.kind: HCPayload.requestSchedule],
-                                replyHandler: { [weak self] response in
-                DispatchQueue.main.async { self?.applyContext(response) }
+            session.sendMessage(request, replyHandler: { [weak self] response in
+                DispatchQueue.main.async {
+                    guard let self else { return }
+                    self.isRequestingSchedule = false
+                    self.applyContext(response)
+                    if response["refreshing"] as? Bool == true {
+                        self.status = "Checking Command Center for today's plan…"
+                    }
+                }
+            }, errorHandler: { [weak self] error in
+                DispatchQueue.main.async {
+                    guard let self else { return }
+                    if manual {
+                        self.queueScheduleRequest(session)
+                    } else {
+                        self.status = "iPhone not reachable · " + error.localizedDescription
+                    }
+                }
+            })
+        } else if manual {
+            queueScheduleRequest(session)
+        } else {
+            status = scheduleState == "ready" ?
+                "Showing last confirmed plan · iPhone offline" :
+                "Open imun on iPhone for today's workout"
+        }
+    }
+
+    private func queueScheduleRequest(_ session: WCSession) {
+        guard session.activationState == .activated else {
+            pendingManualScheduleRequest = true
+            status = "Waiting to connect to iPhone…"
+            return
+        }
+        let alreadyQueued = session.outstandingUserInfoTransfers.contains { transfer in
+            (transfer.userInfo[HCPayload.kind] as? String) == HCPayload.requestSchedule
+        }
+        if !alreadyQueued {
+            session.transferUserInfo([
+                HCPayload.kind: HCPayload.requestSchedule,
+                "forceRefresh": true,
+                "requestedAt": Date()
+            ])
+        }
+        isRequestingSchedule = false
+        status = "Refresh queued · open imun on your iPhone to receive it"
+    }
+
+    private func markConfirmed(_ id: UUID) {
+        guard !confirmedIDs.contains(id) else { return }
+        confirmedIDs.insert(id)
+        save(Array(confirmedIDs), name: "confirmed-ids.json")
+        lastPhoneAcknowledgement = Date()
+        status = "Workout received by iPhone"
+    }
+
+    /// A real Send to iPhone action: immediately retry any watch workouts that
+    /// have no outstanding transfer, even if previously marked as queued.
+    func sendToPhone() {
+        guard WCSession.isSupported() else {
+            status = "Watch-to-iPhone sync is unavailable."
+            return
+        }
+        let session = WCSession.default
+        guard session.activationState == .activated else {
+            status = "Connecting to iPhone…"
+            session.activate()
+            return
+        }
+        sendPending(forceResend: true)
+        if session.isReachable {
+            session.sendMessage([HCPayload.kind: HCPayload.syncRequest],
+                                replyHandler: { [weak self] reply in
+                DispatchQueue.main.async {
+                    guard let self else { return }
+                    if reply["saved"] as? Bool == true {
+                        self.lastPhoneAcknowledgement = Date()
+                        self.status = "iPhone connected · awaiting workout receipts"
+                    } else {
+                        self.status = "Waiting for iPhone to accept workout data"
+                    }
+                }
             }, errorHandler: { [weak self] _ in
                 DispatchQueue.main.async {
-                    self?.status = "iPhone unavailable · last confirmed schedule shown"
+                    self?.status = "Workouts queued · open imun on your iPhone"
                 }
             })
         } else {
-            status = scheduleState == "ready" ?
-                "iPhone offline · last confirmed schedule shown" :
-                "Open imun on iPhone to sync today's plan"
+            status = "Workouts queued · open imun on your iPhone"
         }
     }
 
@@ -498,40 +600,67 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
         }
     }
 
-    private func sendPending() {
+    private func sendPending(forceResend: Bool = false) {
         guard WCSession.isSupported(),
               WCSession.default.activationState == .activated else { return }
         let session = WCSession.default
-        for entry in sets where !queuedIDs.contains(entry.id) {
+        var inFlight = Set<UUID>()
+        for transfer in session.outstandingUserInfoTransfers {
+            guard let kind = transfer.userInfo[HCPayload.kind] as? String,
+                  let bytes = transfer.userInfo[HCPayload.data] as? Data else { continue }
+            if kind == HCPayload.loggedSet,
+               let item = try? decoder.decode(HCLoggedSet.self, from: bytes) {
+                inFlight.insert(item.id)
+            } else if kind == HCPayload.completedRun,
+                      let run = try? decoder.decode(HCRunFinished.self, from: bytes) {
+                inFlight.insert(run.id)
+            }
+        }
+        var newTransfers = 0
+        for entry in sets where !confirmedIDs.contains(entry.id) &&
+            (!queuedIDs.contains(entry.id) ||
+             (forceResend && !inFlight.contains(entry.id))) {
             guard let bytes = try? encoder.encode(entry) else { continue }
-            let packet: [String: Any] = [HCPayload.kind: HCPayload.loggedSet,
-                                         HCPayload.data: bytes]
+            let packet: [String: Any] = [
+                HCPayload.kind: HCPayload.loggedSet, HCPayload.data: bytes
+            ]
             session.transferUserInfo(packet)
             if session.isReachable {
                 session.sendMessage(packet, replyHandler: { [weak self] reply in
                     if reply["saved"] as? Bool == true {
-                        DispatchQueue.main.async { self?.status = "Set synced to iPhone" }
+                        DispatchQueue.main.async {
+                            self?.markConfirmed(entry.id)
+                        }
                     }
-                }, errorHandler: { _ in /* background queue will deliver it */ })
+                }, errorHandler: { _ in /* reliable background transfer remains */ })
             }
             queuedIDs.insert(entry.id)
+            newTransfers += 1
         }
-        for run in completedRuns where !queuedIDs.contains(run.id) {
+        for run in completedRuns where !confirmedIDs.contains(run.id) &&
+            (!queuedIDs.contains(run.id) ||
+             (forceResend && !inFlight.contains(run.id))) {
             guard let bytes = try? encoder.encode(run) else { continue }
-            let packet: [String: Any] = [HCPayload.kind: HCPayload.completedRun,
-                                         HCPayload.data: bytes]
+            let packet: [String: Any] = [
+                HCPayload.kind: HCPayload.completedRun, HCPayload.data: bytes
+            ]
             session.transferUserInfo(packet)
             if session.isReachable {
                 session.sendMessage(packet, replyHandler: { [weak self] reply in
                     if reply["saved"] as? Bool == true {
-                        DispatchQueue.main.async { self?.status = "Run synced to iPhone" }
+                        DispatchQueue.main.async {
+                            self?.markConfirmed(run.id)
+                        }
                     }
-                }, errorHandler: { _ in /* background queue will deliver it */ })
+                }, errorHandler: { _ in /* reliable background transfer remains */ })
             }
             queuedIDs.insert(run.id)
+            newTransfers += 1
         }
         save(Array(queuedIDs), name: "queued-ids.json")
-        status = "Saved locally · queued for iPhone"
+        if newTransfers > 0 {
+            status = "\(newTransfers) workout item(s) queued for iPhone"
+        }
     }
 
     func session(_ session: WCSession,
@@ -540,7 +669,9 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
         if state == .activated {
             DispatchQueue.main.async {
                 self.sendPending()
-                self.requestCurrentSchedule()
+                let manual = self.pendingManualScheduleRequest
+                self.pendingManualScheduleRequest = false
+                self.requestCurrentSchedule(manual: manual)
             }
         } else if let error {
             DispatchQueue.main.async { self.status = error.localizedDescription }
@@ -551,7 +682,28 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
         applyContext(context)
     }
 
+    func session(_ session: WCSession, didReceiveMessage message: [String: Any],
+                 replyHandler: @escaping ([String: Any]) -> Void) {
+        if message[HCPayload.kind] as? String == HCPayload.pushSchedule {
+            applyContext(message)
+            replyHandler(["received": true])
+        } else {
+            replyHandler(["received": false])
+        }
+    }
+
     func session(_ session: WCSession, didReceiveUserInfo userInfo: [String: Any] = [:]) {
+        if userInfo[HCPayload.kind] as? String == HCPayload.pushSchedule {
+            applyContext(userInfo)
+            return
+        }
+        if userInfo[HCPayload.kind] as? String == HCPayload.syncReceipt {
+            if let raw = userInfo["recordID"] as? String,
+               let id = UUID(uuidString: raw) {
+                DispatchQueue.main.async { self.markConfirmed(id) }
+            }
+            return
+        }
         guard userInfo[HCPayload.kind] as? String == "correctedSet",
               let bytes = userInfo[HCPayload.data] as? Data,
               let corrected = try? decoder.decode(HCLoggedSet.self, from: bytes) else { return }

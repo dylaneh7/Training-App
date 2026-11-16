@@ -278,8 +278,27 @@ struct WatchWorkoutView: View {
                             Text("Synced " + last.formatted(date: .omitted, time: .shortened))
                                 .font(WTheme.label(10)).foregroundStyle(WTheme.aqua)
                         }
-                        Button("Refresh from iPhone") { store.requestCurrentSchedule() }
-                            .font(.system(size: 11))
+                        HStack(spacing: 8) {
+                            Button {
+                                store.requestCurrentSchedule(manual: true)
+                            } label: {
+                                Label(store.isRequestingSchedule ? "Checking…" : "Refresh",
+                                      systemImage: "arrow.clockwise")
+                            }
+                            .disabled(store.isRequestingSchedule)
+                            Button {
+                                store.sendToPhone()
+                            } label: {
+                                Label("Send to iPhone", systemImage: "iphone.gen3")
+                            }
+                        }
+                        .font(.system(size: 11, weight: .semibold))
+                        .buttonStyle(.bordered)
+                        .tint(WTheme.aqua)
+                        Text(store.status)
+                            .font(.system(size: 10))
+                            .foregroundStyle(WTheme.muted)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                 }
                 if let recovery = store.recoverySummary {
@@ -437,8 +456,11 @@ private struct WatchStrengthReady: View {
                          "Open imun on your iPhone to load the latest schedule.")
                         .font(.system(size: 12)).foregroundStyle(WTheme.muted)
                     WSecondary(title: "REFRESH", symbol: "arrow.clockwise") {
-                        store.requestCurrentSchedule()
+                        store.requestCurrentSchedule(manual: true)
                     }
+                    Text(store.status)
+                        .font(.system(size: 11))
+                        .foregroundStyle(WTheme.muted)
                 } else {
                 Text("TODAY'S LIFT")
                     .font(WTheme.label()).tracking(1.5)
