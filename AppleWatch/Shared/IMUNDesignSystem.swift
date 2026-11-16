@@ -279,6 +279,50 @@ enum IMUNStyle {
             secondary: secondary, accent: accent,
             supporting: resolvedColor(p.accentTwo))
     }
+    // A compact, whitelisted preferences envelope for the user-scoped cloud
+    // route. It is separate from strength plans, HealthKit and workout logs.
+    private static let cloudStrings = [
+        "hcDesignPreset", "hcDesignMode", "hcDesignAccentHex",
+        "hcDesignBackgroundHex", "hcDesignSurfaceHex", "hcDesignTextHex",
+        "hcDesignShape", "hcDesignButtonShape", "hcDesignFont",
+        "hcDesignDensity", "hcDesignMotif", "hcDesignNavigation",
+        "hcDesignProgress"
+    ]
+    private static let cloudFlags = [
+        "hcDesignCustomPalette", "hcDesignCustomGeometry",
+        "hcDesignReduceMotion"
+    ]
+    static func cloudPayload() -> [String: Any] {
+        var result: [String: Any] = ["version": 1,
+            "watchSyncEnabled": prefs.bool(forKey: "hcDesignWatchSyncEnabled"),
+            "hcDesignPreset": preset.rawValue]
+        for key in cloudStrings {
+            if let value = prefs.string(forKey: key) {
+                result[key] = String(value.prefix(40))
+            }
+        }
+        for key in cloudFlags {
+            result[key] = prefs.bool(forKey: key)
+        }
+        return result
+    }
+    static func applyCloudPayload(_ data: [String: Any]) {
+        guard data["watchSyncEnabled"] as? Bool == true,
+              let name = data["hcDesignPreset"] as? String,
+              IMUNPreset(rawValue: name) != nil else { return }
+        for key in cloudStrings {
+            guard let value = data[key] as? String, !value.isEmpty,
+                  value.count <= 40 else { continue }
+            if key.hasSuffix("Hex") &&
+               (value.count != 6 || UInt64(value, radix: 16) == nil) { continue }
+            prefs.set(value, forKey: key)
+        }
+        for key in cloudFlags {
+            if let value = data[key] as? Bool { prefs.set(value, forKey: key) }
+        }
+        prefs.set(name, forKey: "hcDesignPreset")
+    }
+
     static var onAccent: Color {
         // Contrast-aware foreground for the preset or athlete-selected accent.
         // 0.179 is the relative-luminance crossover for black vs. white text.
