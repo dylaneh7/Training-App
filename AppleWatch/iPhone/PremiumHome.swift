@@ -297,6 +297,7 @@ private struct PremiumStrengthPage: View {
     @AppStorage("hcAggressiveProgression") private var aggressive = true
     @State private var showEditor = false
     @State private var showNew = false
+    @State private var swapTarget: HCExercise?
     @State private var newTitle = "Full Body Strength"
 
     private var plan: HCWorkout? { coach.workout }
@@ -312,12 +313,15 @@ private struct PremiumStrengthPage: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 19) {
                 HCSectionTitle(title: "Weightlifting", detail: aggressive ? "Coached session" : "Today's plan")
-                HCSyncStatus(pending: coach.cloudPendingCount,
-                             saving: coach.savingPlan, connected: coach.signedIn)
+                if coach.phoneSessionStartedAt == nil {
+                    HCSyncStatus(pending: coach.cloudPendingCount,
+                                 saving: coach.savingPlan, connected: coach.signedIn)
+                }
 
                 if !coach.signedIn { PremiumLogin() }
 
                 if let plan {
+                    if coach.phoneSessionStartedAt == nil {
                     HCCard(accent: HCDesign.electric) {
                         VStack(alignment: .leading, spacing: 17) {
                             HCAccentTag(title: "TODAY'S PROGRAM", color: HCDesign.electric)
@@ -361,6 +365,12 @@ private struct PremiumStrengthPage: View {
                                     coach.finishPhoneWorkout()
                                 }
                             }
+                            if coach.lastReplacedExercise != nil {
+                                HCOutlineButton(title: "Undo last exercise swap",
+                                                icon: "arrow.uturn.backward") {
+                                    coach.undoLastExerciseReplacement()
+                                }
+                            }
                             HStack(spacing: 10) {
                                 HCOutlineButton(title: "Edit program", icon: "slider.horizontal.3") {
                                     showEditor = true
@@ -379,21 +389,45 @@ private struct PremiumStrengthPage: View {
                             }
                         }
                     }
-                    HCSectionTitle(title: "Workout lineup", detail: "Tap to train")
+                    } else {
+                        PremiumPhoneGuidedWorkout()
+                    }
+                    if coach.phoneSessionStartedAt == nil {
+                    HCSectionTitle(title: "Workout lineup",
+                                   detail: "Preview or swap movements before starting")
                     ForEach(plan.exercises.indices, id: \.self) { index in
                         let exercise = plan.exercises[index]
-                        NavigationLink {
-                            PremiumExerciseSession(exerciseID: exercise.id)
-                        } label: {
-                            PremiumExerciseCard(index: index + 1, exercise: exercise,
-                                                workoutDate: plan.date,
-                                                logged: doneSets.filter { $0.exerciseID == exercise.id },
-                                                aggressive: aggressive)
+                        VStack(spacing: 5) {
+                            NavigationLink {
+                                PremiumExerciseSession(exerciseID: exercise.id)
+                            } label: {
+                                PremiumExerciseCard(index: index + 1, exercise: exercise,
+                                                    workoutDate: plan.date,
+                                                    logged: doneSets.filter { $0.exerciseID == exercise.id },
+                                                    aggressive: aggressive)
+                            }
+                            .buttonStyle(.plain)
+                            HStack(spacing: 10) {
+                                Button {
+                                    swapTarget = exercise
+                                } label: {
+                                    Label("Swap · Same muscle", systemImage: "arrow.left.arrow.right")
+                                        .font(.system(size: 12, weight: .semibold))
+                                        .foregroundStyle(HCDesign.aqua)
+                                }
+                                .buttonStyle(.plain)
+                                Spacer()
+                                Text(HCMuscleAlternatives.primaryMuscle(for: exercise.name))
+                                    .font(HCDesign.label(10))
+                                    .foregroundStyle(HCDesign.secondary)
+                            }
+                            .padding(.horizontal, 14)
+                            .padding(.bottom, 8)
                         }
-                        .buttonStyle(.plain)
                     }
                     HCOutlineButton(title: "Add or rearrange exercises", icon: "plus") {
                         showEditor = true
+                    }
                     }
                 } else {
                     HCCard {
@@ -434,6 +468,10 @@ private struct PremiumStrengthPage: View {
         }
         .sheet(isPresented: $showEditor) {
             PremiumWorkoutEditor()
+                .environmentObject(coach)
+        }
+        .sheet(item: $swapTarget) { exercise in
+            PremiumMuscleSwapPicker(exercise: exercise)
                 .environmentObject(coach)
         }
         .alert("New training session", isPresented: $showNew) {
@@ -501,6 +539,324 @@ private struct PremiumExerciseCard: View {
                 }
             }
         }
+    }
+}
+
+// A compact, one-screen iPhone lifting controller mirrors the Watch:
+ // Next saves the set, triggers planned rest and continues automatically.
+private struct PremiumPhoneGuidedWorkout: View {
+    @EnvironmentObject private var coach: PhoneWorkoutBridge
+    @AppStorage("hcWeightIncrement") private var increment = 5.0
+    @State private var reps = 8
+    @State private var weight = 0.0
+    @State private var rir = 2
+    @State private var hasWeight = false
+    @State private var showAllSets = false
+    @State private var swapTarget: HCExercise?
+    @State private var confirmFinish = false
+    private let pulse = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
+
+    private var current: HCExercise? { coach.phoneGuidedExercise }
+    private var active: Bool { coach.phoneSetStartedAt != nil }
+    private var token: String {
+        guard let current else { return "none" }
+        return current.id + ":" + current.name + ":" +
+            "\(coach.phoneGuidedSetNumber):\(coach.phoneCompletedSetCount)"
+    }
+    private var completed: Bool {
+        guard let plan = coach.workout, !plan.exercises.isEmpty else { return false }
+        return coach.phoneCompletedSetCount >= plan.prescribedSetCount
+    }
+
+    var body: some View {
+        HCCard(accent: HCDesign.electric) {
+            VStack(alignment: .leading, spacing: 14) {
+                HStack {
+                    HCInsightChip(title: "LIVE WORKOUT", symbol: "bolt.fill",
+                                  tint: HCDesign.electric)
+                    Spacer()
+                    Text("\(coach.phoneCompletedSetCount) / \(coach.workout?.prescribedSetCount ?? 0) SETS")
+                        .font(HCDesign.label(11))
+                        .foregroundStyle(HCDesign.secondary)
+                }
+                ProgressView(value: Double(coach.phoneCompletedSetCount),
+                             total: Double(max(1, coach.workout?.prescribedSetCount ?? 1)))
+                    .tint(HCDesign.electric)
+
+                if completed {
+                    HCStatusLine(text: "All prescribed sets complete. Finish the workout when ready.",
+                                 symbol: "checkmark.circle.fill", tint: HCDesign.good)
+                } else if let exercise = current {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(exercise.name)
+                            .font(HCDesign.display(25))
+                            .foregroundStyle(HCDesign.ink)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Text("SET \(coach.phoneGuidedSetNumber) OF \(exercise.prescribedSets)  ·  \(exercise.repDescription) REPS")
+                            .font(HCDesign.label(11))
+                            .foregroundStyle(HCDesign.aqua)
+                    }
+
+                    TimelineView(.periodic(from: .now, by: 1)) { tick in
+                        if let started = coach.phoneSetStartedAt {
+                            HStack {
+                                Label("Current set", systemImage: "timer")
+                                Spacer()
+                                Text(hcDuration(tick.date.timeIntervalSince(started)))
+                                    .monospacedDigit()
+                            }
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(HCDesign.secondary)
+                        } else if let rest = coach.phoneRestEndsAt, rest > tick.date {
+                            VStack(alignment: .leading, spacing: 10) {
+                                HStack {
+                                    Label("Recovery · Next set starts automatically",
+                                          systemImage: "timer")
+                                        .font(.system(size: 12, weight: .semibold))
+                                    Spacer()
+                                    Text(hcDuration(rest.timeIntervalSince(tick.date)))
+                                        .font(HCDesign.metric(25))
+                                        .monospacedDigit()
+                                }
+                                .foregroundStyle(HCDesign.aqua)
+                                HCOutlineButton(title: "Skip rest", icon: "forward.end.fill") {
+                                    coach.skipPhoneRest()
+                                }
+                            }
+                        }
+                    }
+
+                    Toggle("Record weight", isOn: $hasWeight)
+                        .tint(HCDesign.electric)
+                        .font(.system(size: 12, weight: .medium))
+                    if hasWeight {
+                        HCNumberControl(label: "WEIGHT · LB", value: weight.formatted(),
+                                        decrement: { weight = max(0, weight - increment) },
+                                        increment: { weight = min(1500, weight + increment) })
+                    }
+                    HCNumberControl(label: "REPETITIONS", value: "\(reps)",
+                                    decrement: { reps = max(1, reps - 1) },
+                                    increment: { reps = min(100, reps + 1) })
+                    HCNumberControl(label: "REPS IN RESERVE", value: "\(rir)",
+                                    decrement: { rir = max(0, rir - 1) },
+                                    increment: { rir = min(10, rir + 1) })
+
+                    if active {
+                        HCFilledButton(title: "NEXT · SAVE SET",
+                                       icon: "checkmark.circle.fill") {
+                            coach.logFromPhone(exercise: exercise,
+                                               weightLb: hasWeight ? weight : nil,
+                                               reps: reps, rir: Double(rir))
+                        }
+                    } else {
+                        HCStatusLine(text: "The next set starts when recovery ends.",
+                                     symbol: "hourglass", tint: HCDesign.aqua)
+                    }
+
+                    HStack(spacing: 8) {
+                        HCOutlineButton(title: "Swap exercise",
+                                        icon: "arrow.left.arrow.right") {
+                            swapTarget = exercise
+                        }
+                        if coach.lastReplacedExercise != nil {
+                            HCOutlineButton(title: "Undo",
+                                            icon: "arrow.uturn.backward") {
+                                coach.undoLastExerciseReplacement()
+                            }
+                        }
+                    }
+
+                    if let queued = coach.phoneQueuedGuidedSet,
+                       let next = coach.workout?.exercises.first(where: {
+                           $0.id == queued.exerciseID
+                       }) {
+                        HCStatusLine(text: "UP NEXT: \(next.name) · Set \(queued.setNumber)",
+                                     symbol: "arrow.right.circle",
+                                     tint: HCDesign.aqua)
+                        if active {
+                            HCOutlineButton(title: "Switch now · Don't log current set",
+                                            icon: "arrow.triangle.2.circlepath") {
+                                coach.switchPhoneToQueuedSetNow()
+                            }
+                        }
+                    }
+
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            showAllSets.toggle()
+                        }
+                    } label: {
+                        HStack {
+                            Label("Choose any unfinished set", systemImage: "square.grid.2x2")
+                            Spacer()
+                            Image(systemName: showAllSets ? "chevron.up" : "chevron.down")
+                        }
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(HCDesign.aqua)
+                        .padding(12)
+                        .background(HCDesign.raised, in: RoundedRectangle(cornerRadius: 12))
+                    }
+                    .buttonStyle(.plain)
+
+                    if showAllSets, let plan = coach.workout {
+                        VStack(alignment: .leading, spacing: 13) {
+                            ForEach(plan.exercises) { item in
+                                VStack(alignment: .leading, spacing: 7) {
+                                    Text(item.name)
+                                        .font(.system(size: 14, weight: .semibold))
+                                        .foregroundStyle(HCDesign.ink)
+                                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 52),
+                                                                 spacing: 6)], spacing: 6) {
+                                        ForEach(Array(1...max(1, item.prescribedSets)),
+                                                id: \.self) { number in
+                                            let done = coach.loggedSets.contains {
+                                                $0.workoutID == plan.id &&
+                                                $0.exerciseID == item.id &&
+                                                $0.index == number
+                                            }
+                                            let selected = coach.phoneGuidedExercise?.id == item.id &&
+                                                coach.phoneGuidedSetNumber == number
+                                            Button {
+                                                coach.selectPhoneGuidedSet(item, number: number)
+                                                showAllSets = false
+                                            } label: {
+                                                Label("\(number)",
+                                                      systemImage: done ? "checkmark.circle.fill" :
+                                                        selected ? "arrow.right.circle.fill" :
+                                                        "circle")
+                                                    .font(.system(size: 12, weight: .semibold))
+                                                    .frame(maxWidth: .infinity)
+                                                    .padding(.vertical, 11)
+                                                    .foregroundStyle(done ? HCDesign.secondary :
+                                                                     selected ? HCDesign.onAccent :
+                                                                     HCDesign.ink)
+                                                    .background(selected && !done ?
+                                                        HCDesign.electric : HCDesign.raised,
+                                                        in: RoundedRectangle(cornerRadius: 10))
+                                            }
+                                            .disabled(done || item.prescribedSets < 1)
+                                            .buttonStyle(.plain)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        .padding(12)
+                        .background(HCDesign.card,
+                                    in: RoundedRectangle(cornerRadius: 13))
+                    }
+                }
+                if !active {
+                    HCOutlineButton(title: "Finish workout",
+                                    icon: "flag.checkered") {
+                        confirmFinish = true
+                    }
+                }
+            }
+        }
+        .confirmationDialog("Finish this workout?",
+                            isPresented: $confirmFinish) {
+            Button("Finish Workout") { coach.finishPhoneWorkout() }
+            Button("Keep Training", role: .cancel) {}
+        } message: {
+            Text("Completed sets remain in your history.")
+        }
+        .task(id: token) { loadTargets() }
+        .onAppear { coach.advancePhoneAfterRestIfReady() }
+        .onReceive(pulse) { _ in coach.advancePhoneAfterRestIfReady() }
+        .sheet(item: $swapTarget) { exercise in
+            PremiumMuscleSwapPicker(exercise: exercise)
+                .environmentObject(coach)
+        }
+    }
+
+    private func loadTargets() {
+        guard let exercise = current else { return }
+        let latest = coach.loggedSets.last(where: {
+            $0.workoutID == coach.workout?.id && $0.exerciseID == exercise.id &&
+            $0.exerciseName == exercise.name
+        })
+        let suggested = latest?.weightLb ?? exercise.suggestedWeightLb
+        if let suggested, suggested > 0 {
+            weight = suggested
+            hasWeight = true
+        } else {
+            weight = 0
+            hasWeight = false
+        }
+        reps = latest?.reps ?? exercise.repMin
+        rir = Int((latest?.rir ?? 2).rounded())
+    }
+}
+
+// The same exercise library and muscle-matching rules are used on both devices.
+// Replacements affect the plan only; recorded sets remain immutable history.
+private struct PremiumMuscleSwapPicker: View {
+    @EnvironmentObject private var coach: PhoneWorkoutBridge
+    @Environment(\.dismiss) private var dismiss
+    let exercise: HCExercise
+    @State private var query = ""
+
+    private var alternatives: [HCLibraryExercise] {
+        HCMuscleAlternatives.suggestions(for: exercise,
+                                          excluding: coach.workout?.exercises ?? [])
+            .filter {
+                query.isEmpty || $0.name.localizedCaseInsensitiveContains(query) ||
+                $0.equipment.localizedCaseInsensitiveContains(query)
+            }
+    }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    Text("Replacing \(exercise.name)")
+                        .font(.headline)
+                    Text("Suggestions target your \(HCMuscleAlternatives.primaryMuscle(for: exercise.name).lowercased()). Your completed sets remain recorded under the movements actually performed. Suggested load resets for the alternative.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Section("Same primary muscle") {
+                    if alternatives.isEmpty {
+                        Text("No matching exercises in this library. Use Edit Program to add a custom movement.")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+                    ForEach(alternatives) { item in
+                        Button {
+                            if coach.replaceExercise(exercise.id, with: item) {
+                                dismiss()
+                            }
+                        } label: {
+                            HStack {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(item.name)
+                                        .font(.system(size: 15, weight: .semibold))
+                                    Text(item.equipment)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                Image(systemName: "arrow.left.arrow.right")
+                                    .foregroundStyle(HCDesign.aqua)
+                            }
+                        }
+                        .tint(HCDesign.ink)
+                    }
+                }
+            }
+            .searchable(text: $query, prompt: "Search alternatives")
+            .scrollContentBackground(.hidden)
+            .background(HCDesign.canvas)
+            .navigationTitle("Swap exercise")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+            }
+        }
+        .preferredColorScheme(.dark)
     }
 }
 

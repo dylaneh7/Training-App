@@ -39,6 +39,25 @@ struct HCWorkout: Codable, Identifiable {
                                                      isPreview: true)
 }
 
+
+struct HCGuidedSetChoice: Codable, Equatable {
+    let exerciseID: String
+    let setNumber: Int
+}
+
+/// A replacement changes the planned movement in the *same* exercise slot.
+/// Its stable ID keeps previously completed set records attached to the slot;
+/// each recorded set retains its actual movement name.
+struct HCExerciseSwap: Codable, Identifiable {
+    let id: UUID
+    let workoutID: String
+    let workoutDate: String
+    let exerciseID: String
+    let previousName: String
+    let replacement: HCExercise
+    let createdAt: Date
+}
+
 struct HCLoggedSet: Codable, Identifiable, Hashable {
     let id: UUID
     let workoutID: String
@@ -185,6 +204,7 @@ enum HCPayload {
     static let pushSchedule = "pushScheduleV3"
     static let syncRequest = "syncRequestV3"
     static let syncReceipt = "syncReceiptV3"
+    static let exerciseSwap = "exerciseSwapV1"
     static let workout = "workout"
     static let runPlan = "runPlan"
     static let runHistory = "runHistory"

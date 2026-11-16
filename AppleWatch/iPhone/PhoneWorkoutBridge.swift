@@ -6,6 +6,7 @@ import WatchConnectivity
 /// historical training sources and WatchConnectivity queues.
 final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
     @Published private(set) var workout: HCWorkout?
+    @Published private(set) var lastReplacedExercise: HCExercise?
     @Published private(set) var runPlan: HCRunPlan?
     @Published private(set) var loggedSets: [HCLoggedSet] = []
     @Published private(set) var completedWatchRuns: [HCRunFinished] = []
@@ -35,6 +36,9 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
     @Published private(set) var phoneSetExerciseID: String?
     @Published private(set) var phoneSetStartedAt: Date?
     @Published private(set) var phoneRestEndsAt: Date?
+    @Published private(set) var phoneActiveSetNumber: Int?
+    @Published private(set) var phoneSelectedGuidedSet: HCGuidedSetChoice?
+    @Published private(set) var phoneQueuedGuidedSet: HCGuidedSetChoice?
 
     private let cloud = HCCloudClient()
     private let encoder = JSONEncoder()
@@ -120,6 +124,9 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
         phoneSetStartedAt = read("iphone-set-start.json")
         phoneSetExerciseID = read("iphone-set-exercise.json")
         phoneRestEndsAt = read("iphone-rest-end.json")
+        phoneActiveSetNumber = read("iphone-active-set-number.json")
+        phoneSelectedGuidedSet = read("iphone-guided-choice.json")
+        phoneQueuedGuidedSet = read("iphone-guided-next.json")
         workout = pendingEditedWorkout
         updatePendingCount()
         if WCSession.isSupported() {
@@ -391,6 +398,86 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
         status = "Workout saved locally; syncing to watch and cloud…"
         sendToWatch()
         retryPendingWorkout()
+    }
+
+    /// Same-muscle change from iPhone. Completed sets retain actual historical
+    /// exercise names; replacement affects only remaining planned work.
+    @discardableResult
+    func replaceExercise(_ exerciseID: String, with option: HCLibraryExercise) -> Bool {
+        guard let plan = workout, let index = plan.exercises.firstIndex(where: { $0.id == exerciseID }) else {
+            return false
+        }
+        let original = plan.exercises[index]
+        let muscle = HCMuscleAlternatives.primaryMuscle(for: original.name)
+        guard muscle != "Other",
+              HCMuscleAlternatives.primaryMuscle(for: option.name) == muscle,
+              HCProgramCatalog.normalized(original.name) !=
+              HCProgramCatalog.normalized(option.name) else { return false }
+        var exercises = plan.exercises
+        exercises[index] = HCMuscleAlternatives.replacing(original, with: option)
+        if phoneSetExerciseID == exerciseID && phoneSetStartedAt != nil {
+            cancelPhoneSet() // No fake completed set is recorded.
+        }
+        lastReplacedExercise = original
+        saveEditedWorkout(HCWorkout(id: plan.id, date: plan.date,
+                                    sessionKey: plan.sessionKey, title: plan.title,
+                                    exercises: exercises, isPreview: false))
+        if phoneSessionStartedAt != nil && phoneSetStartedAt == nil &&
+           (phoneRestEndsAt == nil || phoneRestEndsAt! <= Date()),
+           let current = workout?.exercises.first(where: { $0.id == exerciseID }),
+           phoneGuidedExercise?.id == exerciseID {
+            startPhoneSet(exercise: current)
+        }
+        status = "Swapped \(original.name) for \(option.name) · Watch sync in progress"
+        return true
+    }
+
+    func undoLastExerciseReplacement() {
+        guard let original = lastReplacedExercise,
+              let current = workout?.exercises.first(where: { $0.id == original.id }),
+              current.name != original.name else { return }
+        let restore = HCLibraryExercise(name: original.name,
+                           group: HCMuscleAlternatives.primaryMuscle(for: original.name),
+                           equipment: "Previous movement",
+                           instructions: original.instructions ?? "")
+        lastReplacedExercise = nil
+        if replaceExercise(current.id, with: restore) {
+            lastReplacedExercise = nil
+        }
+    }
+
+    /// Accepts a Watch replacement in the authoritative iPhone workout plan,
+    /// then persists it to Command Center and pushes the updated schedule.
+    @discardableResult
+    private func acceptWatchSwap(_ change: HCExerciseSwap) -> Bool {
+        guard let plan = workout,
+              plan.id == change.workoutID, plan.date == change.workoutDate,
+              let index = plan.exercises.firstIndex(where: { $0.id == change.exerciseID })
+        else { return false }
+        let current = plan.exercises[index]
+        if current.name == change.replacement.name { return true } // duplicate
+        let key = "\(plan.id)|\(change.exerciseID)"
+        let receivedAt: [String: Date] = read("watch-swap-last-applied.json") ?? [:]
+        if let newer = receivedAt[key], newer > change.createdAt { return true }
+        guard current.id == change.replacement.id,
+              current.exerciseIndex == change.replacement.exerciseIndex,
+              current.prescribedSets == change.replacement.prescribedSets,
+              current.name == change.previousName,
+              HCMuscleAlternatives.primaryMuscle(for: current.name) != "Other",
+              HCMuscleAlternatives.primaryMuscle(for: current.name) ==
+                  HCMuscleAlternatives.primaryMuscle(for: change.replacement.name)
+        else { return false }
+        var exercises = plan.exercises
+        exercises[index] = change.replacement
+        lastReplacedExercise = current
+        var timestamps = receivedAt
+        timestamps[key] = change.createdAt
+        save(timestamps, name: "watch-swap-last-applied.json")
+        saveEditedWorkout(HCWorkout(id: plan.id, date: plan.date,
+                                    sessionKey: plan.sessionKey, title: plan.title,
+                                    exercises: exercises, isPreview: false))
+        status = "Watch exercise swap saved · \(change.replacement.name)"
+        return true
     }
 
     func retryPendingWorkout() {
@@ -702,57 +789,202 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
         watchSyncStatus = "Queued for Watch · open imun on both devices"
     }
 
+    // MARK: - One-screen iPhone guided workout
+    private func recordedPhoneSet(_ choice: HCGuidedSetChoice) -> Bool {
+        guard let workout else { return false }
+        return loggedSets.contains {
+            $0.workoutID == workout.id && $0.exerciseID == choice.exerciseID &&
+            $0.index == choice.setNumber
+        }
+    }
+
+    private func firstMissingSet(for exercise: HCExercise) -> Int? {
+        guard exercise.prescribedSets > 0 else { return nil }
+        return (1...exercise.prescribedSets).first {
+            !recordedPhoneSet(.init(exerciseID: exercise.id, setNumber: $0))
+        }
+    }
+
+    private func validPhoneChoice(_ choice: HCGuidedSetChoice?) -> HCGuidedSetChoice? {
+        guard let choice,
+              let exercise = workout?.exercises.first(where: { $0.id == choice.exerciseID }),
+              choice.setNumber >= 1, choice.setNumber <= exercise.prescribedSets,
+              !recordedPhoneSet(choice) else { return nil }
+        return choice
+    }
+
+    private func suggestedPhoneChoice(after id: String? = nil) -> HCGuidedSetChoice? {
+        guard let workout, !workout.exercises.isEmpty else { return nil }
+        if let id, let current = workout.exercises.first(where: { $0.id == id }),
+           let missing = firstMissingSet(for: current) {
+            return .init(exerciseID: id, setNumber: missing)
+        }
+        let start = workout.exercises.firstIndex(where: { $0.id == id }) ?? -1
+        for offset in 1...workout.exercises.count {
+            let e = workout.exercises[(start + offset + workout.exercises.count) %
+                                       workout.exercises.count]
+            if let number = firstMissingSet(for: e) {
+                return .init(exerciseID: e.id, setNumber: number)
+            }
+        }
+        return nil
+    }
+
+    var phoneGuidedExercise: HCExercise? {
+        guard let workout else { return nil }
+        if phoneSetStartedAt != nil, let id = phoneSetExerciseID {
+            return workout.exercises.first { $0.id == id }
+        }
+        if let choice = validPhoneChoice(phoneSelectedGuidedSet) {
+            return workout.exercises.first { $0.id == choice.exerciseID }
+        }
+        guard let next = suggestedPhoneChoice() else { return nil }
+        return workout.exercises.first { $0.id == next.exerciseID }
+    }
+
+    var phoneGuidedSetNumber: Int {
+        if phoneSetStartedAt != nil, let active = phoneActiveSetNumber { return active }
+        if let choice = validPhoneChoice(phoneSelectedGuidedSet) { return choice.setNumber }
+        if let e = phoneGuidedExercise { return firstMissingSet(for: e) ?? 1 }
+        return 1
+    }
+
+    var phoneCompletedSetCount: Int {
+        guard let workout else { return 0 }
+        return loggedSets.filter { $0.workoutID == workout.id }.count
+    }
+
+    func selectPhoneGuidedSet(_ exercise: HCExercise, number: Int) {
+        let choice = HCGuidedSetChoice(exerciseID: exercise.id, setNumber: number)
+        guard validPhoneChoice(choice) != nil else { return }
+        if phoneSetStartedAt != nil {
+            phoneQueuedGuidedSet = choice
+            save(choice, name: "iphone-guided-next.json")
+        } else {
+            phoneSelectedGuidedSet = choice
+            save(choice, name: "iphone-guided-choice.json")
+        }
+    }
+
+    func switchPhoneToQueuedSetNow() {
+        guard let next = validPhoneChoice(phoneQueuedGuidedSet),
+              let exercise = workout?.exercises.first(where: { $0.id == next.exerciseID })
+        else { return }
+        if phoneSetStartedAt != nil { cancelPhoneSet() }
+        phoneQueuedGuidedSet = nil
+        try? FileManager.default.removeItem(at: local("iphone-guided-next.json"))
+        selectPhoneGuidedSet(exercise, number: next.setNumber)
+        skipPhoneRest()
+        startPhoneSet(exercise: exercise)
+    }
+
     func startPhoneWorkout() {
-        guard phoneSessionStartedAt == nil else { return }
+        guard phoneSessionStartedAt == nil, let workout, !workout.exercises.isEmpty else { return }
         let started = Date()
         phoneSessionStartedAt = started
         save(started,name:"iphone-session-start.json")
+        phoneSelectedGuidedSet = suggestedPhoneChoice()
+        if let choice = phoneSelectedGuidedSet,
+           let exercise = workout.exercises.first(where: { $0.id == choice.exerciseID }) {
+            save(choice, name: "iphone-guided-choice.json")
+            startPhoneSet(exercise: exercise)
+        }
     }
 
     func finishPhoneWorkout() {
         guard phoneSetStartedAt == nil else { return }
         phoneSessionStartedAt = nil
         phoneRestEndsAt = nil
-        try? FileManager.default.removeItem(at: local("iphone-session-start.json"))
-        try? FileManager.default.removeItem(at: local("iphone-rest-end.json"))
+        phoneActiveSetNumber = nil
+        phoneSelectedGuidedSet = nil
+        phoneQueuedGuidedSet = nil
+        for name in ["iphone-session-start.json", "iphone-rest-end.json",
+                     "iphone-active-set-number.json", "iphone-guided-choice.json",
+                     "iphone-guided-next.json"] {
+            try? FileManager.default.removeItem(at: local(name))
+        }
     }
 
     func startPhoneSet(exercise: HCExercise) {
-        guard phoneSessionStartedAt != nil, phoneSetStartedAt == nil else { return }
+        guard phoneSessionStartedAt != nil, phoneSetStartedAt == nil,
+              phoneRestEndsAt == nil || phoneRestEndsAt! <= Date() else { return }
+        let choice: HCGuidedSetChoice
+        if let selected = validPhoneChoice(phoneSelectedGuidedSet),
+           selected.exerciseID == exercise.id {
+            choice = selected
+        } else if let number = firstMissingSet(for: exercise) {
+            choice = .init(exerciseID: exercise.id, setNumber: number)
+        } else { return }
         phoneSetExerciseID = exercise.id
+        phoneActiveSetNumber = choice.setNumber
         phoneSetStartedAt = Date()
         phoneRestEndsAt = nil
-        save(exercise.id,name:"iphone-set-exercise.json")
-        save(phoneSetStartedAt,name:"iphone-set-start.json")
+        save(exercise.id, name:"iphone-set-exercise.json")
+        save(choice.setNumber, name:"iphone-active-set-number.json")
+        save(phoneSetStartedAt, name:"iphone-set-start.json")
+        try? FileManager.default.removeItem(at: local("iphone-rest-end.json"))
     }
 
     func cancelPhoneSet() {
         phoneSetExerciseID = nil
         phoneSetStartedAt = nil
-        try? FileManager.default.removeItem(at: local("iphone-set-exercise.json"))
-        try? FileManager.default.removeItem(at: local("iphone-set-start.json"))
+        phoneActiveSetNumber = nil
+        for name in ["iphone-set-exercise.json", "iphone-set-start.json",
+                     "iphone-active-set-number.json"] {
+            try? FileManager.default.removeItem(at: local(name))
+        }
+    }
+
+    func advancePhoneAfterRestIfReady() {
+        guard phoneSessionStartedAt != nil, phoneSetStartedAt == nil else { return }
+        if let rest = phoneRestEndsAt, rest > Date() { return }
+        phoneRestEndsAt = nil
+        try? FileManager.default.removeItem(at: local("iphone-rest-end.json"))
+        guard let next = phoneGuidedExercise else { return }
+        startPhoneSet(exercise: next)
     }
 
     func logFromPhone(exercise: HCExercise, weightLb: Double?, reps: Int, rir: Double?) {
         guard let workout, reps > 0, reps <= 300,
               weightLb == nil || (weightLb! >= 0 && weightLb! <= 3000) else { return }
-        let existing = loggedSets.filter {
-            $0.workoutID == workout.id && $0.exerciseID == exercise.id
-        }.count
-        var entry = HCLoggedSet(id:UUID(),workoutID:workout.id,workoutDate:workout.date,
-                                sessionKey:workout.sessionKey,workoutTitle:workout.title,
-                                exerciseID:exercise.id,exerciseName:exercise.name,
-                                exerciseIndex:exercise.exerciseIndex,index:existing+1,
-                                weightLb:weightLb,reps:reps,rir:rir,completedAt:Date())
+        let isTimed = phoneSetExerciseID == exercise.id && phoneSetStartedAt != nil
+        let setIndex = isTimed ? phoneActiveSetNumber :
+            firstMissingSet(for: exercise)
+        guard let setIndex, setIndex >= 1 && setIndex <= exercise.prescribedSets,
+              !recordedPhoneSet(.init(exerciseID: exercise.id, setNumber: setIndex))
+        else { return }
+        let now = Date()
+        var entry = HCLoggedSet(id: UUID(), workoutID: workout.id, workoutDate: workout.date,
+                                sessionKey: workout.sessionKey, workoutTitle: workout.title,
+                                exerciseID: exercise.id, exerciseName: exercise.name,
+                                exerciseIndex: exercise.exerciseIndex, index: setIndex,
+                                weightLb: weightLb, reps: reps, rir: rir, completedAt: now)
         entry.source = "iPhone"
-        if phoneSetExerciseID == exercise.id, let started = phoneSetStartedAt {
+        if isTimed, let started = phoneSetStartedAt {
             entry.startedAt = started
-            entry.durationSeconds = Date().timeIntervalSince(started)
+            entry.durationSeconds = now.timeIntervalSince(started)
             cancelPhoneSet()
-            phoneRestEndsAt = Date().addingTimeInterval(Double(exercise.restSeconds))
-            save(phoneRestEndsAt,name:"iphone-rest-end.json")
         }
         acceptSet(entry)
+
+        if isTimed {
+            let upcoming = validPhoneChoice(phoneQueuedGuidedSet) ??
+                           suggestedPhoneChoice(after: exercise.id)
+            phoneQueuedGuidedSet = nil
+            try? FileManager.default.removeItem(at: local("iphone-guided-next.json"))
+            phoneSelectedGuidedSet = upcoming
+            if let upcoming { save(upcoming, name: "iphone-guided-choice.json") }
+            let override = UserDefaults.standard.integer(forKey: "hcRestOverrideSeconds")
+            let duration = override > 0 ? override : exercise.restSeconds
+            phoneRestEndsAt = upcoming != nil && duration > 0 ?
+                now.addingTimeInterval(Double(duration)) : nil
+            if let rest = phoneRestEndsAt {
+                save(rest, name: "iphone-rest-end.json")
+            } else {
+                try? FileManager.default.removeItem(at: local("iphone-rest-end.json"))
+                advancePhoneAfterRestIfReady()
+            }
+        }
     }
 
     func correctLoggedSet(id: UUID, weightLb: Double?, reps: Int, rir: Double?) {
@@ -787,6 +1019,7 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
     func skipPhoneRest() {
         phoneRestEndsAt = nil
         try? FileManager.default.removeItem(at: local("iphone-rest-end.json"))
+        advancePhoneAfterRestIfReady()
     }
 
     private func updatePendingCount() {
@@ -892,6 +1125,14 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
             }
             return
         }
+        if kind == HCPayload.exerciseSwap,
+           let payload = message[HCPayload.data] as? Data,
+           let change = try? decoder.decode(HCExerciseSwap.self, from: payload) {
+            DispatchQueue.main.async {
+                replyHandler(["saved": self.acceptWatchSwap(change)])
+            }
+            return
+        }
         if kind == HCPayload.syncRequest {
             DispatchQueue.main.async {
                 self.retryPendingCloudSets()
@@ -938,6 +1179,13 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
         guard let kind = userInfo[HCPayload.kind] as? String,
               let payload = userInfo[HCPayload.data] as? Data else { return }
         switch kind {
+        case HCPayload.exerciseSwap:
+            guard let change = try? decoder.decode(HCExerciseSwap.self, from: payload) else { return }
+            DispatchQueue.main.async {
+                if self.acceptWatchSwap(change) {
+                    self.confirmWatchRecord(change.id)
+                }
+            }
         case HCPayload.loggedSet:
             guard let item = try? decoder.decode(HCLoggedSet.self,from:payload) else { return }
             DispatchQueue.main.async {

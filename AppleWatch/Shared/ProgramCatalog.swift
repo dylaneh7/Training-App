@@ -220,6 +220,77 @@ enum HCExerciseLibrary {
     ]
 }
 
+
+// Exercise variants are suggested by *primary movement pattern*, not by the
+// overly broad library "Arms"/"Legs"/"Shoulders" labels. This avoids offering
+// a triceps movement for biceps, leg curls for quadriceps, etc.
+enum HCMuscleAlternatives {
+    static func primaryMuscle(for name: String) -> String {
+        let n = HCProgramCatalog.normalized(name)
+        if n.contains("curl") && !n.contains("leg") { return "Biceps" }
+        if n.contains("pressdown") || n.contains("pushdown") ||
+           n.contains("tricep") || n.contains("close grip bench") { return "Triceps" }
+        if n.contains("face pull") || n.contains("rear delt") ||
+           n.contains("reverse pec") { return "Rear delts" }
+        if n.contains("lateral raise") { return "Side delts" }
+        if n.contains("shoulder press") || n.contains("overhead press") { return "Shoulders" }
+        if n.contains("shrug") { return "Traps" }
+        // Check chest first: "flat bench" contains the letters "lat",
+        // but it does not work the lats.
+        if n.contains("bench") || n.contains("chest") ||
+           n.contains("push up") || n.contains("pushup") ||
+           n.contains("dip") || n.contains("cable fly") ||
+           n.contains("pec deck") || n.contains("low to high") { return "Chest" }
+        if n.contains("lat pulldown") || n.contains("pulldown") ||
+           n.contains("pull up") || n.contains("pullup") ||
+           n.contains("lat prayer") { return "Lats" }
+        if n.contains("row") { return "Back" }
+        if n.contains("squat") || n.contains("leg press") ||
+           n.contains("leg extension") || n.contains("split squat") { return "Quads" }
+        if n.contains("romanian") || n.contains("rdl") ||
+           n.contains("leg curl") { return "Hamstrings" }
+        if n.contains("hip thrust") || n.contains("glute") { return "Glutes" }
+        if n.contains("calf") { return "Calves" }
+        if n.contains("ab ") || n.contains("crunch") ||
+           n.contains("rollout") || n.contains("plank") { return "Core" }
+        if let known = HCExerciseLibrary.all.first(where: {
+            HCProgramCatalog.normalized($0.name) == n
+        }) { return known.group }
+        return "Other"
+    }
+
+    static func suggestions(for exercise: HCExercise,
+                            excluding existing: [HCExercise] = []) -> [HCLibraryExercise] {
+        let muscle = primaryMuscle(for: exercise.name)
+        guard muscle != "Other" else { return [] }
+        let excludedNames = Set(existing.filter { $0.id != exercise.id }
+            .map { HCProgramCatalog.normalized($0.name) })
+        let original = HCProgramCatalog.normalized(exercise.name)
+        return HCExerciseLibrary.all.filter {
+            HCProgramCatalog.normalized($0.name) != original &&
+            !excludedNames.contains(HCProgramCatalog.normalized($0.name)) &&
+            primaryMuscle(for: $0.name) == muscle
+        }.sorted { $0.name < $1.name }
+    }
+
+    static func replacing(_ existing: HCExercise,
+                          with alternative: HCLibraryExercise) -> HCExercise {
+        var replacement = HCExercise(
+            id: existing.id,
+            name: alternative.name,
+            originalName: existing.originalName,
+            exerciseIndex: existing.exerciseIndex,
+            prescribedSets: existing.prescribedSets,
+            repMin: existing.repMin,
+            repMax: existing.repMax,
+            suggestedWeightLb: nil, // reset: weights aren't equivalent across equipment
+            restSeconds: existing.restSeconds
+        )
+        replacement.instructions = alternative.instructions
+        return replacement
+    }
+}
+
 struct HCPerformanceSet: Hashable {
     let exercise: String
     let weightLb: Double

@@ -517,6 +517,7 @@ private struct WatchGuidedSession: View {
     @State private var rir = 2
     @State private var readyHapticSent = false
     @State private var showSetPicker = false
+    @State private var showSwapPicker = false
     private let restPulse = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
     let onFinish: () -> Void
 
@@ -534,7 +535,8 @@ private struct WatchGuidedSession: View {
         store.liftClock?.setStartedAt != nil && !active
     }
     private var nextSetToken: String {
-        (current?.id ?? "none") + ":" + String(store.guidedSetNumber) + ":" + String(setCount)
+        (current?.id ?? "none") + ":" + (current?.name ?? "") + ":" +
+            String(store.guidedSetNumber) + ":" + String(setCount)
     }
 
     var body: some View {
@@ -607,6 +609,34 @@ private struct WatchGuidedSession: View {
                     }
                     .padding(.top, 3)
 
+                    HStack(spacing: 7) {
+                        Button {
+                            showSwapPicker = true
+                        } label: {
+                            Label("SWAP EXERCISE", systemImage: "arrow.left.arrow.right")
+                                .font(WTheme.label(11))
+                                .foregroundStyle(WTheme.aqua)
+                                .frame(maxWidth: .infinity, minHeight: 42)
+                                .background(WTheme.panel,
+                                            in: RoundedRectangle(cornerRadius: 11))
+                        }
+                        .buttonStyle(.plain)
+                        if store.lastSwappedExercise != nil {
+                            Button {
+                                store.undoLastExerciseSwap()
+                                wHaptic(.click)
+                            } label: {
+                                Image(systemName: "arrow.uturn.backward")
+                                    .font(.system(size: 14, weight: .semibold))
+                                    .foregroundStyle(WTheme.amber)
+                                    .frame(width: 44, height: 42)
+                                    .background(WTheme.panel,
+                                                in: RoundedRectangle(cornerRadius: 11))
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel("Undo last exercise swap")
+                        }
+                    }
                     Button {
                         withAnimation(.easeInOut(duration: 0.2)) {
                             showSetPicker.toggle()
@@ -754,6 +784,12 @@ private struct WatchGuidedSession: View {
         .onAppear {
             store.advanceAfterRestIfReady()
         }
+        .sheet(isPresented: $showSwapPicker) {
+            if let exercise = current {
+                WatchMuscleSwapPicker(exercise: exercise)
+                    .environmentObject(store)
+            }
+        }
     }
 
     @ViewBuilder
@@ -862,7 +898,10 @@ private struct WatchGuidedSession: View {
 
     private func loadNextTargets() {
         guard let next = current else { return }
-        let previous = store.completedSets(for: next).last
+        // Never reuse another exercise variation's previous load merely
+        // because its prescribed slot ID stayed the same after a swap.
+        let previous = store.completedSets(for: next)
+            .last(where: { $0.exerciseName == next.name })
         let suggested = previous?.weightLb ?? next.suggestedWeightLb
         if let suggested, suggested > 0 {
             weight = suggested
@@ -909,6 +948,62 @@ private struct WatchSessionOptions: View {
         }
         .listStyle(.plain)
         .navigationTitle("Workout options")
+    }
+}
+
+private struct WatchMuscleSwapPicker: View {
+    @EnvironmentObject private var store: WatchWorkoutStore
+    @Environment(\.dismiss) private var dismiss
+    let exercise: HCExercise
+
+    private var alternatives: [HCLibraryExercise] {
+        HCMuscleAlternatives.suggestions(for: exercise,
+                                          excluding: store.workout.exercises)
+    }
+
+    var body: some View {
+        List {
+            Section {
+                Text("REPLACE \(exercise.name.uppercased())")
+                    .font(WTheme.label(10))
+                    .foregroundStyle(WTheme.aqua)
+                Text("Same primary muscle: \(HCMuscleAlternatives.primaryMuscle(for: exercise.name))")
+                    .font(.system(size: 11))
+                    .foregroundStyle(WTheme.muted)
+                Text("Completed sets stay saved. Suggested load resets for new equipment.")
+                    .font(.system(size: 10))
+                    .foregroundStyle(WTheme.muted)
+            }
+            if alternatives.isEmpty {
+                Section {
+                    Text("No matched alternative in the library. Edit the plan on iPhone.")
+                        .font(.system(size: 11))
+                        .foregroundStyle(WTheme.muted)
+                }
+            } else {
+                Section("SAME MUSCLE") {
+                    ForEach(alternatives) { option in
+                        Button {
+                            store.swapExercise(exercise, to: option)
+                            wHaptic(.success)
+                            dismiss()
+                        } label: {
+                            VStack(alignment: .leading, spacing: 5) {
+                                Text(option.name)
+                                    .font(.system(size: 13, weight: .semibold))
+                                    .foregroundStyle(.white)
+                                Text(option.equipment)
+                                    .font(WTheme.label(10))
+                                    .foregroundStyle(WTheme.muted)
+                            }
+                            .padding(.vertical, 5)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+        }
+        .navigationTitle("Swap movement")
     }
 }
 
