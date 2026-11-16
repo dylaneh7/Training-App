@@ -4,34 +4,20 @@ import AVFoundation
 import Combine
 
 private enum WTheme {
-    static let bg = Color(red: 0.025, green: 0.047, blue: 0.065)
-    static let panel = Color(red: 0.085, green: 0.115, blue: 0.145)
-    static let muted = Color(red: 0.61, green: 0.70, blue: 0.73)
-    static var lime: Color {
-        switch UserDefaults.standard.string(forKey: "hcAccentStyle") ?? "crimson" {
-        case "lime": return Color(red: 0.76, green: 0.98, blue: 0.43)
-        case "aqua": return Color(red: 0.41, green: 0.85, blue: 0.82)
-        case "white": return .white
-        default: return Color(red: 0.83, green: 0.20, blue: 0.31)
-        }
-    }
-    static var onAccent: Color {
-        (UserDefaults.standard.string(forKey: "hcAccentStyle") ?? "crimson") == "crimson" ? .white : bg
-    }
-    static var aqua: Color {
-        switch UserDefaults.standard.string(forKey: "hcAccentStyle") ?? "crimson" {
-        case "crimson": return .white
-        case "white": return Color(red: 0.83, green: 0.88, blue: 0.94)
-        default: return Color(red: 0.41, green: 0.85, blue: 0.82)
-        }
-    }
-    static let amber = Color(red: 1.0, green: 0.7, blue: 0.35)
+    static var bg: Color { IMUNStyle.palette.canvas }
+    static var panel: Color { IMUNStyle.palette.surface }
+    static var muted: Color { IMUNStyle.palette.secondary }
+    static var lime: Color { IMUNStyle.palette.accent }
+    static var onAccent: Color { IMUNStyle.onAccent }
+    static var aqua: Color { IMUNStyle.palette.supporting }
+    static var amber: Color { Color(red: 1, green: 0.7, blue: 0.35) }
 
     static func metric(_ size: CGFloat) -> Font {
-        .system(size: size, weight: .bold, design: .rounded).monospacedDigit()
+        .system(size: size, weight: .bold,
+                design: IMUNStyle.headingDesign).monospacedDigit()
     }
     static func label(_ size: CGFloat = 10) -> Font {
-        .system(size: size, weight: .heavy, design: .rounded)
+        .system(size: size, weight: .heavy, design: IMUNStyle.headingDesign)
     }
 }
 
@@ -55,7 +41,8 @@ private struct WPrimary: View {
                 .foregroundStyle(color == WTheme.lime ? WTheme.onAccent : WTheme.bg)
                 .frame(maxWidth: .infinity, minHeight: 65)
                 .padding(.horizontal, 4)
-                .background(color, in: RoundedRectangle(cornerRadius: 15))
+                .background(color, in: IMUNPanelShape(
+                    shape: IMUNStyle.buttonShape, corner: 15))
         }
         .buttonStyle(.plain)
         .accessibilityLabel(title)
@@ -73,7 +60,8 @@ private struct WSecondary: View {
                 .font(.system(size: 14, weight: .semibold, design: .rounded))
                 .foregroundStyle(.white)
                 .frame(maxWidth: .infinity, minHeight: 49)
-                .background(WTheme.panel, in: RoundedRectangle(cornerRadius: 13))
+                .background(WTheme.panel, in: IMUNPanelShape(
+                    shape: IMUNStyle.cardShape, corner: 13))
         }
         .buttonStyle(.plain)
         .accessibilityLabel(title)
@@ -195,7 +183,10 @@ private struct WProgressHalo: View {
             Circle()
                 .trim(from: 0, to: planned > 0 ?
                       min(1, Double(completed) / Double(planned)) : 0)
-                .stroke(WTheme.lime, style: StrokeStyle(lineWidth: 8, lineCap: .round))
+                .stroke(WTheme.lime, style: StrokeStyle(
+                    lineWidth: 8,
+                    lineCap: IMUNStyle.progressStyle == "segmented" ? .butt : .round,
+                    dash: IMUNStyle.progressStyle == "segmented" ? [9, 5] : []))
                 .rotationEffect(.degrees(-90))
             VStack(spacing: 1) {
                 Text(planned > 0 ? "\(min(completed, planned))" : "—")
@@ -215,6 +206,10 @@ private struct WProgressHalo: View {
 struct WatchWorkoutView: View {
     @EnvironmentObject private var store: WatchWorkoutStore
     @AppStorage("hcAccentStyle") private var accent = "crimson"
+    @AppStorage("hcDesignPreset") private var visualPreset = "techno"
+    @AppStorage("hcDesignCustomGeometry") private var visualCustom = false
+    @AppStorage("hcDesignShape") private var visualShape = "rounded"
+    @AppStorage("hcDesignFont") private var visualFont = "standard"
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
@@ -295,7 +290,7 @@ struct WatchWorkoutView: View {
                     }
                     .listRowBackground(WTheme.panel)
                 }
-                Section("TODAY · IPHONE SCHEDULE") {
+                Section("TODAY · TRAINING PLAN") {
                     VStack(alignment: .leading, spacing: 5) {
                         Text(store.scheduleState == "ready" ?
                              (store.hasScheduledLift ? store.workout.title : "No lift planned today") :
@@ -448,7 +443,7 @@ struct WatchWorkoutView: View {
         }
         .tint(WTheme.lime)
         .preferredColorScheme(.dark)
-        .id(accent)
+        .id([accent, visualPreset, String(visualCustom), visualShape, visualFont].joined(separator: ":"))
         .onAppear {
             store.checkPhoneConnection()
             store.requestCurrentSchedule()
@@ -1035,38 +1030,105 @@ private struct WatchMovementPicker: View {
 }
 
 private struct WatchPreferences: View {
-    @AppStorage("hcAccentStyle") private var accent = "crimson"
+    @AppStorage("hcDesignPreset") private var preset = "techno"
+    @AppStorage("hcDesignCustomGeometry") private var customGeometry = false
+    @AppStorage("hcDesignShape") private var cardShape = "rounded"
+    @AppStorage("hcDesignFont") private var font = "standard"
+    @AppStorage("hcDesignDensity") private var density = "balanced"
+    @AppStorage("hcDesignAcceptPhoneAppearance") private var acceptPhoneLook = true
+    @AppStorage("hcMotivationSource") private var motivationSource = "off"
+    @AppStorage("hcMotivationTranslation") private var translation = "ESV"
     @AppStorage("hcWeightIncrement") private var increment = 5.0
     @AppStorage("hcRestOverrideSeconds") private var restOverride = 0
     @AppStorage("hcWatchHaptics") private var haptics = true
 
     var body: some View {
         List {
-            Picker("Accent", selection: $accent) {
-                Text("Crimson + White").tag("crimson")
-                Text("Performance Lime").tag("lime")
-                Text("Ocean Aqua").tag("aqua")
-                Text("Minimal White").tag("white")
+            Section("YOUR VISUAL IDENTITY") {
+                HStack {
+                    Image(systemName: IMUNStyle.preset.symbol)
+                        .font(.system(size: 21))
+                        .foregroundStyle(WTheme.lime)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(IMUNStyle.preset.title)
+                            .font(WTheme.metric(17))
+                        Text(IMUNStyle.preset.tagline)
+                            .font(.system(size: 10))
+                            .foregroundStyle(WTheme.muted)
+                    }
+                }
+                Picker("Design preset", selection: $preset) {
+                    ForEach(IMUNPreset.allCases) { option in
+                        Text(option.title).tag(option.rawValue)
+                    }
+                }
+                Toggle("Use iPhone style when sent", isOn: $acceptPhoneLook)
+                    .tint(WTheme.lime)
+                Toggle("Custom layout", isOn: $customGeometry)
+                    .tint(WTheme.lime)
+                if customGeometry {
+                    Picker("Card shape", selection: $cardShape) {
+                        Text("Rounded").tag("rounded")
+                        Text("Square").tag("square")
+                        Text("Chamfered").tag("chamfered")
+                        Text("Pill").tag("pill")
+                        Text("Asymmetric").tag("asymmetric")
+                    }
+                    Picker("Headings", selection: $font) {
+                        Text("Classic serif").tag("serif")
+                        Text("Clean sans").tag("standard")
+                        Text("Rounded").tag("rounded")
+                        Text("Technical mono").tag("monospaced")
+                    }
+                    Picker("Spacing", selection: $density) {
+                        Text("Compact").tag("compact")
+                        Text("Balanced").tag("balanced")
+                        Text("Airy").tag("airy")
+                    }
+                }
             }
-            Picker("Weight steps", selection: $increment) {
-                Text("2.5 lb").tag(2.5)
-                Text("5 lb").tag(5.0)
-                Text("10 lb").tag(10.0)
+            Section("MOTIVATION (OPTIONAL)") {
+                Picker("Content", selection: $motivationSource) {
+                    Text("Off").tag("off")
+                    Text("Original").tag("original")
+                    Text("Performance").tag("performance")
+                    Text("Scripture").tag("scripture")
+                    Text("My words").tag("custom")
+                }
+                if motivationSource == "scripture" {
+                    Picker("Reference translation", selection: $translation) {
+                        Text("ESV").tag("ESV")
+                        Text("LSB").tag("LSB")
+                    }
+                }
+                if let line = IMUNMotivation.line {
+                    Text(line)
+                        .font(.system(size: 12, weight: .medium,
+                                      design: IMUNStyle.headingDesign))
+                        .foregroundStyle(WTheme.muted)
+                }
             }
-            Picker("Rest duration", selection: $restOverride) {
-                Text("Use program").tag(0)
-                Text("60 seconds").tag(60)
-                Text("90 seconds").tag(90)
-                Text("2 minutes").tag(120)
-                Text("3 minutes").tag(180)
+            Section("TRAINING CONTROLS") {
+                Picker("Weight steps", selection: $increment) {
+                    Text("2.5 lb").tag(2.5)
+                    Text("5 lb").tag(5.0)
+                    Text("10 lb").tag(10.0)
+                }
+                Picker("Rest duration", selection: $restOverride) {
+                    Text("Use program").tag(0)
+                    Text("60 seconds").tag(60)
+                    Text("90 seconds").tag(90)
+                    Text("2 minutes").tag(120)
+                    Text("3 minutes").tag(180)
+                }
+                Toggle("Haptic feedback", isOn: $haptics).tint(WTheme.lime)
+                Text("Running voice cues and automatic miles remain in the Run screen.")
+                    .font(.caption2).foregroundStyle(WTheme.muted)
             }
-            Toggle("Haptic feedback", isOn: $haptics)
-                .tint(WTheme.lime)
-            Text("Running voice cues and automatic miles are configured in the Run screen, or in Coach → Settings on iPhone.")
-                .font(.caption2).foregroundStyle(WTheme.muted)
         }
         .listStyle(.plain)
         .navigationTitle("Preferences")
+        .background(WTheme.bg.ignoresSafeArea())
     }
 }
 
