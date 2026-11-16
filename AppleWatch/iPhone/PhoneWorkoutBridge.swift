@@ -393,6 +393,61 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
         retryPendingWorkout()
     }
 
+    /// Same-muscle change from iPhone. Completed sets retain actual historical
+    /// exercise names; replacement affects only remaining planned work.
+    @discardableResult
+    func replaceExercise(_ exerciseID: String, with option: HCLibraryExercise) -> Bool {
+        guard let plan = workout, let index = plan.exercises.firstIndex(where: { $0.id == exerciseID }) else {
+            return false
+        }
+        let original = plan.exercises[index]
+        let muscle = HCMuscleAlternatives.primaryMuscle(for: original.name)
+        guard muscle != "Other",
+              HCMuscleAlternatives.primaryMuscle(for: option.name) == muscle,
+              HCProgramCatalog.normalized(original.name) !=
+              HCProgramCatalog.normalized(option.name) else { return false }
+        var exercises = plan.exercises
+        exercises[index] = HCMuscleAlternatives.replacing(original, with: option)
+        saveEditedWorkout(HCWorkout(id: plan.id, date: plan.date,
+                                    sessionKey: plan.sessionKey, title: plan.title,
+                                    exercises: exercises, isPreview: false))
+        status = "Swapped \(original.name) for \(option.name) · Watch sync in progress"
+        return true
+    }
+
+    /// Accepts a Watch replacement in the authoritative iPhone workout plan,
+    /// then persists it to Command Center and pushes the updated schedule.
+    @discardableResult
+    private func acceptWatchSwap(_ change: HCExerciseSwap) -> Bool {
+        guard let plan = workout,
+              plan.id == change.workoutID, plan.date == change.workoutDate,
+              let index = plan.exercises.firstIndex(where: { $0.id == change.exerciseID })
+        else { return false }
+        let current = plan.exercises[index]
+        if current.name == change.replacement.name { return true } // duplicate
+        let key = "\(plan.id)|\(change.exerciseID)"
+        let receivedAt: [String: Date] = read("watch-swap-last-applied.json") ?? [:]
+        if let newer = receivedAt[key], newer > change.createdAt { return true }
+        guard current.id == change.replacement.id,
+              current.exerciseIndex == change.replacement.exerciseIndex,
+              current.prescribedSets == change.replacement.prescribedSets,
+              current.name == change.previousName,
+              HCMuscleAlternatives.primaryMuscle(for: current.name) != "Other",
+              HCMuscleAlternatives.primaryMuscle(for: current.name) ==
+                  HCMuscleAlternatives.primaryMuscle(for: change.replacement.name)
+        else { return false }
+        var exercises = plan.exercises
+        exercises[index] = change.replacement
+        var timestamps = receivedAt
+        timestamps[key] = change.createdAt
+        save(timestamps, name: "watch-swap-last-applied.json")
+        saveEditedWorkout(HCWorkout(id: plan.id, date: plan.date,
+                                    sessionKey: plan.sessionKey, title: plan.title,
+                                    exercises: exercises, isPreview: false))
+        status = "Watch exercise swap saved · \(change.replacement.name)"
+        return true
+    }
+
     func retryPendingWorkout() {
         guard signedIn, !savingPlan, let toSave = pendingEditedWorkout else { return }
         savingPlan = true
@@ -892,6 +947,14 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
             }
             return
         }
+        if kind == HCPayload.exerciseSwap,
+           let payload = message[HCPayload.data] as? Data,
+           let change = try? decoder.decode(HCExerciseSwap.self, from: payload) {
+            DispatchQueue.main.async {
+                replyHandler(["saved": self.acceptWatchSwap(change)])
+            }
+            return
+        }
         if kind == HCPayload.syncRequest {
             DispatchQueue.main.async {
                 self.retryPendingCloudSets()
@@ -938,6 +1001,13 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
         guard let kind = userInfo[HCPayload.kind] as? String,
               let payload = userInfo[HCPayload.data] as? Data else { return }
         switch kind {
+        case HCPayload.exerciseSwap:
+            guard let change = try? decoder.decode(HCExerciseSwap.self, from: payload) else { return }
+            DispatchQueue.main.async {
+                if self.acceptWatchSwap(change) {
+                    self.confirmWatchRecord(change.id)
+                }
+            }
         case HCPayload.loggedSet:
             guard let item = try? decoder.decode(HCLoggedSet.self,from:payload) else { return }
             DispatchQueue.main.async {
