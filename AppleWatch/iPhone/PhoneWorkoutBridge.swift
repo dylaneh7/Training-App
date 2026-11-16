@@ -265,6 +265,12 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
                     let queueOnCompletion = self.sendAfterCalendarRefresh
                     self.sendAfterCalendarRefresh = false
                     self.sendToWatch(forceQueue: queueOnCompletion)
+                    // Publish the same dated workout the iPhone shows. The
+                    // Watch can fetch it securely from the user's account
+                    // if Apple's companion registration stops working.
+                    if saved == nil, let active, active.date == dateText {
+                        Task { try? await self.cloud.saveWorkout(active) }
+                    }
                     self.retryPendingCloudSets()
                     self.retryPendingWorkout()
                 }
@@ -320,6 +326,9 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
                     let manualDelivery = forceWatchDelivery || self.sendAfterCalendarRefresh
                     self.sendAfterCalendarRefresh = false
                     self.sendToWatch(forceQueue: manualDelivery)
+                    if published == nil, let ready = self.workout, ready.date == day {
+                        Task { try? await self.cloud.saveWorkout(ready) }
+                    }
                 }
             } catch {
                 DispatchQueue.main.async {
