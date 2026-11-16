@@ -732,7 +732,11 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
         }
         if let data = context[HCPayload.schedule] as? Data,
            let snapshot = try? decoder.decode(HCWatchSchedule.self, from: data) {
-            DispatchQueue.main.async { self.applySchedule(snapshot) }
+            if Thread.isMainThread {
+                applySchedule(snapshot)
+            } else {
+                DispatchQueue.main.async { self.applySchedule(snapshot) }
+            }
         }
         if let data = context["hcRecoverySnapshot"] as? Data,
            let reading = try? decoder.decode(HCRecoveryDatum.self, from: data) {
@@ -829,19 +833,59 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
         applyContext(context)
     }
 
+    /// Only acknowledge a schedule after it decodes and has been applied.
+    /// A transport-level reply by itself must not be reported as a loaded lift.
+    private func confirmedSchedule(_ incoming: HCWatchSchedule) -> Bool {
+        guard let current = latestSchedule,
+              current.date == incoming.date,
+              current.state == incoming.state,
+              current.workout?.id == incoming.workout?.id else { return false }
+        // An ongoing older workout is intentionally protected from replacement,
+        // but in that case the new workout is not yet available for training.
+        if incoming.state == "ready", let scheduled = incoming.workout {
+            return workout.id == scheduled.id && hasScheduledLift
+        }
+        return true
+    }
+
     func session(_ session: WCSession, didReceiveMessage message: [String: Any],
                  replyHandler: @escaping ([String: Any]) -> Void) {
-        if message[HCPayload.kind] as? String == HCPayload.pushSchedule {
-            applyContext(message)
-            replyHandler(["received": true])
-        } else {
-            replyHandler(["received": false])
+        guard message[HCPayload.kind] as? String == HCPayload.pushSchedule,
+              let bytes = message[HCPayload.schedule] as? Data,
+              let incoming = try? decoder.decode(HCWatchSchedule.self, from: bytes),
+              incoming.date == Self.today() else {
+            replyHandler(["received": false, "reason": "Missing or outdated workout schedule"])
+            return
+        }
+        DispatchQueue.main.async {
+            self.applyContext(message)
+            let accepted = self.confirmedSchedule(incoming)
+            replyHandler([
+                "received": accepted,
+                "scheduleState": self.scheduleState,
+                "workoutID": self.latestSchedule?.workout?.id ?? "",
+                "reason": accepted ? "" : "Watch did not load this workout"
+            ])
         }
     }
 
     func session(_ session: WCSession, didReceiveUserInfo userInfo: [String: Any] = [:]) {
         if userInfo[HCPayload.kind] as? String == HCPayload.pushSchedule {
-            applyContext(userInfo)
+            guard let bytes = userInfo[HCPayload.schedule] as? Data,
+                  let incoming = try? decoder.decode(HCWatchSchedule.self, from: bytes),
+                  incoming.date == Self.today() else { return }
+            DispatchQueue.main.async {
+                self.applyContext(userInfo)
+                guard self.confirmedSchedule(incoming) else { return }
+                // A queued transfer also deserves a receipt: otherwise iPhone
+                // cannot distinguish "sent" from "loaded" when Watch was offline.
+                session.transferUserInfo([
+                    HCPayload.kind: HCPayload.scheduleReceipt,
+                    "date": incoming.date,
+                    "scheduleState": incoming.state,
+                    "workoutID": incoming.workout?.id ?? ""
+                ])
+            }
             return
         }
         if userInfo[HCPayload.kind] as? String == HCPayload.syncReceipt {
