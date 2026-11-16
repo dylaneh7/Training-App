@@ -25,6 +25,7 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
     @Published private(set) var status = "Preparing Health Coach…"
     @Published private(set) var watchSyncStatus = "Waiting for Watch connection"
     @Published private(set) var watchConnectionDetails = "Connection not checked"
+    @Published private(set) var designCloudStatus = "Design saved on this iPhone"
     @Published private(set) var watchLastAcknowledgedAt: Date?
     private var sendAfterCalendarRefresh = false
     private var sendWhenWatchActivated = false
@@ -339,6 +340,33 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
                         self.sendAfterCalendarRefresh = false
                     }
                     self.status = "Calendar refresh failed; last confirmed plan preserved."
+                }
+            }
+        }
+    }
+
+    /// Independent of Apple's companion-app registration. A cloud-signed-in
+    /// Watch can fetch these appearance values using its own account token.
+    func publishDesignToCloud() {
+        guard signedIn else {
+            designCloudStatus = "Sign in to share your look with Watch"
+            return
+        }
+        guard UserDefaults.standard.bool(forKey: "hcDesignWatchSyncEnabled") else {
+            designCloudStatus = "Design saved only on this iPhone"
+            return
+        }
+        let payload = IMUNStyle.cloudPayload()
+        designCloudStatus = "Sharing design through cloud…"
+        Task {
+            do {
+                try await cloud.saveVisualPreferences(payload)
+                DispatchQueue.main.async {
+                    self.designCloudStatus = "Watch design saved to your cloud account"
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    self.designCloudStatus = "Cloud design sync failed: " + error.localizedDescription
                 }
             }
         }
