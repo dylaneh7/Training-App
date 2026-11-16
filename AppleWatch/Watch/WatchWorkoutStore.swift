@@ -746,6 +746,13 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
     /// last context. Queue an offline request when live messaging is unavailable.
     func requestCurrentSchedule(manual: Bool = false) {
         invalidatePreviousDayIfNeeded()
+        // A normal Refresh should work even when watchOS says the iPhone
+        // companion is absent. The authenticated cloud route has its own
+        // network transport and never waits for WatchConnectivity.
+        if manual && cloudSignedIn {
+            refreshCloudWorkout()
+            uploadPendingCloudSets()
+        }
         guard WCSession.isSupported() else {
             status = "iPhone sync isn't supported on this Watch."
             isRequestingSchedule = false
