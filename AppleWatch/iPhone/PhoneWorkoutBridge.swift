@@ -922,6 +922,10 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
         guard let kind = message[HCPayload.kind] as? String else {
             replyHandler([:]); return
         }
+        if kind == "imunDiagnosticPingV1" {
+            replyHandler(["imunDiagnosticPong": true])
+            return
+        }
         if kind == HCPayload.requestSchedule {
             DispatchQueue.main.async {
                 // Reply promptly with the last confirmed date-scoped snapshot,
