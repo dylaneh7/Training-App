@@ -94,12 +94,23 @@ struct PremiumHomeView: View {
 
     private func configureTabAppearance() {
         let bar = UITabBarAppearance()
-        bar.configureWithOpaqueBackground()
-        bar.backgroundColor = UIColor(HCDesign.canvas)
+        if IMUNStyle.navigation == "editorial" {
+            // Light, translucent tab rail for Atelier / editorial layouts.
+            bar.configureWithDefaultBackground()
+            bar.backgroundColor = UIColor(HCDesign.canvas).withAlphaComponent(0.78)
+            bar.shadowColor = .clear
+        } else {
+            bar.configureWithOpaqueBackground()
+            bar.backgroundColor = IMUNStyle.navigation == "sport"
+                ? UIColor(HCDesign.electric).withAlphaComponent(0.16)
+                : UIColor(HCDesign.canvas)
+        }
         bar.stackedLayoutAppearance.normal.iconColor = UIColor(HCDesign.secondary)
-        bar.stackedLayoutAppearance.normal.titleTextAttributes = [.foregroundColor: UIColor(HCDesign.secondary)]
+        bar.stackedLayoutAppearance.normal.titleTextAttributes = [
+            .foregroundColor: UIColor(HCDesign.secondary)]
         bar.stackedLayoutAppearance.selected.iconColor = UIColor(HCDesign.electric)
-        bar.stackedLayoutAppearance.selected.titleTextAttributes = [.foregroundColor: UIColor(HCDesign.electric)]
+        bar.stackedLayoutAppearance.selected.titleTextAttributes = [
+            .foregroundColor: UIColor(HCDesign.electric)]
         UITabBar.appearance().standardAppearance = bar
         UITabBar.appearance().scrollEdgeAppearance = bar
     }
