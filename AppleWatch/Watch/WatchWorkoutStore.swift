@@ -1100,7 +1100,7 @@ private actor HCWatchCloudFallback {
     private let base = URL(string: "https://ecmosmmqloyahsdcxvpz.supabase.co")!
     // Supabase publishable key; user data remains protected by JWT and RLS.
     private let publishableKey = "sb_publishable_ClssY_cSAW7Lv7O2VG6jBg_yTDZW1fJ"
-    private var token: HCWatchCloudToken? = Self.loadToken()
+    private var token: HCWatchCloudToken? = HCWatchCloudFallback.loadToken()
 
     private static let service = "imun.watch.cloud"
     private static let account = "session"
