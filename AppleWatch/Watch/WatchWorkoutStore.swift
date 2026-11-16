@@ -28,11 +28,6 @@ struct HCTrainingClock: Codable {
     }
 }
 
-struct HCGuidedSetChoice: Codable, Equatable {
-    let exerciseID: String
-    let setNumber: Int
-}
-
 final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
     @Published private(set) var workout: HCWorkout = .unscheduled(date: WatchWorkoutStore.today())
     @Published private(set) var scheduleState = "loading"
