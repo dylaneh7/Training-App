@@ -295,6 +295,18 @@ struct WatchWorkoutView: View {
                         .font(.system(size: 11, weight: .semibold))
                         .buttonStyle(.bordered)
                         .tint(WTheme.aqua)
+                        Button {
+                            store.checkPhoneConnection()
+                        } label: {
+                            Label("Check iPhone link", systemImage: "antenna.radiowaves.left.and.right")
+                        }
+                        .font(.system(size: 11, weight: .semibold))
+                        .buttonStyle(.bordered)
+                        .tint(WTheme.aqua)
+                        Text(store.phoneConnectionStatus)
+                            .font(.system(size: 10))
+                            .foregroundStyle(WTheme.aqua)
+                            .fixedSize(horizontal: false, vertical: true)
                         Text(store.status)
                             .font(.system(size: 10))
                             .foregroundStyle(WTheme.muted)
@@ -374,9 +386,15 @@ struct WatchWorkoutView: View {
         .tint(WTheme.lime)
         .preferredColorScheme(.dark)
         .id(accent)
-        .onAppear { store.requestCurrentSchedule() }
+        .onAppear {
+            store.checkPhoneConnection()
+            store.requestCurrentSchedule()
+        }
         .onChange(of: scenePhase) { _, phase in
-            if phase == .active { store.requestCurrentSchedule() }
+            if phase == .active {
+                store.checkPhoneConnection()
+                store.requestCurrentSchedule()
+            }
         }
     }
 }
