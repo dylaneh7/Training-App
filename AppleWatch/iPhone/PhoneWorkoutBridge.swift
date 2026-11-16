@@ -28,6 +28,9 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
     @Published private(set) var watchLastAcknowledgedAt: Date?
     private var sendAfterCalendarRefresh = false
     private var sendWhenWatchActivated = false
+    // If the OS temporarily reports the companion missing, never throw away
+    // the user's requested delivery. Re-check on pairing/reachability changes.
+    private var watchDeliveryWaitingForRegistration = false
     @Published private(set) var signedIn = false
     @Published private(set) var loading = false
     @Published private(set) var savingPlan = false
@@ -669,15 +672,20 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
             watchSyncStatus = "No paired Apple Watch recognized by this iPhone"
             return
         }
-        guard connection.isWatchAppInstalled else {
-            watchSyncStatus = "iPhone doesn't recognize this iMun Watch app. " +
-                "Check the iPhone Watch app → My Watch → Installed on Apple Watch. " +
-                "Then run HealthCoachWatch on the paired physical Watch in Xcode."
-            return
-        }
+        // Do not block the entire workout pipeline on a stale
+        // isWatchAppInstalled value. On some developer installations the
+        // iPhone reports false even when the physical Watch has the app.
+        // Try the transport and handle the real result, not just this hint.
+        let isRegistered = connection.isWatchAppInstalled
+        if !isRegistered { watchDeliveryWaitingForRegistration = true }
         do {
             let current = try watchContext()
-            try connection.updateApplicationContext(current)
+            var contextFailure: Error?
+            do {
+                try connection.updateApplicationContext(current)
+            } catch {
+                contextFailure = error
+            }
             guard let scheduleBytes = current[HCPayload.schedule] as? Data,
                   let scheduled = try? decoder.decode(HCWatchSchedule.self,
                                                       from: scheduleBytes) else {
@@ -686,6 +694,12 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
             }
             var packet = current
             packet[HCPayload.kind] = HCPayload.pushSchedule
+            if let contextFailure {
+                watchSyncStatus = "Watch context not delivered: " +
+                    contextFailure.localizedDescription
+                if forceQueue { queueWatchDelivery(packet) }
+                return
+            }
             if connection.isReachable {
                 connection.sendMessage(packet, replyHandler: { [weak self] reply in
                     DispatchQueue.main.async {
@@ -721,6 +735,8 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
                 watchSyncStatus = "Sending today's plan to Watch…"
             } else if forceQueue {
                 queueWatchDelivery(packet)
+            } else if !isRegistered {
+                watchSyncStatus = "Workout prepared · waiting for watchOS to recognize iMun"
             } else {
                 watchSyncStatus = "Plan ready · waiting for Watch to connect"
             }
@@ -742,7 +758,9 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
             return queued == next
         }
         if !hasIdenticalPending { connection.transferUserInfo(packet) }
-        watchSyncStatus = "Queued for Watch · open imun on both devices"
+        watchSyncStatus = connection.isWatchAppInstalled
+            ? "Workout queued for Watch · awaiting confirmation"
+            : "Workout queued · watchOS has not recognized the companion yet"
     }
 
     func startPhoneWorkout() {
@@ -889,8 +907,7 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
     private func confirmWatchRecord(_ id: UUID) {
         guard WCSession.isSupported(),
               WCSession.default.activationState == .activated,
-              WCSession.default.isPaired,
-              WCSession.default.isWatchAppInstalled else { return }
+              WCSession.default.isPaired else { return }
         WCSession.default.transferUserInfo([
             HCPayload.kind: HCPayload.syncReceipt,
             "recordID": id.uuidString
@@ -976,17 +993,45 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
     func sessionWatchStateDidChange(_ session: WCSession) {
         DispatchQueue.main.async {
             self.checkWatchConnection()
-            // A new pairing/installation changes the route. The user can use
-            // Refresh & send to retry once the installed state says Yes.
+            guard session.activationState == .activated,
+                  session.isPaired, session.isWatchAppInstalled,
+                  self.watchDeliveryWaitingForRegistration else { return }
+            self.watchDeliveryWaitingForRegistration = false
+            // Registration is finally visible: resend the current dated plan,
+            // even if the user is no longer looking at the Connections page.
+            self.refreshTodaySchedule(forceWatchDelivery: true)
         }
     }
 
     func sessionReachabilityDidChange(_ session: WCSession) {
-        DispatchQueue.main.async { self.checkWatchConnection() }
+        DispatchQueue.main.async {
+            self.checkWatchConnection()
+            if session.activationState == .activated, session.isReachable,
+               self.signedIn, self.confirmedScheduleDate == HCPlanBuilder.dateString(Date()) {
+                self.sendToWatch(forceQueue: false)
+            }
+        }
     }
 
     func sessionDidBecomeInactive(_ session: WCSession) {}
     func sessionDidDeactivate(_ session: WCSession) { session.activate() }
+
+    func session(_ session: WCSession,
+                 didFinish userInfoTransfer: WCSessionUserInfoTransfer,
+                 error: Error?) {
+        guard userInfoTransfer.userInfo[HCPayload.kind] as? String == HCPayload.pushSchedule else {
+            return
+        }
+        DispatchQueue.main.async {
+            if let error {
+                self.watchSyncStatus = "Watch delivery failed: " + error.localizedDescription
+            } else {
+                // A completed background transfer is not a loaded-workout
+                // acknowledgment. The Watch separately sends a scheduleReceipt.
+                self.watchSyncStatus = "Workout transferred · awaiting Watch confirmation"
+            }
+        }
+    }
 
     func session(_ session: WCSession, didReceiveUserInfo userInfo: [String: Any] = [:]) {
         if userInfo[HCPayload.kind] as? String == HCPayload.requestSchedule {
