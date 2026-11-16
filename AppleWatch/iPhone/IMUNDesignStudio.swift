@@ -85,6 +85,31 @@ struct IMUNDesignStudioPage: View {
                     }
                 }
 
+                HCSectionTitle(title: "Motivation", detail: "Independent of your theme")
+                NavigationLink {
+                    IMUNMotivationPage()
+                } label: {
+                    HCCard {
+                        HStack(spacing: 12) {
+                            Image(systemName: "book.closed")
+                                .font(.title2)
+                                .foregroundStyle(HCDesign.aqua)
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("WORDS TO TRAIN BY")
+                                    .font(HCDesign.label(12)).tracking(1)
+                                    .foregroundStyle(HCDesign.ink)
+                                Text("Off, original writing, performance, Scripture references, or your own.")
+                                    .font(.caption)
+                                    .foregroundStyle(HCDesign.secondary)
+                            }
+                            Spacer(minLength: 0)
+                            Image(systemName: "chevron.right")
+                                .foregroundStyle(HCDesign.secondary)
+                        }
+                    }
+                }
+                .buttonStyle(.plain)
+
                 HCSectionTitle(title: "Layout & typography")
                 HCCard {
                     VStack(alignment: .leading, spacing: 12) {
