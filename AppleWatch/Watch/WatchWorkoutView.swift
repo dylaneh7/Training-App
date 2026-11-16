@@ -307,6 +307,18 @@ struct WatchWorkoutView: View {
                             .font(.system(size: 10))
                             .foregroundStyle(WTheme.aqua)
                             .fixedSize(horizontal: false, vertical: true)
+                        Button {
+                            store.testPhoneLink()
+                        } label: {
+                            Label("Test live iPhone link", systemImage: "waveform.path")
+                        }
+                        .font(.system(size: 11, weight: .semibold))
+                        .buttonStyle(.bordered)
+                        .tint(WTheme.aqua)
+                        Text(store.phonePingStatus)
+                            .font(.system(size: 10))
+                            .foregroundStyle(WTheme.muted)
+                            .fixedSize(horizontal: false, vertical: true)
                         Text(store.status)
                             .font(.system(size: 10))
                             .foregroundStyle(WTheme.muted)
