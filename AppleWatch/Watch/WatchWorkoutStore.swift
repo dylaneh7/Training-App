@@ -214,6 +214,26 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
         }
     }
 
+    /// A busy machine may require changing the active set before it is done.
+    /// This intentionally abandons only its unrecorded timer, never a logged set.
+    func switchToQueuedSetNow() {
+        guard let choice = validChoice(queuedNextGuidedSet),
+              let exercise = workout.exercises.first(where: {
+                  $0.id == choice.exerciseID
+              }) else { return }
+        if liftClock?.setStartedAt != nil { cancelSet() }
+        queuedNextGuidedSet = nil
+        try? FileManager.default.removeItem(at:
+            directory.appendingPathComponent("queued-guided-set.json"))
+        selectGuidedSet(exercise, setNumber: choice.setNumber)
+        if let rest = liftClock?.restEndsAt, rest > Date() {
+            skipRest()
+        } else {
+            startSet(for: exercise)
+        }
+        status = "Switched to \(exercise.name) set \(choice.setNumber) without logging the previous set"
+    }
+
     func selectGuidedExercise(_ exercise: HCExercise) {
         guard let number = firstUnfinishedSet(in: exercise) else { return }
         selectGuidedSet(exercise, setNumber: number)
@@ -261,7 +281,12 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
 
     func resumeLifting() {
         guard var clock = liftClock, clock.isPaused, let paused = clock.pausedAt else { return }
-        clock.pausedSeconds += Date().timeIntervalSince(paused)
+        let pausedTime = Date().timeIntervalSince(paused)
+        clock.pausedSeconds += pausedTime
+        // Pausing the workout also pauses its prescribed recovery countdown.
+        if let rest = clock.restEndsAt {
+            clock.restEndsAt = rest.addingTimeInterval(pausedTime)
+        }
         clock.pausedAt = nil
         liftClock = clock
         save(clock, name: "lifting-clock.json")
