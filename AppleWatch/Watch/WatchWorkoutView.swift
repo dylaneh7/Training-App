@@ -898,7 +898,10 @@ private struct WatchGuidedSession: View {
 
     private func loadNextTargets() {
         guard let next = current else { return }
-        let previous = store.completedSets(for: next).last
+        // Never reuse another exercise variation's previous load merely
+        // because its prescribed slot ID stayed the same after a swap.
+        let previous = store.completedSets(for: next)
+            .last(where: { $0.exerciseName == next.name })
         let suggested = previous?.weightLb ?? next.suggestedWeightLb
         if let suggested, suggested > 0 {
             weight = suggested
