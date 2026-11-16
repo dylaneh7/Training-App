@@ -22,6 +22,7 @@ struct IMUNDesignStudioPage: View {
     @AppStorage("hcDesignNavigation") private var navigation = "standard"
     @AppStorage("hcDesignProgress") private var progress = "ring"
     @AppStorage("hcDesignReduceMotion") private var reduceMotion = false
+    @AppStorage("hcDesignWatchSyncEnabled") private var shareWithWatch = false
 
     var body: some View {
         ScrollView {
@@ -152,9 +153,10 @@ struct IMUNDesignStudioPage: View {
                             .foregroundStyle(HCDesign.secondary)
                         HCFilledButton(title: "SEND DESIGN TO WATCH",
                                        icon: "applewatch") {
+                            shareWithWatch = true
                             coach.sendToWatch(forceQueue: true)
                         }
-                        Text("If the Watch is connected directly to the cloud instead, select your preset from Watch → Preferences. Design options are saved on each device.")
+                        Text("If the Watch uses direct cloud sync or can't reach the iPhone, select your look in Watch → Preferences. You can turn off sharing there to keep a different Watch look.")
                             .font(.caption2)
                             .foregroundStyle(HCDesign.secondary)
                     }
