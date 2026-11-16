@@ -407,7 +407,7 @@ extension View {
             .foregroundStyle(HCDesign.ink)
             .background(HCAppBackground())
             .toolbarBackground(HCDesign.canvas, for: .navigationBar)
-            .toolbarColorScheme(.dark, for: .navigationBar)
+            .toolbarColorScheme(IMUNStyle.preferredScheme, for: .navigationBar)
     }
 }
 
