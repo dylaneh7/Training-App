@@ -192,7 +192,9 @@ struct IMUNDesignStudioPage: View {
         .hcPage()
         .navigationTitle("Design studio")
         .navigationBarTitleDisplayMode(.inline)
-        .onChange(of: preset) { _, _ in coach.sendToWatch() }
+        .onChange(of: preset) { _, _ in
+            if shareWithWatch { coach.sendToWatch() }
+        }
     }
 
     private func colorRow(_ title: String, hex: Binding<String>) -> some View {
