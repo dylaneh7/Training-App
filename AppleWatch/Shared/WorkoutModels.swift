@@ -183,6 +183,7 @@ enum HCPayload {
     static let schedule = "scheduleSnapshotV2"
     static let requestSchedule = "requestScheduleV2"
     static let pushSchedule = "pushScheduleV3"
+    static let scheduleReceipt = "scheduleReceiptV1"
     static let syncRequest = "syncRequestV3"
     static let syncReceipt = "syncReceiptV3"
     static let workout = "workout"
