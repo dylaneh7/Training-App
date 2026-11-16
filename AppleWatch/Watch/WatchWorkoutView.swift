@@ -252,6 +252,7 @@ struct WatchWorkoutView: View {
                         if store.cloudSignedIn {
                             Button {
                                 store.refreshCloudWorkout()
+                store.refreshCloudAppearance()
                                 store.uploadPendingCloudSets()
                             } label: {
                                 WDestination(symbol: "icloud.and.arrow.down",
@@ -346,6 +347,7 @@ struct WatchWorkoutView: View {
                         if store.cloudSignedIn {
                             Button {
                                 store.refreshCloudWorkout()
+                store.refreshCloudAppearance()
                                 store.uploadPendingCloudSets()
                             } label: {
                                 Label("Load workout from cloud", systemImage: "icloud.and.arrow.down")
@@ -452,6 +454,7 @@ struct WatchWorkoutView: View {
             store.requestCurrentSchedule()
             if store.cloudSignedIn {
                 store.refreshCloudWorkout()
+                store.refreshCloudAppearance()
             }
         }
         .onChange(of: scenePhase) { _, phase in
@@ -460,6 +463,7 @@ struct WatchWorkoutView: View {
                 store.requestCurrentSchedule()
                 if store.cloudSignedIn {
                     store.refreshCloudWorkout()
+                store.refreshCloudAppearance()
                 }
             }
         }
@@ -1067,6 +1071,19 @@ private struct WatchPreferences: View {
                 }
                 Toggle("Use iPhone style when sent", isOn: $acceptPhoneLook)
                     .tint(WTheme.lime)
+                if acceptPhoneLook {
+                    Button {
+                        store.refreshCloudAppearance()
+                    } label: {
+                        Label("Sync iPhone design from cloud",
+                              systemImage: "arrow.triangle.2.circlepath")
+                    }
+                    .disabled(!store.cloudSignedIn)
+                    .font(.system(size: 12, weight: .semibold))
+                    Text(store.designSyncStatus)
+                        .font(.system(size: 10))
+                        .foregroundStyle(WTheme.muted)
+                }
                 Toggle("Custom layout", isOn: $customGeometry)
                     .tint(WTheme.lime)
                 if customGeometry {
