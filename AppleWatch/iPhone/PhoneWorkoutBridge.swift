@@ -615,9 +615,14 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
             result.routePoints = []
             return result
         }
-        context[HCPayload.runHistory] = try encoder.encode(summaries)
-        if let recent = recoveryHistory.first {
-            context["hcRecoverySnapshot"] = try encoder.encode(recent)
+        // Optional history must never prevent delivery of today's actual workout.
+        // WCSession interactive messages also have tight payload size limits.
+        if let history = try? encoder.encode(summaries), history.count < 40_000 {
+            context[HCPayload.runHistory] = history
+        }
+        if let recent = recoveryHistory.first,
+           let snapshot = try? encoder.encode(recent), snapshot.count < 16_000 {
+            context["hcRecoverySnapshot"] = snapshot
         }
         return context
     }
