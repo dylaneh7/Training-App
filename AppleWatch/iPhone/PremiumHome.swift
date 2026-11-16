@@ -297,6 +297,7 @@ private struct PremiumStrengthPage: View {
     @AppStorage("hcAggressiveProgression") private var aggressive = true
     @State private var showEditor = false
     @State private var showNew = false
+    @State private var swapTarget: HCExercise?
     @State private var newTitle = "Full Body Strength"
 
     private var plan: HCWorkout? { coach.workout }
@@ -361,6 +362,12 @@ private struct PremiumStrengthPage: View {
                                     coach.finishPhoneWorkout()
                                 }
                             }
+                            if coach.lastReplacedExercise != nil {
+                                HCOutlineButton(title: "Undo last exercise swap",
+                                                icon: "arrow.uturn.backward") {
+                                    coach.undoLastExerciseReplacement()
+                                }
+                            }
                             HStack(spacing: 10) {
                                 HCOutlineButton(title: "Edit program", icon: "slider.horizontal.3") {
                                     showEditor = true
@@ -379,18 +386,40 @@ private struct PremiumStrengthPage: View {
                             }
                         }
                     }
-                    HCSectionTitle(title: "Workout lineup", detail: "Tap to train")
+                    if coach.phoneSessionStartedAt != nil {
+                        PremiumPhoneGuidedWorkout()
+                    }
+                    HCSectionTitle(title: "Workout lineup",
+                                   detail: "Choose a set or swap a movement")
                     ForEach(plan.exercises.indices, id: \.self) { index in
                         let exercise = plan.exercises[index]
-                        NavigationLink {
-                            PremiumExerciseSession(exerciseID: exercise.id)
-                        } label: {
-                            PremiumExerciseCard(index: index + 1, exercise: exercise,
-                                                workoutDate: plan.date,
-                                                logged: doneSets.filter { $0.exerciseID == exercise.id },
-                                                aggressive: aggressive)
+                        VStack(spacing: 5) {
+                            NavigationLink {
+                                PremiumExerciseSession(exerciseID: exercise.id)
+                            } label: {
+                                PremiumExerciseCard(index: index + 1, exercise: exercise,
+                                                    workoutDate: plan.date,
+                                                    logged: doneSets.filter { $0.exerciseID == exercise.id },
+                                                    aggressive: aggressive)
+                            }
+                            .buttonStyle(.plain)
+                            HStack(spacing: 10) {
+                                Button {
+                                    swapTarget = exercise
+                                } label: {
+                                    Label("Swap · Same muscle", systemImage: "arrow.left.arrow.right")
+                                        .font(.system(size: 12, weight: .semibold))
+                                        .foregroundStyle(HCDesign.aqua)
+                                }
+                                .buttonStyle(.plain)
+                                Spacer()
+                                Text(HCMuscleAlternatives.primaryMuscle(for: exercise.name))
+                                    .font(HCDesign.label(10))
+                                    .foregroundStyle(HCDesign.secondary)
+                            }
+                            .padding(.horizontal, 14)
+                            .padding(.bottom, 8)
                         }
-                        .buttonStyle(.plain)
                     }
                     HCOutlineButton(title: "Add or rearrange exercises", icon: "plus") {
                         showEditor = true
@@ -434,6 +463,10 @@ private struct PremiumStrengthPage: View {
         }
         .sheet(isPresented: $showEditor) {
             PremiumWorkoutEditor()
+                .environmentObject(coach)
+        }
+        .sheet(item: $swapTarget) { exercise in
+            PremiumMuscleSwapPicker(exercise: exercise)
                 .environmentObject(coach)
         }
         .alert("New training session", isPresented: $showNew) {
