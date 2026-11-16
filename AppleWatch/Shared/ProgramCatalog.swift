@@ -235,12 +235,15 @@ enum HCMuscleAlternatives {
         if n.contains("lateral raise") { return "Side delts" }
         if n.contains("shoulder press") || n.contains("overhead press") { return "Shoulders" }
         if n.contains("shrug") { return "Traps" }
+        // Check chest first: "flat bench" contains the letters "lat",
+        // but it does not work the lats.
         if n.contains("bench") || n.contains("chest") ||
            n.contains("push up") || n.contains("pushup") ||
            n.contains("dip") || n.contains("cable fly") ||
            n.contains("pec deck") || n.contains("low to high") { return "Chest" }
-        if n.contains("lat") || n.contains("pulldown") ||
-           n.contains("pull up") || n.contains("pullup") { return "Lats" }
+        if n.contains("lat pulldown") || n.contains("pulldown") ||
+           n.contains("pull up") || n.contains("pullup") ||
+           n.contains("lat prayer") { return "Lats" }
         if n.contains("row") { return "Back" }
         if n.contains("squat") || n.contains("leg press") ||
            n.contains("leg extension") || n.contains("split squat") { return "Quads" }
