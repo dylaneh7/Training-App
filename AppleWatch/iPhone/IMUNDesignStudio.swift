@@ -24,6 +24,16 @@ struct IMUNDesignStudioPage: View {
     @AppStorage("hcDesignReduceMotion") private var reduceMotion = false
     @AppStorage("hcDesignWatchSyncEnabled") private var shareWithWatch = false
 
+    // Debounce ColorPicker scrubbing so we do not flood the user's cloud
+    // with rapid intermediate settings while dragging a color wheel.
+    private var cloudDesignSignature: String {
+        [preset, mode, String(customPalette), String(customGeometry),
+         accentHex, backgroundHex, surfaceHex, textHex,
+         shape, buttonShape, headingFont, density, motif,
+         navigation, progress, String(reduceMotion),
+         String(shareWithWatch)].joined(separator: ":")
+    }
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 23) {
@@ -179,9 +189,13 @@ struct IMUNDesignStudioPage: View {
                         HCFilledButton(title: "SEND DESIGN TO WATCH",
                                        icon: "applewatch") {
                             shareWithWatch = true
+                            coach.publishDesignToCloud()
                             coach.sendToWatch(forceQueue: true)
                         }
-                        Text("If the Watch uses direct cloud sync or can't reach the iPhone, select your look in Watch → Preferences. You can turn off sharing there to keep a different Watch look.")
+                        Text(coach.designCloudStatus)
+                            .font(.caption)
+                            .foregroundStyle(HCDesign.secondary)
+                        Text("Uses the same authenticated cloud connection that brought workouts back. On Watch, open Preferences to sync the design or keep your own.")
                             .font(.caption2)
                             .foregroundStyle(HCDesign.secondary)
                     }
@@ -194,6 +208,15 @@ struct IMUNDesignStudioPage: View {
         .navigationBarTitleDisplayMode(.inline)
         .onChange(of: preset) { _, _ in
             if shareWithWatch { coach.sendToWatch() }
+        }
+        .task(id: cloudDesignSignature) {
+            guard shareWithWatch, coach.signedIn else { return }
+            do {
+                try await Task.sleep(nanoseconds: 650_000_000)
+            } catch {
+                return
+            }
+            coach.publishDesignToCloud()
         }
     }
 
