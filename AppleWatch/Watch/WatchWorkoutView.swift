@@ -587,6 +587,10 @@ private struct WatchGuidedSession: View {
                         quickSetControls(current)
                     }
 
+                    ProgressView(value: Double(store.guidedCompletedSets),
+                                 total: Double(max(1, store.workout.prescribedSetCount)))
+                        .tint(WTheme.lime)
+                        .accessibilityLabel("Workout progress")
                     HStack(spacing: 5) {
                         Text("\(store.guidedCompletedSets) / \(store.workout.prescribedSetCount) COMPLETED")
                             .font(WTheme.label(9))
