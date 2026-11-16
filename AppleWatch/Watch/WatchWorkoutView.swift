@@ -319,6 +319,28 @@ struct WatchWorkoutView: View {
                             .font(.system(size: 10))
                             .foregroundStyle(WTheme.muted)
                             .fixedSize(horizontal: false, vertical: true)
+                        if store.cloudSignedIn {
+                            Button {
+                                store.refreshCloudWorkout()
+                                store.uploadPendingCloudSets()
+                            } label: {
+                                Label("Load workout from cloud", systemImage: "icloud.and.arrow.down")
+                            }
+                            .font(.system(size: 11, weight: .semibold))
+                            .buttonStyle(.bordered)
+                            .tint(WTheme.aqua)
+                        } else {
+                            NavigationLink {
+                                WatchCloudBackupSetup()
+                            } label: {
+                                Label("Connect direct cloud backup", systemImage: "icloud")
+                            }
+                            .font(.system(size: 11, weight: .semibold))
+                        }
+                        Text(store.cloudStatus)
+                            .font(.system(size: 10))
+                            .foregroundStyle(WTheme.muted)
+                            .fixedSize(horizontal: false, vertical: true)
                         Text(store.status)
                             .font(.system(size: 10))
                             .foregroundStyle(WTheme.muted)
@@ -1365,5 +1387,46 @@ private struct WatchRunDetail: View {
         .scrollIndicators(.hidden)
         .background(WTheme.bg.ignoresSafeArea())
         .navigationTitle("Run details")
+    }
+}
+
+ 
+/// Optional alternate route when Apple's paired-app registration is unreliable.
+/// Credentials are entered on the Watch and sent only to Supabase over HTTPS.
+/// The refresh token is persisted only in this Watch's Keychain.
+private struct WatchCloudBackupSetup: View {
+    @EnvironmentObject private var store: WatchWorkoutStore
+    @State private var email = ""
+    @State private var password = ""
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 9) {
+                Text("DIRECT CLOUD SYNC")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundStyle(WTheme.aqua)
+                Text("Sign in to your existing iMun account once. Your Watch can then download today's workout even if the iPhone link isn't available.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(WTheme.muted)
+                TextField("Account email", text: $email)
+                    .textContentType(.emailAddress)
+                    .textInputAutocapitalization(.never)
+                SecureField("Password", text: $password)
+                    .textContentType(.password)
+                Button("Sign in & load") {
+                    store.signInToCloud(email: email, password: password)
+                    password = ""
+                }
+                .disabled(email.isEmpty || password.isEmpty)
+                .buttonStyle(.borderedProminent)
+                .tint(WTheme.lime)
+                Text(store.cloudStatus)
+                    .font(.system(size: 11))
+                    .foregroundStyle(WTheme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(.horizontal, 5)
+        }
+        .navigationTitle("Cloud backup")
     }
 }
