@@ -80,6 +80,18 @@ enum IMUNPreset: String, CaseIterable, Identifiable {
         case .rally: return "13191F"
         }
     }
+    var darkSurface: String {
+        switch self {
+        case .heritage: return "23332B"
+        case .retro: return "3A302B"
+        case .techno: return "111D2A"
+        case .coast: return "17404A"
+        case .fieldNotes: return "2C392B"
+        case .discipline: return "1D2224"
+        case .atelier: return "302825"
+        case .rally: return "202D38"
+        }
+    }
     var lightBackground: String {
         switch self {
         case .heritage: return "F1EBDD"
@@ -246,9 +258,9 @@ enum IMUNStyle {
             : adaptive(light: p.lightBackground, dark: p.darkBackground)
         let surface = customPalette
             ? resolvedColor(prefs.string(forKey: "hcDesignSurfaceHex") ?? "243332")
-            : adaptive(light: "FFFFFF", dark: p.darkBackground)
+            : adaptive(light: "FFFFFF", dark: p.darkSurface)
         let raised = customPalette ? surface.opacity(0.94) :
-            adaptive(light: "E6E2D9", dark: p.darkBackground)
+            adaptive(light: "E6E2D9", dark: p.darkSurface)
         let ink = customPalette
             ? resolvedColor(prefs.string(forKey: "hcDesignTextHex") ?? "F4F5F2")
             : adaptive(light: "222727", dark: "F6F3E9")
@@ -264,7 +276,7 @@ enum IMUNStyle {
     }
     static var onAccent: Color {
         switch preset {
-        case .discipline: return resolvedColor("101316")
+        case .techno, .heritage: return .white
         default: return resolvedColor("0B1519")
         }
     }
