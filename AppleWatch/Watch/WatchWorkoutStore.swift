@@ -50,6 +50,7 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
     @Published private(set) var runClock: HCTrainingClock?
     @Published private(set) var status = "Ready to train"
     @Published private(set) var phoneConnectionStatus = "iPhone connection not checked"
+    @Published private(set) var phonePingStatus = "No live connection test performed"
     @Published private(set) var isRequestingSchedule = false
     @Published private(set) var lastPhoneAcknowledgement: Date?
     private var pendingManualScheduleRequest = false
@@ -546,6 +547,40 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
             "iPhone app recognized: " +
             (connection.isCompanionAppInstalled ? "Yes" : "No") +
             " · Live reachable: " + (connection.isReachable ? "Yes" : "No")
+    }
+
+    /// A real round-trip probe avoids interpreting a boolean as a successful
+    /// connection. No private workout information is sent by this diagnostic.
+    func testPhoneLink() {
+        checkPhoneConnection()
+        guard WCSession.isSupported() else {
+            phonePingStatus = "WatchConnectivity unavailable"
+            return
+        }
+        let session = WCSession.default
+        guard session.activationState == .activated else {
+            phonePingStatus = "Watch session not activated"
+            session.activate()
+            return
+        }
+        guard session.isReachable else {
+            phonePingStatus = "No live route to iPhone for diagnostic ping"
+            return
+        }
+        phonePingStatus = "Testing iPhone connection…"
+        session.sendMessage([HCPayload.kind: "imunDiagnosticPingV1"], replyHandler: {
+            [weak self] response in
+            DispatchQueue.main.async {
+                self?.phonePingStatus =
+                    response["imunDiagnosticPong"] as? Bool == true
+                    ? "iPhone replied · live connection works"
+                    : "iPhone replied without diagnostic acknowledgment"
+            }
+        }, errorHandler: { [weak self] error in
+            DispatchQueue.main.async {
+                self?.phonePingStatus = "Ping failed: " + error.localizedDescription
+            }
+        })
     }
 
     private func invalidatePreviousDayIfNeeded() {
