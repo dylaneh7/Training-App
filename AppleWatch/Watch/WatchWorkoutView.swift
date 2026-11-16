@@ -443,7 +443,10 @@ struct WatchWorkoutView: View {
         }
         .tint(WTheme.lime)
         .preferredColorScheme(.dark)
-        .id([accent, visualPreset, String(visualCustom), visualShape, visualFont].joined(separator: ":"))
+        .animation(IMUNStyle.animationsEnabled ? .easeInOut(duration: 0.18) : nil,
+                   value: visualPreset)
+        .animation(IMUNStyle.animationsEnabled ? .easeInOut(duration: 0.18) : nil,
+                   value: visualShape)
         .onAppear {
             store.checkPhoneConnection()
             store.requestCurrentSchedule()
