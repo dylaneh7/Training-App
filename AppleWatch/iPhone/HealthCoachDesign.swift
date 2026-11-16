@@ -2,62 +2,35 @@ import SwiftUI
 
 // imun: restrained native typography, subtle graphite surfaces and a single accent.
 enum HCDesign {
-    static let canvas = Color(red: 0.027, green: 0.039, blue: 0.062)
-    static let card = Color(red: 0.060, green: 0.082, blue: 0.115)
-    static let raised = Color(red: 0.100, green: 0.124, blue: 0.163)
-    static let outline = Color(red: 0.20, green: 0.25, blue: 0.30)
-    static let ink = Color(red: 0.96, green: 0.97, blue: 0.96)
-    static let secondary = Color(red: 0.60, green: 0.66, blue: 0.70)
-    // Default: Crimson + White. Users can change this in Coach → Appearance.
-    static var style: String {
-        UserDefaults.standard.string(forKey: "hcAccentStyle") ?? "crimson"
-    }
-    static var electric: Color {
-        switch style {
-        case "lime": return Color(red: 0.76, green: 0.98, blue: 0.43)
-        case "aqua": return Color(red: 0.41, green: 0.85, blue: 0.82)
-        case "white": return .white
-        default: return Color(red: 0.83, green: 0.20, blue: 0.31) // crimson
-        }
-    }
-    static var onAccent: Color {
-        style == "crimson" ? .white : canvas
-    }
-    static var aqua: Color {
-        switch style {
-        case "crimson": return .white
-        case "white": return Color(red: 0.83, green: 0.88, blue: 0.94)
-        default: return Color(red: 0.41, green: 0.85, blue: 0.82)
-        }
-    }
-    static let amber = Color(red: 1.0, green: 0.73, blue: 0.39)
-    static let good = Color(red: 0.36, green: 0.83, blue: 0.68)
-    static let caution = Color(red: 0.99, green: 0.76, blue: 0.42)
-    static let danger = Color(red: 1.0, green: 0.46, blue: 0.48)
+    static var canvas: Color { IMUNStyle.palette.canvas }
+    static var card: Color { IMUNStyle.palette.surface }
+    static var raised: Color { IMUNStyle.palette.raised }
+    static var outline: Color { IMUNStyle.palette.outline }
+    static var ink: Color { IMUNStyle.palette.ink }
+    static var secondary: Color { IMUNStyle.palette.secondary }
+    static var electric: Color { IMUNStyle.palette.accent }
+    static var aqua: Color { IMUNStyle.palette.supporting }
+    static var onAccent: Color { IMUNStyle.onAccent }
+    static var amber: Color { Color(red: 1.0, green: 0.73, blue: 0.39) }
+    static var good: Color { Color(red: 0.36, green: 0.83, blue: 0.68) }
+    static var caution: Color { Color(red: 0.99, green: 0.76, blue: 0.42) }
+    static var danger: Color { Color(red: 1.0, green: 0.46, blue: 0.48) }
 
     static func display(_ size: CGFloat = 34) -> Font {
-        .system(size: size, weight: .semibold, design: .rounded)
+        .system(size: size, weight: .semibold, design: IMUNStyle.headingDesign)
     }
     static func metric(_ size: CGFloat = 28) -> Font {
-        .system(size: size, weight: .semibold, design: .rounded).monospacedDigit()
+        .system(size: size, weight: .semibold,
+                design: IMUNStyle.headingDesign).monospacedDigit()
     }
     static func label(_ size: CGFloat = 11) -> Font {
-        .system(size: size, weight: .medium, design: .rounded)
+        .system(size: size, weight: .medium, design: IMUNStyle.headingDesign)
     }
 }
 
 struct HCAppBackground: View {
     var body: some View {
-        ZStack {
-            HCDesign.canvas.ignoresSafeArea()
-            RadialGradient(colors: [HCDesign.electric.opacity(0.11), .clear],
-                           center: .topTrailing, startRadius: 10, endRadius: 460)
-                .ignoresSafeArea()
-            RadialGradient(colors: [Color(red: 0.09, green: 0.24, blue: 0.31).opacity(0.25), .clear],
-                           center: .bottomLeading, startRadius: 20, endRadius: 410)
-                .ignoresSafeArea()
-        }
-        .allowsHitTesting(false)
+        IMUNBackdrop()
     }
 }
 
@@ -72,23 +45,18 @@ struct HCCard<Content: View>: View {
 
     var body: some View {
         content
-            .padding(18)
+            .padding(IMUNStyle.padding)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background {
-                RoundedRectangle(cornerRadius: 22, style: .continuous)
-                    .fill(
-                        LinearGradient(
-                            colors: [HCDesign.raised.opacity(0.89),
-                                     HCDesign.card],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
+                IMUNPanelShape()
+                    .fill(LinearGradient(
+                        colors: [HCDesign.raised, HCDesign.card],
+                        startPoint: .topLeading, endPoint: .bottomTrailing))
             }
             .overlay {
-                RoundedRectangle(cornerRadius: 22, style: .continuous)
-                    .strokeBorder((accent ?? HCDesign.outline).opacity(accent == nil ? 0.7 : 0.45),
-                                  lineWidth: 1)
+                IMUNPanelShape()
+                    .stroke((accent ?? HCDesign.outline).opacity(accent == nil ? 0.7 : 0.6),
+                            lineWidth: 1)
             }
     }
 }
@@ -117,7 +85,7 @@ struct HCPremiumHero<Content: View>: View {
 
     var body: some View {
         ZStack(alignment: .topTrailing) {
-            RoundedRectangle(cornerRadius: 27, style: .continuous)
+            IMUNPanelShape()
                 .fill(LinearGradient(colors: [
                     tint.opacity(0.24), HCDesign.raised, HCDesign.card
                 ], startPoint: .topLeading, endPoint: .bottomTrailing))
@@ -142,7 +110,7 @@ struct HCPremiumHero<Content: View>: View {
                 .font(HCDesign.label(10))
                 .foregroundStyle(tint)
                 Text(title)
-                    .font(.system(size: 31, weight: .bold, design: .rounded))
+                    .font(HCDesign.display(31))
                     .tracking(-1.1)
                     .foregroundStyle(HCDesign.ink)
                     .fixedSize(horizontal: false, vertical: true)
@@ -156,9 +124,8 @@ struct HCPremiumHero<Content: View>: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .fixedSize(horizontal: false, vertical: true)
-        .clipShape(RoundedRectangle(cornerRadius: 27, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 27, style: .continuous)
-                    .strokeBorder(tint.opacity(0.24), lineWidth: 1))
+        .clipShape(IMUNPanelShape())
+        .overlay(IMUNPanelShape().stroke(tint.opacity(0.32), lineWidth: 1))
     }
 }
 
@@ -260,7 +227,10 @@ struct HCProgressRing: View {
                 .stroke(HCDesign.outline, lineWidth: 9)
             Circle()
                 .trim(from: 0, to: bounded)
-                .stroke(tint, style: StrokeStyle(lineWidth: 9, lineCap: .round))
+                .stroke(tint, style: StrokeStyle(
+                    lineWidth: 9,
+                    lineCap: IMUNStyle.progressStyle == "segmented" ? .butt : .round,
+                    dash: IMUNStyle.progressStyle == "segmented" ? [10, 5] : []))
                 .rotationEffect(.degrees(-90))
                 .shadow(color: tint.opacity(0.17), radius: 8)
             VStack(spacing: 3) {
@@ -332,7 +302,7 @@ struct HCFilledButton: View {
                 Image(systemName: icon)
                     .font(.system(size: 15, weight: .bold))
                 Text(title)
-                    .font(.system(size: 16, weight: .bold, design: .rounded))
+                    .font(.system(size: 16, weight: .bold, design: IMUNStyle.headingDesign))
                 Spacer(minLength: 0)
                 Image(systemName: "arrow.up.right")
                     .font(.system(size: 11, weight: .bold))
@@ -341,7 +311,8 @@ struct HCFilledButton: View {
             .foregroundStyle(tint == HCDesign.electric ? HCDesign.onAccent : HCDesign.canvas)
             .padding(.horizontal, 18)
             .frame(height: 55)
-            .background(tint, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .background(tint, in: IMUNPanelShape(
+                shape: IMUNStyle.buttonShape, corner: 16))
         }
         .buttonStyle(.plain)
         .disabled(disabled)
@@ -361,9 +332,10 @@ struct HCOutlineButton: View {
                 .foregroundStyle(HCDesign.ink)
                 .frame(maxWidth: .infinity)
                 .frame(height: 44)
-                .background(HCDesign.raised, in: RoundedRectangle(cornerRadius: 14))
-                .overlay(RoundedRectangle(cornerRadius: 14)
-                    .strokeBorder(HCDesign.outline.opacity(0.75)))
+                .background(HCDesign.raised, in: IMUNPanelShape(
+                    shape: IMUNStyle.buttonShape, corner: 14))
+                .overlay(IMUNPanelShape(shape: IMUNStyle.buttonShape, corner: 14)
+                    .stroke(HCDesign.outline.opacity(0.75)))
         }
         .buttonStyle(.plain)
     }
