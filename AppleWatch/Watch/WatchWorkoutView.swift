@@ -630,6 +630,22 @@ private struct WatchGuidedSession: View {
                             .font(WTheme.label(10))
                             .foregroundStyle(WTheme.aqua)
                             .fixedSize(horizontal: false, vertical: true)
+                        if active {
+                            Button {
+                                store.switchToQueuedSetNow()
+                                readyHapticSent = false
+                                wHaptic(.click)
+                            } label: {
+                                Label("SWITCH NOW · NO SET LOGGED",
+                                      systemImage: "arrow.triangle.2.circlepath")
+                                    .font(WTheme.label(10))
+                                    .foregroundStyle(WTheme.amber)
+                                    .frame(maxWidth: .infinity, minHeight: 40)
+                                    .background(WTheme.panel,
+                                                in: RoundedRectangle(cornerRadius: 10))
+                            }
+                            .buttonStyle(.plain)
+                        }
                     }
                     if showSetPicker {
                         VStack(alignment: .leading, spacing: 13) {
