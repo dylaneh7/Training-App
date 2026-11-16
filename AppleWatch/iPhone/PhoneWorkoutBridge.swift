@@ -24,6 +24,7 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
     @Published private(set) var performanceHistory: [HCPerformanceSet] = []
     @Published private(set) var status = "Preparing Health Coach…"
     @Published private(set) var watchSyncStatus = "Waiting for Watch connection"
+    @Published private(set) var watchConnectionDetails = "Connection not checked"
     @Published private(set) var watchLastAcknowledgedAt: Date?
     private var sendAfterCalendarRefresh = false
     private var sendWhenWatchActivated = false
@@ -627,6 +628,26 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
         return context
     }
 
+    /// Report WatchConnectivity's actual state rather than assuming a Watch
+    /// seen by Bluetooth or on the wrist is recognized as THIS app's companion.
+    /// Call from Settings and from activation/watch-state callbacks.
+    func checkWatchConnection() {
+        guard WCSession.isSupported() else {
+            watchConnectionDetails = "WatchConnectivity unavailable on this device"
+            return
+        }
+        let connection = WCSession.default
+        guard connection.activationState == .activated else {
+            watchConnectionDetails = "Watch session is not activated"
+            connection.activate()
+            return
+        }
+        watchConnectionDetails =
+            "Paired: " + (connection.isPaired ? "Yes" : "No") +
+            " · iMun Watch installed: " + (connection.isWatchAppInstalled ? "Yes" : "No") +
+            " · Live reachable: " + (connection.isReachable ? "Yes" : "No")
+    }
+
     /// A context update is a *pending delivery*, not proof of Watch receipt.
     /// Live messages get a reply; manual sends fall back to a reliable background
     /// transfer. All forms carry the same date-scoped schedule snapshot.
@@ -643,26 +664,48 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
             connection.activate()
             return
         }
-        guard connection.isPaired, connection.isWatchAppInstalled else {
-            watchSyncStatus = "Install and open imun on your paired Apple Watch"
+        checkWatchConnection()
+        guard connection.isPaired else {
+            watchSyncStatus = "No paired Apple Watch recognized by this iPhone"
+            return
+        }
+        guard connection.isWatchAppInstalled else {
+            watchSyncStatus = "iPhone doesn't recognize this iMun Watch app. " +
+                "Check the iPhone Watch app → My Watch → Installed on Apple Watch. " +
+                "Then run HealthCoachWatch on the paired physical Watch in Xcode."
             return
         }
         do {
             let current = try watchContext()
             try connection.updateApplicationContext(current)
+            guard let scheduleBytes = current[HCPayload.schedule] as? Data,
+                  let scheduled = try? decoder.decode(HCWatchSchedule.self,
+                                                      from: scheduleBytes) else {
+                watchSyncStatus = "Could not verify today's schedule payload"
+                return
+            }
             var packet = current
             packet[HCPayload.kind] = HCPayload.pushSchedule
             if connection.isReachable {
                 connection.sendMessage(packet, replyHandler: { [weak self] reply in
                     DispatchQueue.main.async {
                         guard let self else { return }
-                        if reply["received"] as? Bool == true {
+                        let accepted = reply["received"] as? Bool == true &&
+                            reply["scheduleState"] as? String == scheduled.state &&
+                            reply["workoutID"] as? String == (scheduled.workout?.id ?? "")
+                        if accepted {
                             self.watchLastAcknowledgedAt = Date()
-                            self.watchSyncStatus = "Watch received today's plan"
+                            if scheduled.state != "ready" {
+                                self.watchSyncStatus = "Watch connected · waiting for today's workout"
+                            } else if let lift = scheduled.workout {
+                                self.watchSyncStatus = "Watch loaded: " + lift.title
+                            } else {
+                                self.watchSyncStatus = "Watch confirmed no lift scheduled today"
+                            }
                         } else if forceQueue {
                             self.queueWatchDelivery(packet)
                         } else {
-                            self.watchSyncStatus = "Watch sync pending"
+                            self.watchSyncStatus = "Watch did not confirm the workout · Refresh & send again"
                         }
                     }
                 }, errorHandler: { [weak self] error in
@@ -859,6 +902,7 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
     func session(_ session: WCSession, activationDidCompleteWith state: WCSessionActivationState, error: Error?) {
         DispatchQueue.main.async {
             if state == .activated {
+                self.checkWatchConnection()
                 let queuePending = self.sendAfterCalendarRefresh
                 self.sendAfterCalendarRefresh = false
                 self.sendWhenWatchActivated = false
@@ -925,6 +969,18 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
         replyHandler(["saved": false])
     }
 
+    func sessionWatchStateDidChange(_ session: WCSession) {
+        DispatchQueue.main.async {
+            self.checkWatchConnection()
+            // A new pairing/installation changes the route. The user can use
+            // Refresh & send to retry once the installed state says Yes.
+        }
+    }
+
+    func sessionReachabilityDidChange(_ session: WCSession) {
+        DispatchQueue.main.async { self.checkWatchConnection() }
+    }
+
     func sessionDidBecomeInactive(_ session: WCSession) {}
     func sessionDidDeactivate(_ session: WCSession) { session.activate() }
 
@@ -932,6 +988,21 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
         if userInfo[HCPayload.kind] as? String == HCPayload.requestSchedule {
             DispatchQueue.main.async {
                 self.refreshTodaySchedule(forceWatchDelivery: true)
+            }
+            return
+        }
+        if userInfo[HCPayload.kind] as? String == HCPayload.scheduleReceipt {
+            DispatchQueue.main.async {
+                let today = HCPlanBuilder.dateString(Date())
+                guard userInfo["date"] as? String == today,
+                      self.confirmedScheduleDate == today,
+                      userInfo["scheduleState"] as? String == "ready",
+                      userInfo["workoutID"] as? String ==
+                          (self.workout?.date == today ? self.workout?.id ?? "" : "") else { return }
+                self.watchLastAcknowledgedAt = Date()
+                self.watchSyncStatus = self.workout.map {
+                    "Watch loaded: " + $0.title
+                } ?? "Watch confirmed no lift scheduled today"
             }
             return
         }

@@ -2811,6 +2811,14 @@ private struct PremiumSettingsPage: View {
                                         icon: "applewatch") {
                             coach.refreshAndSendToWatch()
                         }
+                        HCOutlineButton(title: "Check Watch connection",
+                                        icon: "antenna.radiowaves.left.and.right") {
+                            coach.checkWatchConnection()
+                        }
+                        Text(coach.watchConnectionDetails)
+                            .font(.caption2)
+                            .foregroundStyle(HCDesign.aqua)
+                            .fixedSize(horizontal: false, vertical: true)
                         Text(coach.watchSyncStatus)
                             .font(.caption2)
                             .foregroundStyle(HCDesign.secondary)
