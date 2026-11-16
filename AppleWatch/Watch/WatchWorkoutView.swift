@@ -423,11 +423,17 @@ struct WatchWorkoutView: View {
         .onAppear {
             store.checkPhoneConnection()
             store.requestCurrentSchedule()
+            if store.cloudSignedIn && !store.hasScheduledLift {
+                store.refreshCloudWorkout()
+            }
         }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active {
                 store.checkPhoneConnection()
                 store.requestCurrentSchedule()
+                if store.cloudSignedIn && !store.hasScheduledLift {
+                    store.refreshCloudWorkout()
+                }
             }
         }
     }
