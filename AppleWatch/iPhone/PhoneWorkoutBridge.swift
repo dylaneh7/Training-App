@@ -614,6 +614,28 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
         var context: [String: Any] = [HCPayload.schedule: try encoder.encode(snapshot)]
         let prefs = UserDefaults.standard
         context[HCPayload.accentStyle] = prefs.string(forKey:"hcAccentStyle") ?? "crimson"
+        // Appearance is optional and independent from schedule delivery.
+        // Enabling it never changes or deletes workout records.
+        if prefs.bool(forKey: "hcDesignWatchSyncEnabled") {
+            context["imunDesignSyncV1"] = true
+            let designKeys = [
+                "hcDesignPreset", "hcDesignMode", "hcDesignCustomPalette",
+                "hcDesignCustomGeometry", "hcDesignAccentHex",
+                "hcDesignBackgroundHex", "hcDesignSurfaceHex",
+                "hcDesignTextHex", "hcDesignShape", "hcDesignButtonShape",
+                "hcDesignFont", "hcDesignDensity", "hcDesignMotif",
+                "hcDesignNavigation", "hcDesignProgress",
+                "hcDesignReduceMotion"
+            ]
+            for key in designKeys {
+                if let value = prefs.object(forKey: key) {
+                    context[key] = value
+                }
+            }
+            context["hcDesignPreset"] = prefs.string(forKey:"hcDesignPreset") ?? "techno"
+            context["hcDesignCustomPalette"] = prefs.bool(forKey:"hcDesignCustomPalette")
+            context["hcDesignCustomGeometry"] = prefs.bool(forKey:"hcDesignCustomGeometry")
+        }
         context[HCPayload.weightIncrement] = prefs.object(forKey:"hcWeightIncrement") as? Double ?? 5.0
         context[HCPayload.restOverride] = prefs.integer(forKey:"hcRestOverrideSeconds")
         context[HCPayload.watchHaptics] = prefs.object(forKey:"hcWatchHaptics") as? Bool ?? true
