@@ -6,6 +6,7 @@ import WatchConnectivity
 /// historical training sources and WatchConnectivity queues.
 final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
     @Published private(set) var workout: HCWorkout?
+    @Published private(set) var lastReplacedExercise: HCExercise?
     @Published private(set) var runPlan: HCRunPlan?
     @Published private(set) var loggedSets: [HCLoggedSet] = []
     @Published private(set) var completedWatchRuns: [HCRunFinished] = []
@@ -414,11 +415,35 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
               HCProgramCatalog.normalized(option.name) else { return false }
         var exercises = plan.exercises
         exercises[index] = HCMuscleAlternatives.replacing(original, with: option)
+        if phoneSetExerciseID == exerciseID && phoneSetStartedAt != nil {
+            cancelPhoneSet() // No fake completed set is recorded.
+        }
+        lastReplacedExercise = original
         saveEditedWorkout(HCWorkout(id: plan.id, date: plan.date,
                                     sessionKey: plan.sessionKey, title: plan.title,
                                     exercises: exercises, isPreview: false))
+        if phoneSessionStartedAt != nil && phoneSetStartedAt == nil &&
+           (phoneRestEndsAt == nil || phoneRestEndsAt! <= Date()),
+           let current = workout?.exercises.first(where: { $0.id == exerciseID }),
+           phoneGuidedExercise?.id == exerciseID {
+            startPhoneSet(exercise: current)
+        }
         status = "Swapped \(original.name) for \(option.name) · Watch sync in progress"
         return true
+    }
+
+    func undoLastExerciseReplacement() {
+        guard let original = lastReplacedExercise,
+              let current = workout?.exercises.first(where: { $0.id == original.id }),
+              current.name != original.name else { return }
+        let restore = HCLibraryExercise(name: original.name,
+                           group: HCMuscleAlternatives.primaryMuscle(for: original.name),
+                           equipment: "Previous movement",
+                           instructions: original.instructions ?? "")
+        lastReplacedExercise = nil
+        if replaceExercise(current.id, with: restore) {
+            lastReplacedExercise = nil
+        }
     }
 
     /// Accepts a Watch replacement in the authoritative iPhone workout plan,
@@ -444,6 +469,7 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
         else { return false }
         var exercises = plan.exercises
         exercises[index] = change.replacement
+        lastReplacedExercise = current
         var timestamps = receivedAt
         timestamps[key] = change.createdAt
         save(timestamps, name: "watch-swap-last-applied.json")
