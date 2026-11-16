@@ -49,6 +49,7 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
     @Published private(set) var queuedNextGuidedSet: HCGuidedSetChoice?
     @Published private(set) var runClock: HCTrainingClock?
     @Published private(set) var status = "Ready to train"
+    @Published private(set) var phoneConnectionStatus = "iPhone connection not checked"
     @Published private(set) var isRequestingSchedule = false
     @Published private(set) var lastPhoneAcknowledgement: Date?
     private var pendingManualScheduleRequest = false
@@ -527,6 +528,26 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
 
     // MARK: - WatchConnectivity
 
+    /// Watch-side counterpart diagnostic. This must not be confused with
+    /// "the iPhone happens to be nearby": the system has to recognize the
+    /// companion application and activate the WatchConnectivity session.
+    func checkPhoneConnection() {
+        guard WCSession.isSupported() else {
+            phoneConnectionStatus = "WatchConnectivity unsupported"
+            return
+        }
+        let connection = WCSession.default
+        guard connection.activationState == .activated else {
+            phoneConnectionStatus = "Watch session not activated"
+            connection.activate()
+            return
+        }
+        phoneConnectionStatus =
+            "iPhone app recognized: " +
+            (connection.isCompanionAppInstalled ? "Yes" : "No") +
+            " · Live reachable: " + (connection.isReachable ? "Yes" : "No")
+    }
+
     private func invalidatePreviousDayIfNeeded() {
         let today = Self.today()
         guard latestSchedule?.date != today else { return }
@@ -819,6 +840,7 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
                  error: Error?) {
         if state == .activated {
             DispatchQueue.main.async {
+                self.checkPhoneConnection()
                 self.sendPending()
                 let manual = self.pendingManualScheduleRequest
                 self.pendingManualScheduleRequest = false
@@ -827,6 +849,10 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
         } else if let error {
             DispatchQueue.main.async { self.status = error.localizedDescription }
         }
+    }
+
+    func sessionReachabilityDidChange(_ session: WCSession) {
+        DispatchQueue.main.async { self.checkPhoneConnection() }
     }
 
     func session(_ session: WCSession, didReceiveApplicationContext context: [String: Any]) {
