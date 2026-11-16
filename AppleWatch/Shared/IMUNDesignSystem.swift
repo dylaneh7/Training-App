@@ -280,10 +280,22 @@ enum IMUNStyle {
             supporting: resolvedColor(p.accentTwo))
     }
     static var onAccent: Color {
-        switch preset {
-        case .techno, .heritage: return .white
-        default: return resolvedColor("0B1519")
+        // Contrast-aware foreground for the preset or athlete-selected accent.
+        // 0.179 is the relative-luminance crossover for black vs. white text.
+        let hex = customPalette
+            ? (prefs.string(forKey: "hcDesignAccentHex") ?? preset.accent)
+            : preset.accent
+        let clean = hex.trimmingCharacters(in: CharacterSet.alphanumerics.inverted)
+        let number = UInt64(clean, radix: 16) ?? 0xFFFFFF
+        let channels = [Double((number >> 16) & 255) / 255,
+                        Double((number >> 8) & 255) / 255,
+                        Double(number & 255) / 255]
+        let linear = channels.map { v in
+            v <= 0.04045 ? v / 12.92 : pow((v + 0.055) / 1.055, 2.4)
         }
+        let luminance = linear[0] * 0.2126 + linear[1] * 0.7152 +
+                        linear[2] * 0.0722
+        return luminance > 0.179 ? resolvedColor("0B1519") : .white
     }
 }
 
