@@ -250,6 +250,35 @@ struct WatchWorkoutView: View {
                                 startPoint: .topLeading, endPoint: .bottomTrailing))
                     )
 
+                    // This control is visible without scrolling through
+                    // iPhone-link diagnostics. One cloud sign-in lets users
+                    // recover today's published workout without pairing sync.
+                    if !store.hasScheduledLift {
+                        if store.cloudSignedIn {
+                            Button {
+                                store.refreshCloudWorkout()
+                                store.uploadPendingCloudSets()
+                            } label: {
+                                WDestination(symbol: "icloud.and.arrow.down",
+                                             title: "GET TODAY'S WORKOUT",
+                                             detail: "Download directly · no iPhone link",
+                                             tint: WTheme.aqua)
+                            }
+                            .buttonStyle(.plain)
+                            .listRowBackground(WTheme.panel)
+                        } else {
+                            NavigationLink {
+                                WatchCloudBackupSetup()
+                            } label: {
+                                WDestination(symbol: "icloud",
+                                             title: "CONNECT CLOUD SYNC",
+                                             detail: "Get workouts without iPhone link",
+                                             tint: WTheme.aqua)
+                            }
+                            .listRowBackground(WTheme.panel)
+                        }
+                    }
+
                     NavigationLink {
                         WatchStrengthScreen()
                     } label: {
@@ -423,7 +452,7 @@ struct WatchWorkoutView: View {
         .onAppear {
             store.checkPhoneConnection()
             store.requestCurrentSchedule()
-            if store.cloudSignedIn && !store.hasScheduledLift {
+            if store.cloudSignedIn {
                 store.refreshCloudWorkout()
             }
         }
@@ -431,7 +460,7 @@ struct WatchWorkoutView: View {
             if phase == .active {
                 store.checkPhoneConnection()
                 store.requestCurrentSchedule()
-                if store.cloudSignedIn && !store.hasScheduledLift {
+                if store.cloudSignedIn {
                     store.refreshCloudWorkout()
                 }
             }
