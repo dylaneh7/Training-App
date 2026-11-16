@@ -1,6 +1,7 @@
 import Foundation
 import Combine
 import WatchConnectivity
+import Security
 
 /// Timestamp-based clocks survive wrist-down, temporary app suspension, and re-launch.
 /// Display timers calculate Date() - start rather than incrementing a foreground counter.
@@ -49,6 +50,10 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
     @Published private(set) var queuedNextGuidedSet: HCGuidedSetChoice?
     @Published private(set) var runClock: HCTrainingClock?
     @Published private(set) var status = "Ready to train"
+    @Published private(set) var phoneConnectionStatus = "iPhone connection not checked"
+    @Published private(set) var phonePingStatus = "No live connection test performed"
+    @Published private(set) var cloudSignedIn = false
+    @Published private(set) var cloudStatus = "Cloud fallback not connected"
     @Published private(set) var isRequestingSchedule = false
     @Published private(set) var lastPhoneAcknowledgement: Date?
     private var pendingManualScheduleRequest = false
@@ -58,6 +63,9 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
     private var queuedIDs: Set<UUID> = []
     private var confirmedIDs: Set<UUID> = []
     private var latestSchedule: HCWatchSchedule?
+    private let cloud = HCWatchCloudFallback()
+    private var cloudUploadedIDs: Set<UUID> = []
+    private var isUploadingCloudSets = false
 
     static func today() -> String {
         let f = DateFormatter()
@@ -82,6 +90,7 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
         if let s: [HCLoggedSet] = load("sets.json") { sets = s }
         if let s: [UUID] = load("queued-ids.json") { queuedIDs = Set(s) }
         if let s: [UUID] = load("confirmed-ids.json") { confirmedIDs = Set(s) }
+        if let s: [UUID] = load("cloud-uploaded-ids.json") { cloudUploadedIDs = Set(s) }
         if let s: HCTrainingClock = load("lifting-clock.json") { liftClock = s }
         guidedExerciseID = load("guided-exercise-id.json")
         selectedGuidedSet = load("guided-set-selection.json")
@@ -96,6 +105,101 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
             WCSession.default.activate()
             applyContext(WCSession.default.receivedApplicationContext)
             requestCurrentSchedule()
+        }
+        Task { [weak self] in
+            guard let self else { return }
+            let available = await cloud.hasSession()
+            DispatchQueue.main.async {
+                self.cloudSignedIn = available
+                if available {
+                    self.refreshCloudWorkout()
+                    self.uploadPendingCloudSets()
+                }
+            }
+        }
+    }
+
+    /// One-time Watch login gives workouts a route that does not depend on
+    /// Apple's companion-registration state. Tokens stay in Watch Keychain.
+    func signInToCloud(email: String, password: String) {
+        let cleanEmail = email.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleanEmail.isEmpty, !password.isEmpty else {
+            cloudStatus = "Enter your Command Center email and password."
+            return
+        }
+        cloudStatus = "Signing in securely…"
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                try await cloud.signIn(email: cleanEmail, password: password)
+                DispatchQueue.main.async {
+                    self.cloudSignedIn = true
+                    self.cloudStatus = "Signed in · loading today's workout"
+                    self.refreshCloudWorkout()
+                    self.uploadPendingCloudSets()
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    self.cloudStatus = "Cloud sign-in failed: " + error.localizedDescription
+                }
+            }
+        }
+    }
+
+    func refreshCloudWorkout() {
+        guard cloudSignedIn else { cloudStatus = "Sign in on Watch first"; return }
+        let day = Self.today()
+        cloudStatus = "Downloading today's plan…"
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                let published = try await cloud.fetchPublishedWorkout(date: day)
+                DispatchQueue.main.async {
+                    guard day == Self.today() else { return }
+                    guard let published else {
+                        self.cloudStatus = "No workout published for today yet · open iMun on iPhone once"
+                        return
+                    }
+                    self.applySchedule(HCWatchSchedule(
+                        date: day, workout: published, runPlan: nil,
+                        generatedAt: Date(), state: "ready"))
+                    self.cloudStatus = "Today's workout downloaded directly from cloud"
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    self.cloudStatus = "Cloud download failed: " + error.localizedDescription
+                }
+            }
+        }
+    }
+
+    /// Uploads retain stable UUIDs. The local set log is never removed, and
+    /// a failed request simply remains pending for the next sync.
+    func uploadPendingCloudSets() {
+        guard cloudSignedIn, !isUploadingCloudSets else { return }
+        let pending = sets.filter { !cloudUploadedIDs.contains($0.id) }
+        guard !pending.isEmpty else { return }
+        isUploadingCloudSets = true
+        Task { [weak self] in
+            guard let self else { return }
+            for entry in pending {
+                do {
+                    try await cloud.upload(entry)
+                    DispatchQueue.main.async {
+                        self.cloudUploadedIDs.insert(entry.id)
+                        self.save(Array(self.cloudUploadedIDs),
+                                  name: "cloud-uploaded-ids.json")
+                        self.cloudStatus = "Logged sets saved to your account"
+                    }
+                } catch {
+                    DispatchQueue.main.async {
+                        self.cloudStatus = "Sets saved offline; cloud retry: " +
+                            error.localizedDescription
+                    }
+                    break
+                }
+            }
+            DispatchQueue.main.async { self.isUploadingCloudSets = false }
         }
     }
 
@@ -385,6 +489,7 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
         entry.durationSeconds = now.timeIntervalSince(started)
         sets.append(entry)
         save(sets, name: "sets.json")
+        uploadPendingCloudSets()
 
         clock.setExerciseID = nil
         clock.setStartedAt = nil
@@ -526,6 +631,60 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
     }
 
     // MARK: - WatchConnectivity
+
+    /// Watch-side counterpart diagnostic. This must not be confused with
+    /// "the iPhone happens to be nearby": the system has to recognize the
+    /// companion application and activate the WatchConnectivity session.
+    func checkPhoneConnection() {
+        guard WCSession.isSupported() else {
+            phoneConnectionStatus = "WatchConnectivity unsupported"
+            return
+        }
+        let connection = WCSession.default
+        guard connection.activationState == .activated else {
+            phoneConnectionStatus = "Watch session not activated"
+            connection.activate()
+            return
+        }
+        phoneConnectionStatus =
+            "iPhone app recognized: " +
+            (connection.isCompanionAppInstalled ? "Yes" : "No") +
+            " · Live reachable: " + (connection.isReachable ? "Yes" : "No")
+    }
+
+    /// A real round-trip probe avoids interpreting a boolean as a successful
+    /// connection. No private workout information is sent by this diagnostic.
+    func testPhoneLink() {
+        checkPhoneConnection()
+        guard WCSession.isSupported() else {
+            phonePingStatus = "WatchConnectivity unavailable"
+            return
+        }
+        let session = WCSession.default
+        guard session.activationState == .activated else {
+            phonePingStatus = "Watch session not activated"
+            session.activate()
+            return
+        }
+        guard session.isReachable else {
+            phonePingStatus = "No live route to iPhone for diagnostic ping"
+            return
+        }
+        phonePingStatus = "Testing iPhone connection…"
+        session.sendMessage([HCPayload.kind: "imunDiagnosticPingV1"], replyHandler: {
+            [weak self] response in
+            DispatchQueue.main.async {
+                self?.phonePingStatus =
+                    response["imunDiagnosticPong"] as? Bool == true
+                    ? "iPhone replied · live connection works"
+                    : "iPhone replied without diagnostic acknowledgment"
+            }
+        }, errorHandler: { [weak self] error in
+            DispatchQueue.main.async {
+                self?.phonePingStatus = "Ping failed: " + error.localizedDescription
+            }
+        })
+    }
 
     private func invalidatePreviousDayIfNeeded() {
         let today = Self.today()
@@ -819,6 +978,7 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
                  error: Error?) {
         if state == .activated {
             DispatchQueue.main.async {
+                self.checkPhoneConnection()
                 self.sendPending()
                 let manual = self.pendingManualScheduleRequest
                 self.pendingManualScheduleRequest = false
@@ -827,6 +987,10 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
         } else if let error {
             DispatchQueue.main.async { self.status = error.localizedDescription }
         }
+    }
+
+    func sessionReachabilityDidChange(_ session: WCSession) {
+        DispatchQueue.main.async { self.checkPhoneConnection() }
     }
 
     func session(_ session: WCSession, didReceiveApplicationContext context: [String: Any]) {
@@ -905,5 +1069,181 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
                 self.status = "Set correction synced from iPhone"
             }
         }
+    }
+}
+
+ 
+// The cloud fallback is deliberately isolated from WatchConnectivity. A failed
+// Apple companion-app registration cannot prevent an authenticated Watch from
+// fetching the owner's published workout and uploading unique logged sets.
+private enum HCWatchCloudError: LocalizedError {
+    case noSession
+    case malformed
+    case service(String)
+    var errorDescription: String? {
+        switch self {
+        case .noSession: return "Sign in on Apple Watch."
+        case .malformed: return "Unexpected cloud response."
+        case .service(let message): return message
+        }
+    }
+}
+
+private struct HCWatchCloudToken: Codable {
+    let userID: String
+    let access: String
+    let refresh: String
+    let expiresAt: Date
+}
+
+private actor HCWatchCloudFallback {
+    private let base = URL(string: "https://ecmosmmqloyahsdcxvpz.supabase.co")!
+    // Supabase publishable key; user data remains protected by JWT and RLS.
+    private let publishableKey = "sb_publishable_ClssY_cSAW7Lv7O2VG6jBg_yTDZW1fJ"
+    private var token: HCWatchCloudToken? = HCWatchCloudFallback.loadToken()
+
+    private static let service = "imun.watch.cloud"
+    private static let account = "session"
+
+    private static func query() -> [String: Any] {
+        [kSecClass as String: kSecClassGenericPassword,
+         kSecAttrService as String: service,
+         kSecAttrAccount as String: account]
+    }
+
+    private static func loadToken() -> HCWatchCloudToken? {
+        var query = Self.query()
+        query[kSecReturnData as String] = true
+        query[kSecMatchLimit as String] = kSecMatchLimitOne
+        var result: CFTypeRef?
+        guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess,
+              let data = result as? Data else { return nil }
+        return try? JSONDecoder().decode(HCWatchCloudToken.self, from: data)
+    }
+
+    private static func saveToken(_ token: HCWatchCloudToken) {
+        guard let data = try? JSONEncoder().encode(token) else { return }
+        SecItemDelete(Self.query() as CFDictionary)
+        var attributes = Self.query()
+        attributes[kSecValueData as String] = data
+        attributes[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+        SecItemAdd(attributes as CFDictionary, nil)
+    }
+
+    func hasSession() -> Bool { token != nil }
+
+    private func parseToken(_ data: Data) throws -> HCWatchCloudToken {
+        guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let access = json["access_token"] as? String,
+              let refresh = json["refresh_token"] as? String,
+              let user = json["user"] as? [String: Any],
+              let userID = user["id"] as? String else {
+            throw HCWatchCloudError.malformed
+        }
+        let seconds = (json["expires_in"] as? NSNumber)?.doubleValue ?? 3600
+        return HCWatchCloudToken(userID: userID, access: access, refresh: refresh,
+                                 expiresAt: Date().addingTimeInterval(seconds))
+    }
+
+    func signIn(email: String, password: String) async throws {
+        let data = try await request(path: "/auth/v1/token",
+            query: [URLQueryItem(name: "grant_type", value: "password")],
+            method: "POST", json: ["email":email,"password":password], bearer: nil)
+        let received = try parseToken(data)
+        token = received
+        Self.saveToken(received)
+    }
+
+    private func authorized() async throws -> HCWatchCloudToken {
+        guard let current = token else { throw HCWatchCloudError.noSession }
+        if current.expiresAt > Date().addingTimeInterval(60) { return current }
+        let data = try await request(path: "/auth/v1/token",
+            query: [URLQueryItem(name: "grant_type", value: "refresh_token")],
+            method: "POST", json: ["refresh_token": current.refresh], bearer: nil)
+        let updated = try parseToken(data)
+        token = updated
+        Self.saveToken(updated)
+        return updated
+    }
+
+    private func request(path: String, query: [URLQueryItem] = [],
+                         method: String = "GET", json: Any? = nil,
+                         bearer: String?, prefer: String? = nil) async throws -> Data {
+        guard var parts = URLComponents(url: base.appendingPathComponent(
+            String(path.dropFirst())), resolvingAgainstBaseURL: false) else {
+            throw HCWatchCloudError.malformed
+        }
+        if !query.isEmpty { parts.queryItems = query }
+        guard let url = parts.url else { throw HCWatchCloudError.malformed }
+        var request = URLRequest(url: url)
+        request.httpMethod = method
+        request.timeoutInterval = 25
+        request.setValue(publishableKey, forHTTPHeaderField: "apikey")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        if let bearer {
+            request.setValue("Bearer " + bearer, forHTTPHeaderField: "Authorization")
+        }
+        if let prefer { request.setValue(prefer, forHTTPHeaderField: "Prefer") }
+        if let json {
+            request.httpBody = try JSONSerialization.data(withJSONObject: json)
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        }
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw HCWatchCloudError.malformed
+        }
+        guard (200...299).contains(http.statusCode) else {
+            let errorData = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+            throw HCWatchCloudError.service(
+                (errorData?["msg"] as? String)
+                ?? (errorData?["error_description"] as? String)
+                ?? (errorData?["message"] as? String)
+                ?? "Request failed (HTTP " + String(http.statusCode) + ")")
+        }
+        return data
+    }
+
+    func fetchPublishedWorkout(date: String) async throws -> HCWorkout? {
+        let session = try await authorized()
+        let data = try await request(path: "/rest/v1/health_coach_native_plans",
+            query: [
+                URLQueryItem(name: "select", value: "plan"),
+                URLQueryItem(name: "user_id", value: "eq." + session.userID),
+                URLQueryItem(name: "workout_date", value: "eq." + date),
+                URLQueryItem(name: "limit", value: "1")
+            ], bearer: session.access)
+        guard let rows = try JSONSerialization.jsonObject(with: data) as? [[String: Any]]
+        else { throw HCWatchCloudError.malformed }
+        guard let raw = rows.first?["plan"] as? [String: Any] else { return nil }
+        return try JSONDecoder().decode(HCWorkout.self,
+            from: JSONSerialization.data(withJSONObject: raw))
+    }
+
+    func upload(_ set: HCLoggedSet) async throws {
+        let session = try await authorized()
+        let iso = ISO8601DateFormatter()
+        iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        var body: [String: Any] = [
+            "id": set.id.uuidString.lowercased(),
+            "user_id": session.userID,
+            "workout_date": set.workoutDate,
+            "session_key": set.sessionKey,
+            "workout_title": set.workoutTitle,
+            "exercise_id": set.exerciseID,
+            "exercise_name": set.exerciseName,
+            "exercise_index": set.exerciseIndex,
+            "set_index": set.index,
+            "reps": set.reps,
+            "completed_at": iso.string(from: set.completedAt),
+            "source": set.source ?? "Apple Watch"
+        ]
+        body["weight_lb"] = set.weightLb.map { $0 as Any } ?? NSNull()
+        body["rir"] = set.rir.map { $0 as Any } ?? NSNull()
+        body["started_at"] = set.startedAt.map { iso.string(from: $0) as Any } ?? NSNull()
+        body["duration_seconds"] = set.durationSeconds.map { $0 as Any } ?? NSNull()
+        _ = try await request(path: "/rest/v1/health_coach_watch_sets",
+            query: [URLQueryItem(name: "on_conflict", value: "id")],
+            method: "POST", json: [body], bearer: session.access,
+            prefer: "resolution=ignore-duplicates,return=minimal")
     }
 }
