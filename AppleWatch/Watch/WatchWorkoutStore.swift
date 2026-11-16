@@ -47,6 +47,7 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
     private var queuedIDs: Set<UUID> = []
+    private var confirmedIDs: Set<UUID> = []
     private var latestSchedule: HCWatchSchedule?
 
     static func today() -> String {
@@ -71,6 +72,7 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
         }
         if let s: [HCLoggedSet] = load("sets.json") { sets = s }
         if let s: [UUID] = load("queued-ids.json") { queuedIDs = Set(s) }
+        if let s: [UUID] = load("confirmed-ids.json") { confirmedIDs = Set(s) }
         if let s: HCTrainingClock = load("lifting-clock.json") { liftClock = s }
         guidedExerciseID = load("guided-exercise-id.json")
         if let s: HCTrainingClock = load("running-clock.json") { runClock = s }
@@ -507,6 +509,14 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
         status = "Refresh queued · open imun on your iPhone to receive it"
     }
 
+    private func markConfirmed(_ id: UUID) {
+        guard !confirmedIDs.contains(id) else { return }
+        confirmedIDs.insert(id)
+        save(Array(confirmedIDs), name: "confirmed-ids.json")
+        lastPhoneAcknowledgement = Date()
+        status = "Workout received by iPhone"
+    }
+
     /// A real Send to iPhone action: immediately retry any watch workouts that
     /// have no outstanding transfer, even if previously marked as queued.
     func sendToPhone() {
@@ -528,7 +538,7 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
                     guard let self else { return }
                     if reply["saved"] as? Bool == true {
                         self.lastPhoneAcknowledgement = Date()
-                        self.status = "iPhone connected · workout sync checked"
+                        self.status = "iPhone connected · awaiting workout receipts"
                     } else {
                         self.status = "Waiting for iPhone to accept workout data"
                     }
@@ -607,8 +617,9 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
             }
         }
         var newTransfers = 0
-        for entry in sets where !queuedIDs.contains(entry.id) ||
-                              (forceResend && !inFlight.contains(entry.id)) {
+        for entry in sets where !confirmedIDs.contains(entry.id) &&
+            (!queuedIDs.contains(entry.id) ||
+             (forceResend && !inFlight.contains(entry.id))) {
             guard let bytes = try? encoder.encode(entry) else { continue }
             let packet: [String: Any] = [
                 HCPayload.kind: HCPayload.loggedSet, HCPayload.data: bytes
@@ -618,8 +629,7 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
                 session.sendMessage(packet, replyHandler: { [weak self] reply in
                     if reply["saved"] as? Bool == true {
                         DispatchQueue.main.async {
-                            self?.lastPhoneAcknowledgement = Date()
-                            self?.status = "Set received by iPhone"
+                            self?.markConfirmed(entry.id)
                         }
                     }
                 }, errorHandler: { _ in /* reliable background transfer remains */ })
@@ -627,8 +637,9 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
             queuedIDs.insert(entry.id)
             newTransfers += 1
         }
-        for run in completedRuns where !queuedIDs.contains(run.id) ||
-                                 (forceResend && !inFlight.contains(run.id)) {
+        for run in completedRuns where !confirmedIDs.contains(run.id) &&
+            (!queuedIDs.contains(run.id) ||
+             (forceResend && !inFlight.contains(run.id))) {
             guard let bytes = try? encoder.encode(run) else { continue }
             let packet: [String: Any] = [
                 HCPayload.kind: HCPayload.completedRun, HCPayload.data: bytes
@@ -638,8 +649,7 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
                 session.sendMessage(packet, replyHandler: { [weak self] reply in
                     if reply["saved"] as? Bool == true {
                         DispatchQueue.main.async {
-                            self?.lastPhoneAcknowledgement = Date()
-                            self?.status = "Run received by iPhone"
+                            self?.markConfirmed(run.id)
                         }
                     }
                 }, errorHandler: { _ in /* reliable background transfer remains */ })
@@ -688,9 +698,9 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
             return
         }
         if userInfo[HCPayload.kind] as? String == HCPayload.syncReceipt {
-            DispatchQueue.main.async {
-                self.lastPhoneAcknowledgement = Date()
-                self.status = "Workout data received by iPhone"
+            if let raw = userInfo["recordID"] as? String,
+               let id = UUID(uuidString: raw) {
+                DispatchQueue.main.async { self.markConfirmed(id) }
             }
             return
         }
