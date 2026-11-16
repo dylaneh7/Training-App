@@ -241,6 +241,8 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
         guidedExerciseID = first?.id
         selectedGuidedSet = nil
         queuedNextGuidedSet = nil
+        try? FileManager.default.removeItem(at: directory.appendingPathComponent("guided-set-selection.json"))
+        try? FileManager.default.removeItem(at: directory.appendingPathComponent("queued-guided-set.json"))
         if let first {
             save(first.id, name: "guided-exercise-id.json")
         }
@@ -276,6 +278,8 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
         liftClock = clock
         selectedGuidedSet = nil
         queuedNextGuidedSet = nil
+        try? FileManager.default.removeItem(at: directory.appendingPathComponent("guided-set-selection.json"))
+        try? FileManager.default.removeItem(at: directory.appendingPathComponent("queued-guided-set.json"))
         save(clock, name: "lifting-clock.json")
         if let latestSchedule { applySchedule(latestSchedule) }
         invalidatePreviousDayIfNeeded()
@@ -364,6 +368,7 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
         let queued = validChoice(queuedNextGuidedSet)
         let next = queued ?? recommendedChoice(after: exercise.id)
         queuedNextGuidedSet = nil
+        try? FileManager.default.removeItem(at: directory.appendingPathComponent("queued-guided-set.json"))
         if let next {
             selectedGuidedSet = next
             guidedExerciseID = next.exerciseID
@@ -371,6 +376,8 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
             save(next.exerciseID, name: "guided-exercise-id.json")
         } else {
             selectedGuidedSet = nil
+            try? FileManager.default.removeItem(at:
+                directory.appendingPathComponent("guided-set-selection.json"))
         }
 
         let override = UserDefaults.standard.integer(forKey: "hcRestOverrideSeconds")
