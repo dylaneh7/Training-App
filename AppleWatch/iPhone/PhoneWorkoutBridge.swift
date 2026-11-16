@@ -25,6 +25,7 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
     @Published private(set) var status = "Preparing Health Coach…"
     @Published private(set) var watchSyncStatus = "Waiting for Watch connection"
     @Published private(set) var watchConnectionDetails = "Connection not checked"
+    @Published private(set) var designCloudStatus = "Design saved on this iPhone"
     @Published private(set) var watchLastAcknowledgedAt: Date?
     private var sendAfterCalendarRefresh = false
     private var sendWhenWatchActivated = false
@@ -344,6 +345,33 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
         }
     }
 
+    /// Independent of Apple's companion-app registration. A cloud-signed-in
+    /// Watch can fetch these appearance values using its own account token.
+    func publishDesignToCloud() {
+        guard signedIn else {
+            designCloudStatus = "Sign in to share your look with Watch"
+            return
+        }
+        guard UserDefaults.standard.bool(forKey: "hcDesignWatchSyncEnabled") else {
+            designCloudStatus = "Design saved only on this iPhone"
+            return
+        }
+        let payload = IMUNStyle.cloudPayload()
+        designCloudStatus = "Sharing design through cloud…"
+        Task {
+            do {
+                try await cloud.saveVisualPreferences(payload)
+                DispatchQueue.main.async {
+                    self.designCloudStatus = "Watch design saved to your cloud account"
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    self.designCloudStatus = "Cloud design sync failed: " + error.localizedDescription
+                }
+            }
+        }
+    }
+
     func refreshAndSendToWatch() {
         guard signedIn else {
             watchSyncStatus = "Sign in to send your workout to Watch"
@@ -614,6 +642,28 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
         var context: [String: Any] = [HCPayload.schedule: try encoder.encode(snapshot)]
         let prefs = UserDefaults.standard
         context[HCPayload.accentStyle] = prefs.string(forKey:"hcAccentStyle") ?? "crimson"
+        // Appearance is optional and independent from schedule delivery.
+        // Enabling it never changes or deletes workout records.
+        if prefs.bool(forKey: "hcDesignWatchSyncEnabled") {
+            context["imunDesignSyncV1"] = true
+            let designKeys = [
+                "hcDesignPreset", "hcDesignMode", "hcDesignCustomPalette",
+                "hcDesignCustomGeometry", "hcDesignAccentHex",
+                "hcDesignBackgroundHex", "hcDesignSurfaceHex",
+                "hcDesignTextHex", "hcDesignShape", "hcDesignButtonShape",
+                "hcDesignFont", "hcDesignDensity", "hcDesignMotif",
+                "hcDesignNavigation", "hcDesignProgress",
+                "hcDesignReduceMotion"
+            ]
+            for key in designKeys {
+                if let value = prefs.object(forKey: key) {
+                    context[key] = value
+                }
+            }
+            context["hcDesignPreset"] = prefs.string(forKey:"hcDesignPreset") ?? "techno"
+            context["hcDesignCustomPalette"] = prefs.bool(forKey:"hcDesignCustomPalette")
+            context["hcDesignCustomGeometry"] = prefs.bool(forKey:"hcDesignCustomGeometry")
+        }
         context[HCPayload.weightIncrement] = prefs.object(forKey:"hcWeightIncrement") as? Double ?? 5.0
         context[HCPayload.restOverride] = prefs.integer(forKey:"hcRestOverrideSeconds")
         context[HCPayload.watchHaptics] = prefs.object(forKey:"hcWatchHaptics") as? Bool ?? true

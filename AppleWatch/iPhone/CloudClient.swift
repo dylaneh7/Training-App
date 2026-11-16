@@ -213,6 +213,21 @@ actor HCCloudClient {
         return try JSONDecoder().decode(HCWorkout.self, from: bytes)
     }
 
+    /// User-scoped design settings; never mixed with training state. RLS
+    /// enforces that only the signed-in athlete can update this row.
+    func saveVisualPreferences(_ values: [String: Any]) async throws {
+        let authenticated = try await authorizedToken()
+        _ = try await send(path: "/rest/v1/health_coach_visual_preferences",
+            query: [URLQueryItem(name: "on_conflict", value: "user_id")],
+            method: "POST",
+            json: [[
+                "user_id": authenticated.userID,
+                "design": values,
+                "updated_at": ISO8601DateFormatter().string(from: Date())
+            ]], bearer: authenticated.access,
+            prefer: "resolution=merge-duplicates,return=minimal")
+    }
+
     /// Atomically moves one existing planner workout without rewriting the
     /// user's full calendar from a potentially stale iPhone snapshot.
     func movePlannedWorkout(id: String, to date: String) async throws {

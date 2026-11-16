@@ -54,6 +54,7 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
     @Published private(set) var phonePingStatus = "No live connection test performed"
     @Published private(set) var cloudSignedIn = false
     @Published private(set) var cloudStatus = "Cloud fallback not connected"
+    @Published private(set) var designSyncStatus = "Watch design is local"
     @Published private(set) var isRequestingSchedule = false
     @Published private(set) var lastPhoneAcknowledgement: Date?
     private var pendingManualScheduleRequest = false
@@ -113,6 +114,7 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
                 self.cloudSignedIn = available
                 if available {
                     self.refreshCloudWorkout()
+                    self.refreshCloudAppearance()
                     self.uploadPendingCloudSets()
                 }
             }
@@ -136,11 +138,46 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
                     self.cloudSignedIn = true
                     self.cloudStatus = "Signed in · loading today's workout"
                     self.refreshCloudWorkout()
+                    self.refreshCloudAppearance()
                     self.uploadPendingCloudSets()
                 }
             } catch {
                 DispatchQueue.main.async {
                     self.cloudStatus = "Cloud sign-in failed: " + error.localizedDescription
+                }
+            }
+        }
+    }
+
+    /// Appearance is downloaded through the same secure, independent cloud
+    /// session used by workouts. No WatchConnectivity registration required.
+    func refreshCloudAppearance() {
+        guard cloudSignedIn else {
+            designSyncStatus = "Sign in on Watch to fetch your theme"
+            return
+        }
+        guard UserDefaults.standard.object(forKey: "hcDesignAcceptPhoneAppearance") as? Bool ?? true else {
+            designSyncStatus = "Watch keeps its own design"
+            return
+        }
+        designSyncStatus = "Checking cloud design…"
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                let values = try await cloud.fetchVisualPreferences()
+                DispatchQueue.main.async {
+                    guard let values,
+                          values["watchSyncEnabled"] as? Bool == true else {
+                        self.designSyncStatus = "Using local Watch style"
+                        return
+                    }
+                    IMUNStyle.applyCloudPayload(values)
+                    self.designSyncStatus = "Visual design loaded from cloud"
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    self.designSyncStatus = "Design sync unavailable: " +
+                        error.localizedDescription
                 }
             }
         }
@@ -875,6 +912,32 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
     }
 
     private func applyContext(_ context: [String: Any]) {
+        // A Watch can keep its own design, particularly when the cloud route
+        // works but WatchConnectivity does not. Only accept explicit opt-in.
+        if (context["imunDesignSyncV1"] as? Bool == true) &&
+           (UserDefaults.standard.object(forKey:"hcDesignAcceptPhoneAppearance") as? Bool ?? true) {
+            let strings = [
+                "hcDesignPreset", "hcDesignMode", "hcDesignAccentHex",
+                "hcDesignBackgroundHex", "hcDesignSurfaceHex",
+                "hcDesignTextHex", "hcDesignShape", "hcDesignButtonShape",
+                "hcDesignFont", "hcDesignDensity", "hcDesignMotif",
+                "hcDesignNavigation", "hcDesignProgress"
+            ]
+            for key in strings {
+                if let value = context[key] as? String, value.count <= 40 {
+                    if key != "hcDesignPreset" ||
+                       IMUNPreset(rawValue: value) != nil {
+                        UserDefaults.standard.set(value, forKey: key)
+                    }
+                }
+            }
+            for key in ["hcDesignCustomPalette", "hcDesignCustomGeometry",
+                        "hcDesignReduceMotion"] {
+                if let value = context[key] as? Bool {
+                    UserDefaults.standard.set(value, forKey: key)
+                }
+            }
+        }
         // Preferences are cheap to apply even while the plan is loading.
         if let color = context[HCPayload.accentStyle] as? String,
            ["crimson", "lime", "aqua", "white"].contains(color) {
@@ -1216,6 +1279,19 @@ private actor HCWatchCloudFallback {
                 ?? "Request failed (HTTP " + String(http.statusCode) + ")")
         }
         return data
+    }
+
+    func fetchVisualPreferences() async throws -> [String: Any]? {
+        let session = try await authorized()
+        let data = try await request(path: "/rest/v1/health_coach_visual_preferences",
+            query: [
+                URLQueryItem(name: "select", value: "design"),
+                URLQueryItem(name: "user_id", value: "eq." + session.userID),
+                URLQueryItem(name: "limit", value: "1")
+            ], bearer: session.access)
+        guard let rows = try JSONSerialization.jsonObject(with: data) as? [[String: Any]]
+        else { throw HCWatchCloudError.malformed }
+        return rows.first?["design"] as? [String: Any]
     }
 
     func fetchPublishedWorkout(date: String) async throws -> HCWorkout? {
