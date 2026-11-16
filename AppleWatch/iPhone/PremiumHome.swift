@@ -2830,6 +2830,18 @@ private struct PremiumSettingsPage: View {
                         }
                     }
                 }
+                HStack {
+                    Image(systemName: "checkmark.seal")
+                        .foregroundStyle(HCDesign.aqua)
+                    Text("imun " +
+                         (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?") +
+                         " · build " +
+                         (Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "?"))
+                        .font(.caption2)
+                        .foregroundStyle(HCDesign.secondary)
+                    Spacer()
+                }
+                .padding(.top, 7)
                 Spacer(minLength: 30)
             }
             .padding(18)

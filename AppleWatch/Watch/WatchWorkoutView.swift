@@ -335,6 +335,13 @@ struct WatchWorkoutView: View {
                         Label("APPEARANCE & CONTROLS", systemImage: "slider.horizontal.3")
                             .font(.system(size: 12, weight: .bold))
                     }
+                    Text("imun " +
+                         (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?") +
+                         " · build " +
+                         (Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "?"))
+                        .font(.system(size: 10))
+                        .foregroundStyle(WTheme.muted)
+                        .accessibilityLabel("Installed imun Watch app version")
                 }
                 Section("YOUR TRAINING") {
                     if let latest = store.runHistory.first {
