@@ -31,6 +31,11 @@ struct PremiumHomeView: View {
     @StateObject private var runImporter = HCRunHealthImporter()
     @StateObject private var tredictImporter = HCTredictImporter()
     @AppStorage("hcAccentStyle") private var accentStyle = "crimson"
+    @AppStorage("hcDesignPreset") private var designPreset = "techno"
+    @AppStorage("hcDesignMode") private var designMode = "dark"
+    @AppStorage("hcDesignCustomPalette") private var customPalette = false
+    @AppStorage("hcDesignAccentHex") private var designAccentHex = "D4324F"
+    @AppStorage("hcDesignBackgroundHex") private var designBackgroundHex = "070C16"
     @Environment(\.scenePhase) private var scenePhase
     private let scheduleRefresh = Timer.publish(every: 60, on: .main, in: .common).autoconnect()
 
@@ -44,9 +49,11 @@ struct PremiumHomeView: View {
                 .tabItem { Label("Health", systemImage: "heart.text.square.fill") }
             NavigationStack { PremiumCoachPage() }
                 .tabItem { Label("Coach", systemImage: "bubble.left.and.text.bubble.right") }
+            NavigationStack { IMUNDesignStudioPage() }
+                .tabItem { Label("Studio", systemImage: "paintpalette.fill") }
         }
         .tint(HCDesign.electric)
-        .preferredColorScheme(.dark)
+        .preferredColorScheme(IMUNStyle.preferredScheme)
         .environmentObject(runImporter)
         .environmentObject(tredictImporter)
         .onReceive(tredictImporter.$snapshot) { snapshot in
@@ -74,6 +81,11 @@ struct PremiumHomeView: View {
             configureTabAppearance()
             coach.sendToWatch()
         }
+        .onChange(of: designPreset) { _, _ in configureTabAppearance() }
+        .onChange(of: designMode) { _, _ in configureTabAppearance() }
+        .onChange(of: customPalette) { _, _ in configureTabAppearance() }
+        .onChange(of: designAccentHex) { _, _ in configureTabAppearance() }
+        .onChange(of: designBackgroundHex) { _, _ in configureTabAppearance() }
         .onAppear {
             if coach.signedIn && coach.workout == nil { coach.refresh(date: Date()) }
             configureTabAppearance()
@@ -82,12 +94,23 @@ struct PremiumHomeView: View {
 
     private func configureTabAppearance() {
         let bar = UITabBarAppearance()
-        bar.configureWithOpaqueBackground()
-        bar.backgroundColor = UIColor(HCDesign.canvas)
+        if IMUNStyle.navigation == "editorial" {
+            // Light, translucent tab rail for Atelier / editorial layouts.
+            bar.configureWithDefaultBackground()
+            bar.backgroundColor = UIColor(HCDesign.canvas).withAlphaComponent(0.78)
+            bar.shadowColor = .clear
+        } else {
+            bar.configureWithOpaqueBackground()
+            bar.backgroundColor = IMUNStyle.navigation == "sport"
+                ? UIColor(HCDesign.electric).withAlphaComponent(0.16)
+                : UIColor(HCDesign.canvas)
+        }
         bar.stackedLayoutAppearance.normal.iconColor = UIColor(HCDesign.secondary)
-        bar.stackedLayoutAppearance.normal.titleTextAttributes = [.foregroundColor: UIColor(HCDesign.secondary)]
+        bar.stackedLayoutAppearance.normal.titleTextAttributes = [
+            .foregroundColor: UIColor(HCDesign.secondary)]
         bar.stackedLayoutAppearance.selected.iconColor = UIColor(HCDesign.electric)
-        bar.stackedLayoutAppearance.selected.titleTextAttributes = [.foregroundColor: UIColor(HCDesign.electric)]
+        bar.stackedLayoutAppearance.selected.titleTextAttributes = [
+            .foregroundColor: UIColor(HCDesign.electric)]
         UITabBar.appearance().standardAppearance = bar
         UITabBar.appearance().scrollEdgeAppearance = bar
     }
@@ -2478,6 +2501,8 @@ private struct PremiumSettingsPage: View {
     @AppStorage("hcCoachingNotes") private var notes = ""
     @AppStorage("hcIncludeRecoveryExport") private var includeRecovery = false
     @AppStorage("hcAccentStyle") private var accentStyle = "crimson"
+    @AppStorage("hcDesignPreset") private var designPreset = "techno"
+    @AppStorage("hcMotivationSource") private var motivationSource = "off"
     @AppStorage("hcWeightIncrement") private var weightIncrement = 5.0
     @AppStorage("hcRestOverrideSeconds") private var restOverride = 0
     @AppStorage("hcWatchHaptics") private var watchHaptics = true
@@ -2542,58 +2567,58 @@ private struct PremiumSettingsPage: View {
                             .font(.caption2).foregroundStyle(HCDesign.secondary)
                     }
                 }
-                HCCard {
-                    VStack(alignment: .leading, spacing: 7) {
-                        Text("SO RUN, THAT YE MAY OBTAIN.")
-                            .font(.system(size: 17, weight: .semibold, design: .serif))
-                            .foregroundStyle(HCDesign.ink)
-                        Text("1 Corinthians 9:24–27")
-                            .font(HCDesign.label(11))
-                            .foregroundStyle(HCDesign.electric)
-                        Text("Discipline in training. Purpose in every effort.")
-                            .font(.caption)
-                            .foregroundStyle(HCDesign.secondary)
-                        DisclosureGroup("READ THE PASSAGE · KJV") {
-                            VStack(alignment: .leading, spacing: 9) {
-                                Text("24 · Know ye not that they which run in a race run all, but one receiveth the prize? So run, that ye may obtain.")
-                                Text("25 · And every man that striveth for the mastery is temperate in all things. Now they do it to obtain a corruptible crown; but we an incorruptible.")
-                                Text("26 · I therefore so run, not as uncertainly; so fight I, not as one that beateth the air:")
-                                Text("27 · But I keep under my body, and bring it into subjection: lest that by any means, when I have preached to others, I myself should be a castaway.")
-                            }
-                            .font(.system(size: 12, design: .serif))
-                            .foregroundStyle(HCDesign.secondary)
-                            .padding(.vertical, 8)
-                        }
-                        .font(HCDesign.label(11))
-                        .tint(HCDesign.electric)
-                    }
-                }
-                HCSectionTitle(title: "Appearance", detail: "Pick your accent")
-                HCCard {
-                    VStack(alignment: .leading, spacing: 14) {
-                        HStack(spacing: 10) {
-                            Image(systemName: "paintpalette.fill")
-                                .font(.title2)
+                HCSectionTitle(title: "Identity", detail: "Your look & your mindset")
+                NavigationLink {
+                    IMUNDesignStudioPage()
+                } label: {
+                    HCCard(accent: HCDesign.electric) {
+                        HStack(spacing: 14) {
+                            Image(systemName: IMUNStyle.preset.symbol)
+                                .font(.system(size: 25, weight: .light))
                                 .foregroundStyle(HCDesign.electric)
-                            VStack(alignment: .leading, spacing: 3) {
-                                Text("YOUR LOOK").font(HCDesign.label(11)).tracking(1)
-                                Text("Crimson + White by default")
-                                    .font(.caption).foregroundStyle(HCDesign.secondary)
+                                .frame(width: 40)
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("DESIGN STUDIO")
+                                    .font(HCDesign.label(12)).tracking(1.2)
+                                    .foregroundStyle(HCDesign.ink)
+                                Text(IMUNStyle.preset.title + " · " +
+                                     IMUNStyle.preset.tagline)
+                                    .font(.caption)
+                                    .foregroundStyle(HCDesign.secondary)
                             }
+                            Spacer(minLength: 0)
+                            Image(systemName: "chevron.right")
+                                .foregroundStyle(HCDesign.secondary)
                         }
-                        HStack(spacing: 9) {
-                            accentTile(id: "crimson", name: "Crimson",
-                                       tint: Color(red: 0.83, green: 0.20, blue: 0.31))
-                            accentTile(id: "white", name: "White", tint: .white)
-                            accentTile(id: "lime", name: "Lime",
-                                       tint: Color(red: 0.76, green: 0.98, blue: 0.43))
-                            accentTile(id: "aqua", name: "Aqua",
-                                       tint: Color(red: 0.41, green: 0.85, blue: 0.82))
-                        }
-                        Text("The dark background and clear white typography stay consistent. Accent choices sync to your Apple Watch.")
-                            .font(.caption2).foregroundStyle(HCDesign.secondary)
                     }
                 }
+                .buttonStyle(.plain)
+                NavigationLink {
+                    IMUNMotivationPage()
+                } label: {
+                    HCCard {
+                        HStack(spacing: 14) {
+                            Image(systemName: "bookmark")
+                                .font(.title2)
+                                .foregroundStyle(HCDesign.aqua)
+                                .frame(width: 40)
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("MOTIVATION & SCRIPTURE")
+                                    .font(HCDesign.label(12)).tracking(1)
+                                    .foregroundStyle(HCDesign.ink)
+                                Text(motivationSource == "off" ?
+                                     "Off by default · choose your own content" :
+                                     "Your selected content is enabled")
+                                    .font(.caption)
+                                    .foregroundStyle(HCDesign.secondary)
+                            }
+                            Spacer(minLength: 0)
+                            Image(systemName: "chevron.right")
+                                .foregroundStyle(HCDesign.secondary)
+                        }
+                    }
+                }
+                .buttonStyle(.plain)
                 HCSectionTitle(title: "Workout controls")
                 HCCard {
                     VStack(alignment: .leading, spacing: 15) {

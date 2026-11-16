@@ -875,6 +875,32 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
     }
 
     private func applyContext(_ context: [String: Any]) {
+        // A Watch can keep its own design, particularly when the cloud route
+        // works but WatchConnectivity does not. Only accept explicit opt-in.
+        if (context["imunDesignSyncV1"] as? Bool == true) &&
+           (UserDefaults.standard.object(forKey:"hcDesignAcceptPhoneAppearance") as? Bool ?? true) {
+            let strings = [
+                "hcDesignPreset", "hcDesignMode", "hcDesignAccentHex",
+                "hcDesignBackgroundHex", "hcDesignSurfaceHex",
+                "hcDesignTextHex", "hcDesignShape", "hcDesignButtonShape",
+                "hcDesignFont", "hcDesignDensity", "hcDesignMotif",
+                "hcDesignNavigation", "hcDesignProgress"
+            ]
+            for key in strings {
+                if let value = context[key] as? String, value.count <= 40 {
+                    if key != "hcDesignPreset" ||
+                       IMUNPreset(rawValue: value) != nil {
+                        UserDefaults.standard.set(value, forKey: key)
+                    }
+                }
+            }
+            for key in ["hcDesignCustomPalette", "hcDesignCustomGeometry",
+                        "hcDesignReduceMotion"] {
+                if let value = context[key] as? Bool {
+                    UserDefaults.standard.set(value, forKey: key)
+                }
+            }
+        }
         // Preferences are cheap to apply even while the plan is loading.
         if let color = context[HCPayload.accentStyle] as? String,
            ["crimson", "lime", "aqua", "white"].contains(color) {
