@@ -1,6 +1,6 @@
 # imun Native Install Verification — 2.3 (19)
 
-Both the native iPhone HealthCoach target and Watch HealthCoachWatch target use **CFBundleShortVersionString 2.3** and **CFBundleVersion 18** in this release. Earlier source releases left both targets at 1.0 (1), making it difficult to tell if Xcode installed the latest binary.
+Both the native iPhone HealthCoach target and Watch HealthCoachWatch target use **CFBundleShortVersionString 2.3** and **CFBundleVersion 19** in this release. Earlier source releases left both targets at 1.0 (1), making it difficult to tell if Xcode installed the latest binary.
 
 ## Identify what is installed, not what looks different
 
