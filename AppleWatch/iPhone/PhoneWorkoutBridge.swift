@@ -650,19 +650,34 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
         do {
             let current = try watchContext()
             try connection.updateApplicationContext(current)
+            guard let scheduleBytes = current[HCPayload.schedule] as? Data,
+                  let scheduled = try? decoder.decode(HCWatchSchedule.self,
+                                                      from: scheduleBytes) else {
+                watchSyncStatus = "Could not verify today's schedule payload"
+                return
+            }
             var packet = current
             packet[HCPayload.kind] = HCPayload.pushSchedule
             if connection.isReachable {
                 connection.sendMessage(packet, replyHandler: { [weak self] reply in
                     DispatchQueue.main.async {
                         guard let self else { return }
-                        if reply["received"] as? Bool == true {
+                        let accepted = reply["received"] as? Bool == true &&
+                            reply["scheduleState"] as? String == scheduled.state &&
+                            reply["workoutID"] as? String == (scheduled.workout?.id ?? "")
+                        if accepted {
                             self.watchLastAcknowledgedAt = Date()
-                            self.watchSyncStatus = "Watch received today's plan"
+                            if scheduled.state != "ready" {
+                                self.watchSyncStatus = "Watch connected · waiting for today's workout"
+                            } else if let lift = scheduled.workout {
+                                self.watchSyncStatus = "Watch loaded: " + lift.title
+                            } else {
+                                self.watchSyncStatus = "Watch confirmed no lift scheduled today"
+                            }
                         } else if forceQueue {
                             self.queueWatchDelivery(packet)
                         } else {
-                            self.watchSyncStatus = "Watch sync pending"
+                            self.watchSyncStatus = "Watch did not confirm the workout · Refresh & send again"
                         }
                     }
                 }, errorHandler: { [weak self] error in
@@ -932,6 +947,21 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
         if userInfo[HCPayload.kind] as? String == HCPayload.requestSchedule {
             DispatchQueue.main.async {
                 self.refreshTodaySchedule(forceWatchDelivery: true)
+            }
+            return
+        }
+        if userInfo[HCPayload.kind] as? String == HCPayload.scheduleReceipt {
+            DispatchQueue.main.async {
+                let today = HCPlanBuilder.dateString(Date())
+                guard userInfo["date"] as? String == today,
+                      self.confirmedScheduleDate == today,
+                      userInfo["scheduleState"] as? String == "ready",
+                      userInfo["workoutID"] as? String ==
+                          (self.workout?.date == today ? self.workout?.id ?? "" : "") else { return }
+                self.watchLastAcknowledgedAt = Date()
+                self.watchSyncStatus = self.workout.map {
+                    "Watch loaded: " + $0.title
+                } ?? "Watch confirmed no lift scheduled today"
             }
             return
         }
