@@ -161,7 +161,8 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
                         return
                     }
                     self.applySchedule(HCWatchSchedule(
-                        date: day, workout: published, runPlan: nil,
+                        date: day, workout: published,
+                        runPlan: self.runPlan?.date == day ? self.runPlan : nil,
                         generatedAt: Date(), state: "ready"))
                     self.cloudStatus = "Today's workout downloaded directly from cloud"
                 }
@@ -706,8 +707,15 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
             invalidatePreviousDayIfNeeded()
             return
         }
-        if let previous = latestSchedule, previous.date == schedule.date,
-           previous.generatedAt > schedule.generatedAt { return }
+        if let previous = latestSchedule, previous.date == schedule.date {
+            // Once the authenticated cloud or iPhone has confirmed today's
+            // workout, a later provisional "loading" update must not make
+            // it appear unscheduled again.
+            if previous.state == "ready" && schedule.state == "loading" {
+                return
+            }
+            if previous.generatedAt > schedule.generatedAt { return }
+        }
         latestSchedule = schedule
         isRequestingSchedule = false
         scheduleState = schedule.state
@@ -746,6 +754,13 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
     /// last context. Queue an offline request when live messaging is unavailable.
     func requestCurrentSchedule(manual: Bool = false) {
         invalidatePreviousDayIfNeeded()
+        // A normal Refresh should work even when watchOS says the iPhone
+        // companion is absent. The authenticated cloud route has its own
+        // network transport and never waits for WatchConnectivity.
+        if manual && cloudSignedIn {
+            refreshCloudWorkout()
+            uploadPendingCloudSets()
+        }
         guard WCSession.isSupported() else {
             status = "iPhone sync isn't supported on this Watch."
             isRequestingSchedule = false
