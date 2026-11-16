@@ -160,7 +160,12 @@ enum IMUNStyle {
         IMUNPreset(rawValue: prefs.string(forKey: "hcDesignPreset") ?? "") ?? .techno
     }
     static var appearanceMode: String {
-        prefs.string(forKey: "hcDesignMode") ?? "dark"
+        #if os(watchOS)
+        // watchOS uses its own dark presentation even when iPhone is light.
+        return "dark"
+        #else
+        return prefs.string(forKey: "hcDesignMode") ?? "dark"
+        #endif
     }
     static var customPalette: Bool { prefs.bool(forKey: "hcDesignCustomPalette") }
     static var customGeometry: Bool { prefs.bool(forKey: "hcDesignCustomGeometry") }
