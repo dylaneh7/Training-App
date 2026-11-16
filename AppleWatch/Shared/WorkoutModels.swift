@@ -40,6 +40,11 @@ struct HCWorkout: Codable, Identifiable {
 }
 
 
+struct HCGuidedSetChoice: Codable, Equatable {
+    let exerciseID: String
+    let setNumber: Int
+}
+
 /// A replacement changes the planned movement in the *same* exercise slot.
 /// Its stable ID keeps previously completed set records attached to the slot;
 /// each recorded set retains its actual movement name.
