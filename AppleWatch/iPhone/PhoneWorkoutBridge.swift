@@ -1060,6 +1060,13 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
             state: state
         )
         var context: [String: Any] = [HCPayload.schedule: try encoder.encode(snapshot)]
+        // Current-date undo records ride alongside the schedule for immediate
+        // offline-safe display correction on the Watch.
+        let todayUndos = combinedUndoRecords.filter { $0.workoutDate == today }
+        if let bytes = try? encoder.encode(Array(todayUndos.suffix(100))),
+           bytes.count < 45_000 {
+            context[HCPayload.workoutUndos] = bytes
+        }
         let prefs = UserDefaults.standard
         context[HCPayload.accentStyle] = prefs.string(forKey:"hcAccentStyle") ?? "crimson"
         // Appearance is optional and independent from schedule delivery.
@@ -1747,6 +1754,7 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
             guard let item = try? decoder.decode(HCWorkoutUndo.self, from: payload) else { return }
             DispatchQueue.main.async {
                 self.appendUndo(item, forwardToWatch: false)
+                self.confirmWatchRecord(item.id)
             }
         default: break
         }
