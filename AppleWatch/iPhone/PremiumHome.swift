@@ -36,6 +36,11 @@ struct PremiumHomeView: View {
     @AppStorage("hcDesignCustomPalette") private var customPalette = false
     @AppStorage("hcDesignAccentHex") private var designAccentHex = "D4324F"
     @AppStorage("hcDesignBackgroundHex") private var designBackgroundHex = "070C16"
+    @AppStorage("hcDesignSurfaceHex") private var designSurfaceHex = "212831"
+    @AppStorage("hcDesignTextHex") private var designTextHex = "F6F3E9"
+    @AppStorage("hcDesignShape") private var designCardShape = "rounded"
+    @AppStorage("hcDesignFont") private var designFont = "standard"
+    @AppStorage("hcDesignCustomGeometry") private var designCustomGeometry = false
     @Environment(\.scenePhase) private var scenePhase
     private let scheduleRefresh = Timer.publish(every: 60, on: .main, in: .common).autoconnect()
     private let progressRefresh = Timer.publish(every: 15, on: .main, in: .common).autoconnect()
@@ -92,6 +97,11 @@ struct PremiumHomeView: View {
         .onChange(of: customPalette) { _, _ in configureTabAppearance() }
         .onChange(of: designAccentHex) { _, _ in configureTabAppearance() }
         .onChange(of: designBackgroundHex) { _, _ in configureTabAppearance() }
+        .onChange(of: designSurfaceHex) { _, _ in configureTabAppearance() }
+        .onChange(of: designTextHex) { _, _ in configureTabAppearance() }
+        .onChange(of: designCardShape) { _, _ in configureTabAppearance() }
+        .onChange(of: designFont) { _, _ in configureTabAppearance() }
+        .onChange(of: designCustomGeometry) { _, _ in configureTabAppearance() }
         .onAppear {
             if coach.signedIn && coach.workout == nil { coach.refresh(date: Date()) }
             if coach.signedIn { coach.refreshCloudProgress() }
