@@ -305,7 +305,7 @@ enum IMUNCoachActionInterpreter {
             let replacementName: String? = {
                 guard operation == .replace else { return nil }
                 return capture(value,
-                    pattern: #"(?:with|to)s+([a-z][a-z0-9 '-]{1,75}?)(?:s+d|s*$)"#,
+                    pattern: #"\b(?:with|to)\s+([a-z][a-z0-9 '\-]{1,75}?)(?:\s+\d|\s*$)"#,
                     group: 1)?.trimmingCharacters(in: .whitespacesAndNewlines)
             }()
             return proposal(.editStrength, "Edit today's strength workout",
