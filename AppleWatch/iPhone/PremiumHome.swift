@@ -3186,6 +3186,10 @@ private struct PremiumSettingsPage: View {
                             .font(.caption2)
                             .foregroundStyle(HCDesign.secondary)
                             .fixedSize(horizontal: false, vertical: true)
+                        Text(coach.cloudWorkoutStatus)
+                            .font(.caption2)
+                            .foregroundStyle(HCDesign.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
                         if let confirmed = coach.watchLastAcknowledgedAt {
                             Text("Watch confirmed receipt " +
                                  confirmed.formatted(date: .omitted, time: .shortened))

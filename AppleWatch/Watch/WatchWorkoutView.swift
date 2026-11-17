@@ -216,6 +216,7 @@ struct WatchWorkoutView: View {
     @AppStorage("hcDesignSurfaceHex") private var visualSurface = "212831"
     @AppStorage("hcDesignTextHex") private var visualInk = "F6F3E9"
     @Environment(\.scenePhase) private var scenePhase
+    @State private var lastCloudScheduleCheck = Date.distantPast
     // Low-rate foreground refresh: no continuous iPhone connection required.
     private let progressPulse = Timer.publish(
         every: 15, on: .main, in: .common).autoconnect()
@@ -474,6 +475,12 @@ struct WatchWorkoutView: View {
         }
         .onReceive(progressPulse) { _ in
             if scenePhase == .active && store.cloudSignedIn {
+                // iMun Watch can receive a new full schedule even if
+                // WatchConnectivity says no live iPhone route exists.
+                if Date().timeIntervalSince(lastCloudScheduleCheck) >= 60 {
+                    lastCloudScheduleCheck = Date()
+                    store.refreshCloudWorkout()
+                }
                 store.refreshCloudSets()
                 store.refreshCloudAppearance()
             }

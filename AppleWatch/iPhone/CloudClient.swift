@@ -197,6 +197,34 @@ actor HCCloudClient {
         return (planner, history)
     }
 
+    /// A single atomic user-scoped snapshot for iMun Watch. Running and
+    /// strength share the same date and source; this never records a workout.
+    func publishWatchSchedule(_ schedule: HCWatchSchedule) async throws {
+        let session = try await authorizedToken()
+        let bytes = try JSONEncoder().encode(schedule)
+        guard let snapshot = try JSONSerialization.jsonObject(with: bytes)
+                as? [String: Any] else {
+            throw HCCloudError.malformedResponse
+        }
+        let data = try await send(
+            path: "/rest/v1/health_coach_watch_schedules",
+            query: [URLQueryItem(name: "on_conflict", value: "user_id,workout_date")],
+            method: "POST",
+            json: [[
+                "user_id": session.userID,
+                "workout_date": schedule.date,
+                "schedule": snapshot,
+                "updated_at": ISO8601DateFormatter().string(from: Date())
+            ]],
+            bearer: session.access,
+            prefer: "resolution=merge-duplicates,return=representation")
+        // A successful HTTP status alone isn't confirmation of a row: RLS
+        // or configuration may silently return an empty representation.
+        guard let rows = try JSONSerialization.jsonObject(with: data) as? [[String: Any]],
+              rows.count == 1, rows[0]["workout_date"] as? String == schedule.date
+        else { throw HCCloudError.malformedResponse }
+    }
+
     func fetchPublishedPlan(date: String) async throws -> HCWorkout? {
         let authenticated = try await authorizedToken()
         let data = try await send(path: "/rest/v1/health_coach_native_plans",
