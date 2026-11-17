@@ -73,6 +73,7 @@ final class HCTredictWatchPlanSync: ObservableObject {
     @Published private(set) var loading = false
     @Published private(set) var sending = false
     @Published private(set) var status = "Connect Tredict to fetch structured running workouts."
+    @Published private(set) var lastSentTodayRunID: String?
 
     private static let tokenService = "imun.tredict.personal-api"
 
@@ -113,13 +114,23 @@ final class HCTredictWatchPlanSync: ObservableObject {
             var sent = 0
             var unchanged = 0
             var failures: [String] = []
+            var successfulToday: [String] = []
             for run in toSend {
                 do {
                     let changed = try await Self.schedule(run)
                     if changed { sent += 1 } else { unchanged += 1 }
+                    if run.date == HCPlanBuilder.dateString(Date()) {
+                        successfulToday.append(run.id)
+                    }
                 } catch {
                     failures.append("\(run.title): \(error.localizedDescription)")
                 }
+            }
+            // One successfully exported workout for today becomes the same
+            // selected run in iMun Phone and iMun Watch. Never guess if more
+            // than one overlapping plan was exported for today.
+            if successfulToday.count == 1 {
+                lastSentTodayRunID = successfulToday[0]
             }
             status = "Apple Workout: \(sent) scheduled, \(unchanged) already current" +
                 (failures.isEmpty ? "." : ". Could not send: " + failures.joined(separator: "; "))
@@ -397,6 +408,7 @@ final class HCTredictWatchPlanSync: ObservableObject {
 /// Multiple parallel Tredict plans can overlap, so nothing is auto-selected.
 struct IMUNTredictWorkoutCard: View {
     @EnvironmentObject private var calendar: HCTredictWatchPlanSync
+    @EnvironmentObject private var coach: PhoneWorkoutBridge
     @State private var selected = Set<String>()
 
     var body: some View {
@@ -445,6 +457,18 @@ struct IMUNTredictWorkoutCard: View {
                             }
                         }
                         .disabled(!run.canSend || calendar.sending)
+                        if run.date == HCPlanBuilder.dateString(Date()) &&
+                           run.unsupportedReason == nil && !run.steps.isEmpty {
+                            if coach.preferredTredictRunID == run.id {
+                                Label("ACTIVE ON iMUN PHONE + WATCH", systemImage: "checkmark.circle.fill")
+                                    .font(.caption2).foregroundStyle(HCDesign.aqua)
+                            } else {
+                                Button("Use as today's run on iMun Phone + Watch") {
+                                    coach.useTredictRunAsToday(run)
+                                }
+                                .font(.caption.weight(.semibold))
+                            }
+                        }
                         if run.hasExecutedActivity {
                             Text("Completed in Tredict — not sent again.")
                                 .font(.caption2).foregroundStyle(HCDesign.secondary)
