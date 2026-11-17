@@ -1012,6 +1012,18 @@ enum IMUNEitanWellnessEngine {
                 guard let date = Calendar.current.date(byAdding: .day,
                                                        value: -offset, to: today)
                 else { break }
+                // One stale abnormal reading cannot create a fictitious
+                // multi-day low streak. Require fresh daily sensor evidence.
+                let dateKey = HCPlanBuilder.dateString(date)
+                let recordedToday = samples.contains {
+                    $0.date == dateKey &&
+                    ["HRV · SDNN", "HRV · RMSSD", "Resting heart rate",
+                     "Daily low HR", "Respiratory rate", "Wrist temperature"]
+                        .contains($0.name) &&
+                    (preferredSource == "Auto" ||
+                     $0.source.localizedCaseInsensitiveContains(preferredSource))
+                }
+                guard recordedToday else { break }
                 let prior = assess(date: date, samples: samples,
                                    activityDays: activityDays,
                                    preferredSource: preferredSource)
@@ -1201,6 +1213,57 @@ enum IMUNEitanWellnessEngine {
                 id: "load", title: "Training balance", value: loadScore,
                 detail: "\(weeklyDays) training days in the last 7 vs \(priorDays) in the preceding 21. Workload estimate uses days, not set completion or measured intensity.",
                 weight: 0.08))
+        }
+        // Activity is contextual training strain, never a reason to reward
+        // exhaustion or punish a healthy rest day. Prefer recorded exercise
+        // minutes to active energy and steps, never count all three twice.
+        for activityName in ["Exercise", "Active energy", "Steps"] {
+            let activityReadings = samples.filter {
+                $0.name == activityName &&
+                $0.date >= earliestDay && $0.date <= targetDay &&
+                $0.value.isFinite && $0.value >= 0 &&
+                (preferredSource == "Auto" ||
+                 $0.source.localizedCaseInsensitiveContains(preferredSource))
+            }
+            let sourceGroups = Dictionary(grouping: activityReadings, by: \.source)
+            var candidates: [(source: String, date: String,
+                              recent: Double, prior: Double)] = []
+            for (source, values) in sourceGroups {
+                let byDay = Dictionary(grouping: values, by: \.date)
+                let daily = byDay.compactMap { day, readings -> (String, Double)? in
+                    let amounts = readings.map(\.value).sorted()
+                    guard !amounts.isEmpty else { return nil }
+                    let midpoint = amounts.count / 2
+                    let median = amounts.count.isMultiple(of: 2) ?
+                        (amounts[midpoint - 1] + amounts[midpoint]) / 2 :
+                        amounts[midpoint]
+                    return (day, median)
+                }
+                let recent = daily.filter { $0.0 >= recent7Start && $0.0 <= targetDay }
+                let older = daily.filter { $0.0 >= prior21Start && $0.0 <= before7 }
+                guard recent.count >= 4, older.count >= 10,
+                      let latest = recent.map(\.0).max(),
+                      latest >= maxThreeDaysAgo else { continue }
+                let recentAverage = recent.reduce(0.0) { $0 + $1.1 } /
+                    Double(recent.count)
+                let oldAverage = older.reduce(0.0) { $0 + $1.1 } /
+                    Double(older.count)
+                guard oldAverage > 0 else { continue }
+                candidates.append((source, latest, recentAverage, oldAverage))
+            }
+            guard let found = candidates.sorted(by: {
+                if $0.date != $1.date { return $0.date > $1.date }
+                return $0.source < $1.source
+            }).first else { continue }
+            let relative = found.recent / found.prior
+            let score = clamp(86 - max(0, relative - 1.3) * 28)
+            parts.append(HCEitanFactor(
+                id: "activity", title: "Activity balance", value: score,
+                detail: String(format: "%@: 7-day average %.0f vs earlier average %.0f (%@); unusually high volume is one recovery consideration.",
+                               activityName, found.recent, found.prior, found.source),
+                weight: 0.08))
+            sources.insert(found.source)
+            break
         }
         // No health-only score from a single sleep night or exercise count.
         // A score requires at least two physiological factors and a genuine
