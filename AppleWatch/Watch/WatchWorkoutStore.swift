@@ -1555,12 +1555,16 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
                 if stored[HCPayload.eitanStamp] != nil {
                     _ = self.applyEitanPacket(stored)
                 }
-                // Cancel only obsolete EITAN refresh requests from older builds.
-                // Workout and undo transfers must never be canceled here.
-                for transfer in session.outstandingUserInfoTransfers
-                    where transfer.userInfo[HCPayload.kind] as? String ==
-                        HCPayload.eitanRequest {
-                    transfer.cancel()
+                // Cancel only obsolete EITAN request/receipt transfers
+                // from older builds. Old receipt queues are one source of
+                // misleading WCSessionTransferTimedOut console messages.
+                // Never cancel workouts, sets, schedule, or undo records.
+                for transfer in session.outstandingUserInfoTransfers {
+                    let kind = transfer.userInfo[HCPayload.kind] as? String
+                    if kind == HCPayload.eitanRequest ||
+                       kind == HCPayload.eitanReceipt {
+                        transfer.cancel()
+                    }
                 }
                 if self.hasScheduledLift && self.workout.date == Self.today() {
                     self.publishLiftSessionStatus(
