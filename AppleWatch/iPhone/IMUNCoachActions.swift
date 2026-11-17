@@ -1,5 +1,56 @@
 import Foundation
 import SwiftUI
+import CryptoKit
+
+/// Prescribed workout edits are proposals, not logged performance changes.
+enum IMUNCoachExerciseOperation: String, CaseIterable, Identifiable {
+    case update, add, replace, remove, moveUp, moveDown
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .update: return "Adjust prescription"
+        case .add: return "Add exercise"
+        case .replace: return "Replace exercise"
+        case .remove: return "Remove exercise"
+        case .moveUp: return "Move earlier"
+        case .moveDown: return "Move later"
+        }
+    }
+}
+
+struct IMUNCoachWorkoutEditHint {
+    let operation: IMUNCoachExerciseOperation
+    let exerciseName: String?
+    let sets: Int?
+    let repMin: Int?
+    let repMax: Int?
+    let restSeconds: Int?
+    let weightLb: Double?
+}
+
+/// Authorized, version-checked edit to today's prescribed workout.
+struct IMUNCoachWorkoutEdit {
+    let workoutID: String
+    let expectedSignature: String
+    let operation: IMUNCoachExerciseOperation
+    let exerciseID: String?
+    let newName: String?
+    let newInstructions: String?
+    let sets: Int
+    let repMin: Int
+    let repMax: Int
+    let restSeconds: Int
+    let suggestedWeightLb: Double?
+}
+
+extension HCWorkout {
+    var coachEditSignature: String {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        guard let payload = try? encoder.encode(self) else { return "" }
+        return Data(SHA256.hash(data: payload)).base64EncodedString()
+    }
+}
 
 /// Narrow, validated app commands. The assistant's narrative never executes
 /// directly. Every matching command is reviewed in the iMun Coach UI.
@@ -12,6 +63,7 @@ enum IMUNCoachActionKind: Equatable {
     case createStrength
     case createRun
     case renameStrength
+    case editStrength
     case selectTraining
     case openTab
     case setMotivation
@@ -30,6 +82,7 @@ struct IMUNCoachActionProposal: Identifiable {
     let suggestedDate: Date?
     let themeID: String?
     var parameter: String? = nil
+    var workoutEdit: IMUNCoachWorkoutEditHint? = nil
 }
 
 /// Parses explicit user commands into *proposals*, not side effects. The
