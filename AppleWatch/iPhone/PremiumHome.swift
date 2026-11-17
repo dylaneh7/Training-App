@@ -31,6 +31,7 @@ struct PremiumHomeView: View {
     @StateObject private var runImporter = HCRunHealthImporter()
     @StateObject private var tredictImporter = HCTredictImporter()
     @StateObject private var tredictPlans = HCTredictWatchPlanSync()
+    @AppStorage("hcSelectedTab") private var selectedTab = "training"
     @AppStorage("hcAccentStyle") private var accentStyle = "crimson"
     @AppStorage("hcDesignPreset") private var designPreset = "techno"
     @AppStorage("hcDesignMode") private var designMode = "dark"
@@ -56,17 +57,22 @@ struct PremiumHomeView: View {
     }
 
     var body: some View {
-        TabView {
+        TabView(selection: $selectedTab) {
             NavigationStack { PremiumTrainingPage() }
                 .tabItem { Label("Training", systemImage: "figure.run.circle.fill") }
+                .tag("training")
             NavigationStack { PremiumProgressPage() }
                 .tabItem { Label("Progress", systemImage: "chart.xyaxis.line") }
+                .tag("progress")
             NavigationStack { PremiumRecoveryPage(appleHealth: appleHealth) }
                 .tabItem { Label("Health", systemImage: "heart.text.square.fill") }
+                .tag("health")
             NavigationStack { PremiumCoachPage() }
                 .tabItem { Label("Coach", systemImage: "bubble.left.and.text.bubble.right") }
+                .tag("coach")
             NavigationStack { PremiumSettingsPage() }
                 .tabItem { Label("Settings", systemImage: "gearshape.fill") }
+                .tag("settings")
         }
         .tint(HCDesign.electric)
         .preferredColorScheme(IMUNStyle.preferredScheme)
