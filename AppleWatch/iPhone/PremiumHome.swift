@@ -1713,24 +1713,6 @@ private struct PremiumProgressPage: View {
                                       tint: HCDesign.ink)
                     }
                 }
-                HCCard(accent: HCDesign.electric) {
-                    VStack(alignment: .leading, spacing: 8) {
-                        IMUNThemeProgressView(
-                            completed: coach.workout.map {
-                                coach.completedSets(for: $0).count
-                            } ?? 0,
-                            planned: coach.workout?.prescribedSetCount ?? 0)
-                        Text("TODAY'S PRESCRIBED WORKING SETS · RECORDED ON BOTH DEVICES")
-                            .font(HCDesign.label(9))
-                            .foregroundStyle(HCDesign.secondary)
-                    }
-                }
-                HCCard {
-                    HCMetricBlock(label: "Total logged run distance",
-                                  value: String(format: "%.1f mi",
-                                    coach.runHistory.compactMap(\.distanceMeters).reduce(0,+) / 1609.344),
-                                  tint: HCDesign.electric)
-                }
                 HCSectionTitle(title: "Exercise progression", detail: "Recorded weight")
                 HCCard {
                     VStack(alignment: .leading, spacing: 16) {
@@ -1783,6 +1765,24 @@ private struct PremiumProgressPage: View {
                         }
                         .frame(height: 210)
                     }
+                }
+                HCCard(accent: HCDesign.electric) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        IMUNThemeProgressView(
+                            completed: coach.workout.map {
+                                coach.completedSets(for: $0).count
+                            } ?? 0,
+                            planned: coach.workout?.prescribedSetCount ?? 0)
+                        Text("TODAY'S PRESCRIBED WORKING SETS · RECORDED ON BOTH DEVICES")
+                            .font(HCDesign.label(9))
+                            .foregroundStyle(HCDesign.secondary)
+                    }
+                }
+                HCCard {
+                    HCMetricBlock(label: "Total logged run distance",
+                                  value: String(format: "%.1f mi",
+                                    coach.runHistory.compactMap(\.distanceMeters).reduce(0,+) / 1609.344),
+                                  tint: HCDesign.electric)
                 }
                 HStack(alignment: .center, spacing: 8) {
                     VStack(alignment: .leading, spacing: 3) {
