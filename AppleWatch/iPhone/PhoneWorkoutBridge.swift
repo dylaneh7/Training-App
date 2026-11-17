@@ -54,6 +54,20 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
     @Published private(set) var phoneSetExerciseID: String?
     @Published private(set) var phoneSetStartedAt: Date?
     @Published private(set) var phoneRestEndsAt: Date?
+    @Published private(set) var watchLiftSessionStatus: HCWatchLiftSessionStatus?
+
+    var activeWatchStartedAt: Date? {
+        guard let state = watchLiftSessionStatus,
+              state.isActive,
+              state.workoutID == workout?.id,
+              state.workoutDate == HCPlanBuilder.dateString(Date()),
+              let started = state.startedAt,
+              started <= Date(),
+              Date().timeIntervalSince(started) < 18 * 3600 else { return nil }
+        return started
+    }
+    var activeWorkoutStartedAt: Date? { phoneSessionStartedAt ?? activeWatchStartedAt }
+    var isWorkoutActive: Bool { activeWorkoutStartedAt != nil }
 
     private let cloud = HCCloudClient()
     private let encoder = JSONEncoder()
@@ -1362,9 +1376,17 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
             : "Workout queued · watchOS has not recognized the companion yet"
     }
 
+    private func receiveWatchLiftSessionStatus(_ value: HCWatchLiftSessionStatus) {
+        guard value.reportedAt > (watchLiftSessionStatus?.reportedAt ?? .distantPast),
+              value.workoutDate == HCPlanBuilder.dateString(Date()) else { return }
+        watchLiftSessionStatus = value
+    }
+
     func startPhoneWorkout() {
         guard phoneSessionStartedAt == nil else { return }
-        let started = Date()
+        // If the session was started on Watch, adopt the same start timestamp
+        // instead of silently creating a second unrelated workout clock.
+        let started = activeWatchStartedAt ?? Date()
         phoneSessionStartedAt = started
         save(started,name:"iphone-session-start.json")
     }
@@ -1701,6 +1723,14 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
                     }
                     return
                 }
+            case HCPayload.liftSessionStatus:
+                if let state = try? decoder.decode(HCWatchLiftSessionStatus.self, from: payload) {
+                    DispatchQueue.main.async {
+                        self.receiveWatchLiftSessionStatus(state)
+                        replyHandler(["saved": true])
+                    }
+                    return
+                }
             case HCPayload.completedRun:
                 if let item = try? decoder.decode(HCRunFinished.self, from: payload) {
                     DispatchQueue.main.async {
@@ -1807,6 +1837,12 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
             DispatchQueue.main.async {
                 self.acceptSet(item)
                 self.confirmWatchRecord(item.id)
+            }
+        case HCPayload.liftSessionStatus:
+            guard let state = try? decoder.decode(HCWatchLiftSessionStatus.self,
+                                                  from: payload) else { return }
+            DispatchQueue.main.async {
+                self.receiveWatchLiftSessionStatus(state)
             }
         case HCPayload.completedRun:
             guard let item = try? decoder.decode(HCRunFinished.self,from:payload) else { return }
