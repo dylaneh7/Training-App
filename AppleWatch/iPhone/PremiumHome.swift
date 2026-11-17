@@ -3078,12 +3078,13 @@ private struct PremiumCoachConversation: View {
 
     private var isaiahBanner: some View {
         VStack(spacing: 12) {
-            HStack(spacing: 13) {
-                IMUNIsaiahMark(size: 73)
-                IMUNIsaiahWordmark(size: 42)
-                Spacer(minLength: 0)
-            }
-            .padding(.top, 10)
+            // Render the approved IsAIah artwork across the entire header.
+            // Unlike the previous SwiftUI text approximation, this is traced
+            // from the chosen design and remains consistent in every theme.
+            IMUNIsaiahArtwork(layout: .full)
+                .frame(height: 112)
+                .frame(maxWidth: .infinity)
+                .padding(.top, 3)
             HStack {
                 Label(launchContext.components(separatedBy: "\n").first ??
                       "Current iMun screen", systemImage: "rectangle.on.rectangle")
