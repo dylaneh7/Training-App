@@ -650,6 +650,7 @@ private struct WatchGuidedSession: View {
     @State private var rir = 2
     @State private var readyHapticSent = false
     @State private var showSetPicker = false
+    @State private var confirmUndoWorkout = false
     private let restPulse = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
     let onFinish: () -> Void
 
@@ -857,6 +858,27 @@ private struct WatchGuidedSession: View {
                     }
                     .buttonStyle(.plain)
                 }
+                if let last = store.lastUndoableSet {
+                    Button {
+                        store.undoSet(last.id)
+                        wHaptic(.click)
+                    } label: {
+                        Label("UNDO SET", systemImage: "arrow.uturn.backward")
+                            .font(WTheme.label(11))
+                            .foregroundStyle(WTheme.aqua)
+                            .frame(maxWidth: .infinity, minHeight: 44)
+                    }
+                    .buttonStyle(.plain)
+                }
+                Button {
+                    confirmUndoWorkout = true
+                } label: {
+                    Label("UNDO WORKOUT", systemImage: "arrow.uturn.backward")
+                        .font(WTheme.label(11))
+                        .foregroundStyle(WTheme.muted)
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                }
+                .buttonStyle(.plain)
                 if !active {
                     Button(action: onFinish) {
                         Label("FINISH WORKOUT", systemImage: "checkmark.seal.fill")
@@ -888,6 +910,16 @@ private struct WatchGuidedSession: View {
         }
         .onAppear {
             store.advanceAfterRestIfReady()
+        }
+        .confirmationDialog("Undo Workout?", isPresented: $confirmUndoWorkout) {
+            Button("Undo Workout", role: .destructive) {
+                if health.kind == .strength { health.undo() }
+                store.undoLifting()
+                wHaptic(.click)
+            }
+            Button("Keep Workout", role: .cancel) {}
+        } message: {
+            Text("Reverse this active session's sets. The prescribed workout remains available.")
         }
     }
 
@@ -1345,6 +1377,7 @@ private struct WatchRunScreen: View {
     @AppStorage("hcRunCueMinutes") private var cueMinutes = 5
     private let cueTimer = Timer.publish(every: 2, on: .main, in: .common).autoconnect()
     @State private var confirmFinish = false
+    @State private var confirmUndoWorkout = false
 
     var body: some View {
         List {
@@ -1494,6 +1527,10 @@ private struct WatchRunScreen: View {
                     }
                     WPrimary(title: "FINISH RUN", symbol: "checkmark.seal.fill",
                              color: WTheme.amber) { confirmFinish = true }
+                    WSecondary(title: "UNDO WORKOUT",
+                               symbol: "arrow.uturn.backward") {
+                        confirmUndoWorkout = true
+                    }
                 } else if store.liftClock?.isActive == true {
                     Text("Finish your strength session before starting a run.")
                         .font(.system(size: 11)).foregroundStyle(WTheme.muted)
@@ -1548,6 +1585,16 @@ private struct WatchRunScreen: View {
             cueCoach.tick(store: store, health: health)
         }
         .onAppear { cueCoach.tick(store: store, health: health) }
+        .confirmationDialog("Undo Workout?", isPresented: $confirmUndoWorkout) {
+            Button("Undo Workout", role: .destructive) {
+                if health.kind == .run { health.undo() }
+                store.undoRun()
+                wHaptic(.click)
+            }
+            Button("Keep Workout", role: .cancel) {}
+        } message: {
+            Text("This reverses the active run without saving it to Apple Fitness.")
+        }
         .confirmationDialog("Finish run?", isPresented: $confirmFinish) {
             Button("Finish & Save") {
                 store.finishRun(distanceMeters: health.distanceMeters,
