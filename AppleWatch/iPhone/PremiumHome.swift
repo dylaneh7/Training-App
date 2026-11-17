@@ -2301,375 +2301,230 @@ private struct PremiumRecoveryPage: View {
     }
 
     var body: some View {
-        // Derive the source-attributed data only once per render, then reuse it
-        // for the hero, search, alerts and chart cards.
         let allSignals = cachedSignals
-        let visible = filteredSignals(from: allSignals)
-        let sleepSources = uniqueSleepSources(visible)
-        let remaining = visible.filter { !isSleepSignal($0) }
-        let sleepWarnings = uniqueSleepSources(allSignals.filter {
-            isSleepSignal($0) && $0.alertEnabled && $0.severity > 0 &&
-            $0.baseline != nil
-        })
-        let otherWarnings = allSignals.filter {
-            !isSleepSignal($0) && $0.alertEnabled && $0.severity > 0 &&
-            $0.baseline != nil
-        }
-        let warningCount = otherWarnings.count + (sleepWarnings.isEmpty ? 0 : 1)
-        let baselineCount = allSignals.filter { $0.baseline != nil }.count
+        let allFamilies = HCMetricFamily.build(from: allSignals)
+        let visibleFamilies = HCMetricFamily.build(
+            from: filteredSignals(from: allSignals))
+        let sourceCount = Set(allSignals.map {
+            HCMetricFamily.sourceKey($0.source)
+        }).count
+        let baselines = allFamilies.filter {
+            $0.readings.contains(where: { $0.baseline != nil })
+        }.count
+        let changed = allFamilies.filter { $0.alerts > 0 }.count
 
         return ScrollView {
-            // Lazily create the expensive Health cards instead of instantiating
-            // every graph on the first scroll/layout pass.
-            LazyVStack(alignment: .leading, spacing: 19) {
-                HCPremiumHero(eyebrow: "IMUN / HEALTH",
-                              title: "See the whole picture.",
-                              subtitle: "Your metrics, their sources, and what has changed.",
-                              icon: "heart.text.square.fill",
-                              tint: HCDesign.aqua) {
-                    HStack(alignment: .center, spacing: 15) {
-                        HCProgressRing(progress: allSignals.isEmpty ? 0 :
-                                       Double(baselineCount) /
-                                       Double(max(1, allSignals.count)),
-                                       value: "\(baselineCount)",
-                                       subtitle: "Baselines",
-                                       tint: HCDesign.aqua, diameter: 92)
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text(warningCount == 0 ? "YOUR BASELINE IS THE BENCHMARK" :
-                                 "\(warningCount) METRIC\(warningCount == 1 ? "" : "S") NEED ATTENTION")
-                                .font(.system(size: 14, weight: .bold, design: .rounded))
-                            Text("Ring shows available comparisons, not a made-up recovery score.")
-                                .font(.caption).foregroundStyle(HCDesign.secondary)
-                        }
-                    }
-                }
-
-                HCSectionTitle(title: "Your theme dashboard",
-                               detail: IMUNStyle.preset.title)
-                HCCard(accent: HCDesign.aqua) {
-                    IMUNThemeRecoveryBrief(
-                        compared: baselineCount,
-                        flagged: warningCount,
-                        sources: Set(allSignals.map(\.source)).count)
-                }
-                HCCard(accent: HCDesign.electric) {
-                    VStack(alignment: .leading, spacing: 12) {
-                        HStack {
-                            Image(systemName: IMUNStyle.preset.symbol)
-                                .foregroundStyle(HCDesign.electric)
-                            Text(IMUNStyle.preset.title.uppercased() + " / TRAINING PROGRESS")
-                                .font(HCDesign.label(11))
-                                .tracking(1)
-                            Spacer()
-                        }
-                        IMUNThemeProgressView(
-                            completed: coach.workout.map {
-                                coach.completedSets(for: $0).count
-                            } ?? 0,
-                            planned: coach.workout?.prescribedSetCount ?? 0)
-                        Text("The visual tracks prescribed sets completed today across iPhone and Watch—not a recovery score.")
-                            .font(.caption2)
+            LazyVStack(alignment: .leading, spacing: 22) {
+                VStack(alignment: .leading, spacing: 11) {
+                    HStack {
+                        Text("IMUN  /  HEALTH")
+                            .font(.system(size: 10, weight: .semibold))
+                            .tracking(1.7)
                             .foregroundStyle(HCDesign.secondary)
-                        if let latest = allSignals.first {
-                            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                                Text("RECENT RECOVERY SIGNAL")
-                                    .font(HCDesign.label(9))
-                                    .tracking(0.8)
-                                    .foregroundStyle(HCDesign.secondary)
-                                Spacer()
-                                Text(latest.label + " · " + latest.formattedValue)
-                                    .font(.caption.weight(.semibold))
-                                    .foregroundStyle(HCDesign.ink)
-                            }
-                            Text("Measured by " + latest.source + " · " + latest.date)
-                                .font(.caption2)
-                                .foregroundStyle(HCDesign.secondary)
-                        } else {
-                            Text("Recovery readings appear here once Apple Health or an authorized source provides them.")
-                                .font(.caption2)
-                                .foregroundStyle(HCDesign.secondary)
-                        }
+                        Spacer()
+                        Text(Date().formatted(.dateTime.month(.abbreviated).day().year()))
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(HCDesign.secondary)
                     }
+                    .padding(.bottom, 8)
+                    Text("Your health, clearly.")
+                        .font(.system(size: 33, weight: .semibold, design: .default))
+                        .tracking(-1.1)
+                        .foregroundStyle(HCDesign.ink)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text("One view of your measurements. Every source keeps its own data and baseline.")
+                        .font(.system(size: 14))
+                        .foregroundStyle(HCDesign.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(.top, 5)
+
+                Rectangle()
+                    .fill(HCDesign.outline.opacity(0.55))
+                    .frame(height: 1)
+
+                HStack(alignment: .top, spacing: 12) {
+                    HCHealthSummaryStat(value: "\(allFamilies.count)",
+                                        title: "Metrics")
+                    HCHealthSummaryStat(value: "\(sourceCount)",
+                                        title: "Sources")
+                    HCHealthSummaryStat(value: "\(baselines)",
+                                        title: "With baselines")
                 }
 
-                if warningCount > 0 {
-                    HCSectionTitle(title: "Outside your recent pattern",
-                                   detail: "Personal comparisons")
-                    if !sleepWarnings.isEmpty {
-                        HCStatusLine(
-                            text: "Sleep · " + sleepWarnings.map {
-                                sleepSourceName($0.source) + ": " + $0.comparison
-                            }.joined(separator: "  |  "),
-                            symbol: "moon.zzz.fill",
-                            tint: HCDesign.danger)
-                    }
-                    ForEach(otherWarnings) { metric in
-                        HCStatusLine(text: metric.label + " · " + metric.comparison,
-                                     symbol: "exclamationmark.triangle.fill",
-                                     tint: metric.color)
-                    }
-                    Text("These are training signals, not a medical diagnosis. Individual readings can be affected by device, illness, measurement time and sleep.")
-                        .font(.caption2).foregroundStyle(HCDesign.secondary)
-                } else if !allSignals.isEmpty {
-                    HCStatusLine(text: "No large unfavorable changes detected in metrics with sufficient same-source history.",
-                                 symbol: "checkmark.circle.fill", tint: HCDesign.good)
-                }
-
-                HCSectionTitle(title: "Explore your health",
-                               detail: "\(appleHealth.metrics.count) synced readings")
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 8) {
-                        ForEach(healthCategories, id: \.self) { group in
-                            Button {
-                                withAnimation(.easeInOut(duration: 0.2)) {
-                                    selectedHealthCategory = group
-                                }
-                            } label: {
-                                Text(group)
-                                    .font(.system(size: 12, weight: .semibold))
-                                    .padding(.horizontal, 12)
-                                    .padding(.vertical, 9)
-                                    .foregroundStyle(selectedHealthCategory == group ?
-                                        HCDesign.onAccent : HCDesign.secondary)
-                                    .background(selectedHealthCategory == group ?
-                                        HCDesign.electric : HCDesign.raised,
-                                        in: Capsule())
-                            }
-                            .buttonStyle(.plain)
-                        }
-                    }
-                }
-                TextField("Search health metrics or sources", text: $metricSearch)
-                    .textInputAutocapitalization(.never)
-                    .padding(13)
-                    .background(HCDesign.raised, in: RoundedRectangle(cornerRadius: 12))
-                    .font(.system(size: 13))
-                    .accessibilityLabel("Search available health measurements")
-
-                HCSectionTitle(title: selectedHealthCategory == "Overview" ?
-                               "Key health signals" : selectedHealthCategory,
-                               detail: "7 / 28-day comparisons")
-                if allSignals.isEmpty {
-                    HCCard {
-                        VStack(alignment: .leading, spacing: 12) {
-                            Text("Build your baseline")
-                                .font(HCDesign.display(22))
-                            Text("Connect Apple Health or import Tredict / Garmin history. We need repeated readings from the same source before showing an out-of-range comparison.")
-                                .font(.subheadline).foregroundStyle(HCDesign.secondary)
-                        }
-                    }
-                }
-                // One Sleep card, multiple clearly attributed device readings.
-                // Comparisons always use each source's own baseline.
-                if !sleepSources.isEmpty {
-                    HCCard(accent: HCDesign.aqua) {
-                        VStack(alignment: .leading, spacing: 13) {
-                            HStack(spacing: 9) {
-                                Image(systemName: "moon.zzz.fill")
-                                    .foregroundStyle(HCDesign.aqua)
-                                Text("SLEEP")
-                                    .font(HCDesign.label(12))
-                                    .tracking(1.4)
-                                    .foregroundStyle(HCDesign.ink)
-                                Spacer()
-                                Text("\(sleepSources.count) SOURCE\(sleepSources.count == 1 ? "" : "S")")
-                                    .font(HCDesign.label(10))
-                                    .foregroundStyle(HCDesign.secondary)
-                            }
-                            Text("Each device keeps its own reading and baseline.")
-                                .font(.caption)
-                                .foregroundStyle(HCDesign.secondary)
-                            ForEach(sleepSources) { reading in
-                                HStack(alignment: .top, spacing: 12) {
-                                    VStack(alignment: .leading, spacing: 6) {
-                                        Text(sleepSourceName(reading.source))
-                                            .font(.system(size: 13, weight: .bold))
-                                            .foregroundStyle(HCDesign.ink)
-                                        Text(reading.comparison)
-                                            .font(.system(size: 12))
-                                            .foregroundStyle(reading.color)
-                                            .fixedSize(horizontal: false, vertical: true)
-                                        Text("Last reading " + reading.date)
-                                            .font(.caption2)
-                                            .foregroundStyle(HCDesign.secondary)
-                                    }
-                                    Spacer(minLength: 5)
-                                    Text(reading.formattedValue)
-                                        .font(HCDesign.metric(21))
-                                        .minimumScaleFactor(0.75)
-                                        .lineLimit(1)
-                                        .foregroundStyle(HCDesign.ink)
-                                }
-                                .padding(.vertical, 7)
-                                Divider().overlay(HCDesign.outline)
-                            }
-                        }
-                    }
-                }
-
-                ForEach(remaining) { metric in
-                    HCCard(accent: metric.color) {
-                        VStack(alignment: .leading, spacing: 13) {
-                            HCMetricGauge(title: metric.label,
-                                          value: metric.formattedValue,
-                                          progress: metric.ringProgress,
-                                          detail: metric.comparison,
-                                          tint: metric.color,
-                                          symbol: metric.symbol)
-                            HStack {
-                                HCInsightChip(title: metric.status,
-                                              symbol: metric.severity > 0 ?
-                                                  "exclamationmark.circle" : "chart.line.uptrend.xyaxis",
-                                              tint: metric.color)
-                                Spacer()
-                                Text(metric.source)
-                                    .font(HCDesign.label(10))
-                                    .foregroundStyle(HCDesign.secondary)
-                                    .lineLimit(1)
-                            }
-                            if metric.points.count >= 2 {
-                                Button {
-                                    if expandedTrends.contains(metric.id) {
-                                        expandedTrends.remove(metric.id)
-                                    } else {
-                                        expandedTrends.insert(metric.id)
-                                    }
-                                } label: {
-                                    Label(expandedTrends.contains(metric.id) ?
-                                          "Hide 28-day trend" : "Show 28-day trend",
-                                          systemImage: "chart.xyaxis.line")
-                                        .font(.caption.weight(.semibold))
-                                        .foregroundStyle(HCDesign.aqua)
-                                }
-                                .buttonStyle(.plain)
-                                if expandedTrends.contains(metric.id) {
-                                    Chart(metric.points) { point in
-                                    LineMark(x: .value("Date", point.date),
-                                             y: .value("Reading", point.value))
-                                        .interpolationMethod(.catmullRom)
-                                        .foregroundStyle(metric.color)
-                                    AreaMark(x: .value("Date", point.date),
-                                             y: .value("Reading", point.value))
-                                        .foregroundStyle(metric.color.opacity(0.07))
-                                    if let baseline = metric.baseline {
-                                        RuleMark(y: .value("Baseline", baseline))
-                                            .lineStyle(StrokeStyle(lineWidth: 1, dash: [3, 4]))
-                                            .foregroundStyle(HCDesign.secondary.opacity(0.5))
-                                    }
-                                }
-                                    .chartYAxis(.hidden)
-                                    .chartXAxis(.hidden)
-                                    .frame(height: 82)
-                                    .accessibilityLabel("Recent trend of \(metric.label)")
-                                }
-                            }
-                            Text("Last reading \(metric.date) · \(metric.baselineLabel) comparison when available")
-                                .font(.caption2).foregroundStyle(HCDesign.secondary)
-                        }
-                    }
-                }
-
-                HCSectionTitle(title: "Apple Health and WHOOP",
-                               detail: "Authorized sources")
-                HCCard {
-                    VStack(alignment: .leading, spacing: 14) {
-                        HStack(alignment: .top) {
-                            VStack(alignment: .leading, spacing: 5) {
-                                Text("Connected readings")
-                                    .font(HCDesign.display(19))
-                                Text("Watch and WHOOP values appear only when shared to Apple Health.")
-                                    .font(.caption).foregroundStyle(HCDesign.secondary)
-                            }
-                            Spacer()
-                            Image(systemName: "heart.text.square.fill")
-                                .font(.title).foregroundStyle(HCDesign.aqua)
-                        }
-                        HStack(spacing: 10) {
-                            HCOutlineButton(title: "Grant Health access",
-                                            icon: "heart.fill") { appleHealth.connect() }
-                            HCOutlineButton(title: appleHealth.loading ?
-                                            "Reading…" : "Refresh",
-                                            icon: "arrow.clockwise") { appleHealth.refreshIfAuthorized() }
-                        }
-                        if appleHealth.loading { ProgressView().tint(HCDesign.aqua) }
-                        Text("HealthKit lists only readings you have authorized and actually recorded. Apple Watch and WHOOP exports remain labeled by source.")
-                            .font(.caption2).foregroundStyle(HCDesign.secondary)
-                        DisclosureGroup(isExpanded: $showRawReadings) {
-                        ForEach(appleHealth.metrics.filter {
-                            selectedHealthCategory == "All" ||
-                            (selectedHealthCategory == "WHOOP" &&
-                             $0.source.localizedCaseInsensitiveContains("whoop")) ||
-                            (selectedHealthCategory == "Overview" &&
-                             (["Resting heart rate","HRV · SDNN","Respiratory rate",
-                               "Total asleep","Blood oxygen","Steps"].contains($0.name))) ||
-                            $0.category == selectedHealthCategory
-                        }.filter {
-                            metricSearch.isEmpty ||
-                            $0.name.localizedCaseInsensitiveContains(metricSearch) ||
-                            $0.source.localizedCaseInsensitiveContains(metricSearch)
-                        }) { metric in
-                            HStack {
-                                VStack(alignment: .leading, spacing: 3) {
-                                    Text(metric.name)
-                                        .font(.system(size: 13, weight: .semibold))
-                                    Text(metric.source + " · " + metric.date)
-                                        .font(.caption2).foregroundStyle(HCDesign.secondary)
-                                }
-                                Spacer()
-                                Text(metric.value)
-                                    .font(HCDesign.metric(20))
-                                    .foregroundStyle(HCDesign.ink)
-                            }
-                            Divider().overlay(HCDesign.outline)
-                        }
-                        } label: {
-                            Label("View individual Apple Health readings",
-                                  systemImage: "list.bullet.rectangle")
-                                .font(.system(size: 13, weight: .semibold))
-                        }
-                        .tint(HCDesign.aqua)
-                        Text(appleHealth.status)
-                            .font(.caption2).foregroundStyle(HCDesign.secondary)
-                    }
-                }
-
-                DisclosureGroup(isExpanded: $showHistory) {
-                    ForEach(Array(coach.recoveryHistory.prefix(14))) { item in
-                        HStack {
-                            Text(item.date + " · " + item.source)
-                            Spacer()
-                            Text(item.hrvMS.map { String(format: "%.0f ms", $0) } ?? "—")
-                        }
-                        .font(.caption2)
-                        .padding(.vertical, 4)
-                    }
-                } label: {
-                    Label("See source history", systemImage: "clock.arrow.circlepath")
-                        .font(.system(size: 13, weight: .semibold))
-                }
-                .tint(HCDesign.aqua)
-
-                HCCard {
-                    VStack(alignment: .leading, spacing: 9) {
-                        Text("WHOOP CONNECTION")
-                            .font(HCDesign.label(10))
-                            .tracking(1.2)
-                            .foregroundStyle(HCDesign.aqua)
-                        Text("WHOOP can share several health measurements and sleep to Apple Health after you enable its integration. WHOOP's proprietary Recovery score, Strain, and HRV RMSSD are not exported to Apple Health. They require an authorized WHOOP API connection, or source-labeled records from an existing connected service.")
+                if changed > 0 {
+                    HStack(alignment: .top, spacing: 10) {
+                        Image(systemName: "info.circle")
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundStyle(HCDesign.caution)
+                        Text("\(changed) metric\(changed == 1 ? "" : "s") differ from recent same-source patterns. Review the marked readings below.")
                             .font(.system(size: 12))
                             .foregroundStyle(HCDesign.secondary)
-                        Link("WHOOP → Apple Health setup",
-                             destination: URL(string:"https://support.whoop.com/s/article/Apple-Health-Integration")!)
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(HCDesign.aqua)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .padding(.vertical, 4)
+                }
+
+                HCSectionTitle(title: "Measurements",
+                               detail: selectedHealthCategory == "Overview" ?
+                                    "At a glance" : selectedHealthCategory)
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 6) {
+                        ForEach(healthCategories, id: \.self) { category in
+                            Button {
+                                selectedHealthCategory = category
+                            } label: {
+                                Text(category)
+                                    .font(.system(size: 12, weight:
+                                        selectedHealthCategory == category ?
+                                        .semibold : .medium))
+                                    .foregroundStyle(
+                                        selectedHealthCategory == category ?
+                                            HCDesign.ink : HCDesign.secondary)
+                                    .padding(.horizontal, 13)
+                                    .padding(.vertical, 10)
+                                    .background(
+                                        selectedHealthCategory == category ?
+                                            HCDesign.raised : Color.clear,
+                                        in: RoundedRectangle(cornerRadius: 9))
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityAddTraits(
+                                selectedHealthCategory == category ?
+                                    [.isSelected] : [])
+                        }
                     }
                 }
-                Text("Comparisons use readings from the same named source and never mix SDNN with RMSSD. A personal baseline requires five earlier daily observations or a provider baseline. Trends and flags are informational, not diagnostic.")
-                    .font(.caption2)
+
+                HStack(spacing: 11) {
+                    Image(systemName: "magnifyingglass")
+                        .font(.system(size: 14))
+                        .foregroundStyle(HCDesign.secondary)
+                    TextField("Find a metric or source", text: $metricSearch)
+                        .textInputAutocapitalization(.never)
+                        .font(.system(size: 13))
+                        .accessibilityLabel("Search health measurements")
+                }
+                .padding(13)
+                .background(HCDesign.card,
+                            in: RoundedRectangle(cornerRadius: 11))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 11)
+                        .strokeBorder(HCDesign.outline.opacity(0.45), lineWidth: 1)
+                }
+
+                if visibleFamilies.isEmpty {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(allFamilies.isEmpty ?
+                             "No measurements available yet" : "No matching measurements")
+                            .font(.system(size: 17, weight: .semibold))
+                        Text(allFamilies.isEmpty ?
+                             "Connect Apple Health or a supported data source to see measured values here." :
+                             "Try another source or clear the search.")
+                            .font(.system(size: 13))
+                            .foregroundStyle(HCDesign.secondary)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.vertical, 28)
+                }
+
+                ForEach(visibleFamilies) { family in
+                    HCMetricFamilyCard(family: family,
+                                       expandedTrends: $expandedTrends)
+                }
+
+                HCSectionTitle(title: "Data sources", detail: "Manage & inspect")
+                    .padding(.top, 7)
+                HCCard {
+                    VStack(alignment: .leading, spacing: 13) {
+                        Text("Your measurements stay attributed to the device or provider that recorded them. Missing metrics are not estimated.")
+                            .font(.system(size: 13))
+                            .foregroundStyle(HCDesign.secondary)
+                        HStack(spacing: 10) {
+                            HCOutlineButton(title: "Health access",
+                                            icon: "heart") { appleHealth.connect() }
+                            HCOutlineButton(title: appleHealth.loading ?
+                                            "Reading…" : "Refresh",
+                                            icon: "arrow.clockwise") {
+                                appleHealth.refreshIfAuthorized()
+                            }
+                        }
+                        if appleHealth.loading {
+                            ProgressView().tint(HCDesign.electric)
+                        }
+                        Text(appleHealth.status)
+                            .font(.system(size: 11))
+                            .foregroundStyle(HCDesign.secondary)
+
+                        Divider().overlay(HCDesign.outline.opacity(0.35))
+
+                        DisclosureGroup(isExpanded: $showRawReadings) {
+                            ForEach(appleHealth.metrics.filter { metric in
+                                (selectedHealthCategory == "All" ||
+                                 selectedHealthCategory == "Overview" ||
+                                 (selectedHealthCategory == "WHOOP" &&
+                                  metric.source.localizedCaseInsensitiveContains("whoop")) ||
+                                 metric.category == selectedHealthCategory) &&
+                                (metricSearch.isEmpty ||
+                                 metric.name.localizedCaseInsensitiveContains(metricSearch) ||
+                                 metric.source.localizedCaseInsensitiveContains(metricSearch))
+                            }) { metric in
+                                HStack(alignment: .top) {
+                                    VStack(alignment: .leading, spacing: 3) {
+                                        Text(metric.name)
+                                            .font(.system(size: 13, weight: .medium))
+                                        Text("\(metric.source) · \(metric.date)")
+                                            .font(.system(size: 11))
+                                            .foregroundStyle(HCDesign.secondary)
+                                    }
+                                    Spacer(minLength: 8)
+                                    Text(metric.value)
+                                        .font(.system(size: 14, weight: .semibold))
+                                        .monospacedDigit()
+                                }
+                                .padding(.vertical, 5)
+                            }
+                        } label: {
+                            Text("Individual Apple Health readings")
+                                .font(.system(size: 13, weight: .semibold))
+                        }
+                        .tint(HCDesign.electric)
+
+                        DisclosureGroup(isExpanded: $showHistory) {
+                            ForEach(Array(coach.recoveryHistory.prefix(14))) { item in
+                                HStack(spacing: 8) {
+                                    Text("\(item.date) · \(item.source)")
+                                        .lineLimit(1)
+                                    Spacer()
+                                    Text(item.hrvMS.map {
+                                        String(format: "%.0f ms", $0)
+                                    } ?? "—")
+                                        .monospacedDigit()
+                                }
+                                .font(.system(size: 11))
+                                .foregroundStyle(HCDesign.secondary)
+                                .padding(.vertical, 4)
+                            }
+                        } label: {
+                            Text("Imported recovery history")
+                                .font(.system(size: 13, weight: .semibold))
+                        }
+                        .tint(HCDesign.electric)
+
+                        Link("WHOOP → Apple Health setup",
+                             destination: URL(
+                                string: "https://support.whoop.com/s/article/Apple-Health-Integration")!)
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(HCDesign.electric)
+                    }
+                }
+                Text("Comparisons require repeated observations from the same source and measurement method. HRV RMSSD and SDNN are shown separately; neither is treated as the other's equivalent. These trends are informational, not diagnostic.")
+                    .font(.system(size: 11))
                     .foregroundStyle(HCDesign.secondary)
-                    .padding(.bottom, 100)
+                    .padding(.bottom, 60)
             }
-            .padding(18)
+            .padding(.horizontal, 18)
+            .padding(.top, 12)
         }
         .scrollIndicators(.hidden)
         .hcPage()
@@ -2680,8 +2535,6 @@ private struct PremiumRecoveryPage: View {
             rebuildSignalCache()
             appleHealth.refreshIfAuthorized()
         }
-        // @Published notifies before its stored property changes; defer the
-        // calculation to the following main-queue turn to use the new values.
         .onReceive(appleHealth.$metrics) { _ in
             DispatchQueue.main.async { rebuildSignalCache() }
         }
