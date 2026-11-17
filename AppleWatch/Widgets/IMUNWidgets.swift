@@ -158,9 +158,7 @@ private struct IMUNTodayWidget: Widget {
     var body: some WidgetConfiguration {
         StaticConfiguration(kind: IMUNWidgetKeys.kind, provider: IMUNTodayProvider()) {
             entry in
-            if #available(iOSApplicationExtension 17.0, *) {
-                IMUNTodayWidgetFamilyView(entry: entry)
-            }
+            IMUNTodayWidgetFamilyView(entry: entry)
         }
         .configurationDisplayName("iMun Today")
         .description("Your actual training plan and, optionally, source-labeled recovery.")
