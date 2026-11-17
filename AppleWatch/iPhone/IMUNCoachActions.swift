@@ -2,7 +2,7 @@ import Foundation
 
 /// Explicit allowlisted user actions. Coach's prose is never executed as code,
 /// SQL, or an unreviewed instruction to mutate the training database.
-enum IMUNCoachActionKind {
+enum IMUNCoachActionKind: Equatable {
     case moveWorkout, completeRun, syncWatch, setTheme
 }
 
