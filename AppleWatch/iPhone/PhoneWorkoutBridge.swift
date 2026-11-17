@@ -1239,18 +1239,13 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
         let packet = currentEitanPacket()
         let stamp = packet[HCPayload.eitanStamp] as? Double ?? 0
         latestEitanDedicatedStamp = stamp
-        // Automatic refreshes should not flood WCSession with simultaneous
-        // schedule, training-set and EITAN messages. Manual Sync is explicit.
-        if !forceQueue &&
-           eitanWatchAcknowledgedAt?.timeIntervalSince1970 == stamp {
-            eitanWatchSyncStatus = "EITAN confirmed on Watch · latest revision"
-            return
-        }
-        if !forceQueue &&
-           Date().timeIntervalSince(lastEitanDeliveryAttemptAt) < 20 {
-            return
-        }
-        lastEitanDeliveryAttemptAt = Date()
+        // The versioned applicationContext is always refreshed, even if
+        // interactive messaging is throttled. This prevents rapid Health
+        // updates from being lost while the Watch is briefly out of reach.
+        let alreadyAcknowledged =
+            eitanWatchAcknowledgedAt?.timeIntervalSince1970 == stamp
+        let maySendLive = forceQueue ||
+            Date().timeIntervalSince(lastEitanDeliveryAttemptAt) >= 20
 
         // The old implementation used reliable user-info queues for every
         // wellness refresh and manual retry. Cancel only those obsolete EITAN
@@ -1283,7 +1278,15 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
         }
         // A failed application-context update must not prevent an immediate
         // delivery while both apps are reachable.
-
+        if alreadyAcknowledged && !forceQueue {
+            eitanWatchSyncStatus = "EITAN confirmed on Watch · latest revision"
+            return
+        }
+        if !maySendLive {
+            eitanWatchSyncStatus = "Latest EITAN state updated · awaiting Watch refresh"
+            return
+        }
+        lastEitanDeliveryAttemptAt = Date()
 
         // A short interactive message is only used while BOTH apps are awake.
         // If it times out, replaceable applicationContext is still pending.
