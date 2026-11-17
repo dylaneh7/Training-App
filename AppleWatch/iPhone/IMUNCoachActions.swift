@@ -1060,7 +1060,7 @@ struct IMUNCoachActionReviewCard: View {
                         .tint(HCDesign.electric)
                         .disabled(!canConfirm)
                 }
-                Text("Generated Coach text cannot perform an app change without confirmation.")
+                Text("IsAIah never makes app changes without your confirmation.")
                     .font(.caption2)
                     .foregroundStyle(HCDesign.secondary)
             }
