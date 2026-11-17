@@ -215,6 +215,135 @@ struct HCEitanFactor: Codable, Identifiable {
     let weight: Double
 }
 
+/// Brief athlete-reported response, stored on device. A day with no entry
+/// remains unknown; it must never be interpreted as good recovery.
+struct HCEitanDailyCheckIn: Codable, Identifiable {
+    let date: String
+    let energy: Int                 // 1 = depleted, 5 = strong
+    let soreness: Int               // 1 = none, 5 = severe
+    let stress: Int                 // 1 = low, 5 = high
+    let motivation: Int             // 1 = low, 5 = high
+    let painOrIllness: Bool
+    var id: String { date }
+}
+
+/// Independent from the descriptive 0–100 EITAN wellness score: an athlete
+/// may choose a controlled challenge on a low-sleep day without implying
+/// that sleep loss is beneficial or that next-day recovery is guaranteed.
+struct HCEitanCoachingPlan: Codable {
+    let mode: String                // challenge | adapt | recover
+    let title: String
+    let message: String
+    let cues: [String]
+    let reasons: [String]
+    let recordedTrainingStreak: Int
+    let recentTrainingDays: Int
+    let recentHardDays: Int
+    let shortSleepNights: Int?
+    let observedSleepNights: Int
+    let confidence: String
+    var needsConversation: Bool { mode == "recover" }
+}
+
+/// An intentionally conservative rule policy, not an injury/overtraining
+/// diagnostic or a scientifically validated clinical cutoff. Training
+/// progress and the athlete's own feedback remain part of the decision.
+enum HCEitanCoachingPolicy {
+    static func evaluate(wellness: Int?, lowDays: Int,
+                         streak: Int, trainingDays: Int,
+                         hardDays: Int, shortSleepNights: Int?,
+                         sleepObservations: Int,
+                         checkIn: HCEitanDailyCheckIn?,
+                         style: String) -> HCEitanCoachingPlan {
+        let poorSubjective = checkIn.map {
+            ($0.energy <= 2 && $0.soreness >= 4) ||
+            ($0.energy <= 2 && $0.stress >= 4)
+        } ?? false
+        let concerning = checkIn?.painOrIllness == true
+        let persistentLow = lowDays >= 3
+        let accumulatingLoad = streak >= 6 || (hardDays >= 4 && trainingDays >= 5)
+        let repeatedShortSleep = (shortSleepNights ?? 0) >= 3 &&
+            sleepObservations >= 4
+        let multipleProblems = [persistentLow, accumulatingLoad,
+                                repeatedShortSleep, poorSubjective]
+            .filter { $0 }.count
+        let recoveryReview = concerning ||
+            (persistentLow && (accumulatingLoad || repeatedShortSleep || poorSubjective)) ||
+            (accumulatingLoad && (repeatedShortSleep || poorSubjective)) ||
+            (streak >= 8 && trainingDays >= 6)
+        let adapt = !recoveryReview && (
+            multipleProblems >= 1 && (streak >= 5 || poorSubjective ||
+                                      (wellness ?? 100) < 45 && lowDays >= 2))
+        let mode = recoveryReview ? "recover" : adapt ? "adapt" : "challenge"
+        var reasons: [String] = []
+        if streak >= 5 {
+            reasons.append("\(streak) consecutive recorded training days; unlogged days cannot confirm recovery")
+        }
+        if hardDays >= 3 { reasons.append("\(hardDays) high-effort days in the past week") }
+        if repeatedShortSleep {
+            reasons.append("\(shortSleepNights ?? 0) recorded nights under seven hours in the past week")
+        }
+        if persistentLow { reasons.append("\(lowDays) consecutive lower EITAN wellness trends") }
+        if poorSubjective { reasons.append("Your check-in reports pronounced fatigue or soreness/stress") }
+        if concerning { reasons.append("Your check-in reports pain or illness") }
+        if reasons.isEmpty, let checkIn, checkIn.energy >= 4,
+           checkIn.soreness <= 2 {
+            reasons.append("Your check-in supports a controlled challenge")
+        }
+        if reasons.isEmpty {
+            reasons.append("No sustained recovery concern established from recorded data")
+        }
+        let styleName = ["driven", "balanced", "cautious"].contains(style)
+            ? style : "driven"
+        let title: String
+        let message: String
+        let cues: [String]
+        if recoveryReview {
+            title = "Review the recovery plan"
+            message = concerning
+                ? "Pain or illness deserves attention before strenuous exercise. Consider pausing the planned intensity and getting appropriate care."
+                : "Several signals point to accumulating strain. IsAIah should propose an easy day, adjusted volume, or extra recovery—not automatically cancel your training."
+            cues = [
+                "Consider an easy session or a recovery day; sustained fatigue is a reason to review the plan",
+                "Prioritize sufficient sleep and nutrition, and reassess how you feel tomorrow",
+                "Discuss reducing lifting volume or easy aerobic work before resuming harder sessions"
+            ]
+        } else if adapt {
+            title = "Train with adjustments"
+            message = "Keep building, but adapt the work to today's response. Use warm-up performance and effort to choose the right challenge."
+            cues = [
+                "Lift with 2–3 repetitions in reserve; allow longer rests if performance drops",
+                "Run by conversational effort or reduce harder intervals if breathing or pace deteriorates",
+                "Check in after the session and review the next day's recovery"
+            ]
+        } else {
+            title = styleName == "cautious" ? "Build consistently" : "Challenge with purpose"
+            let oneBadNight = (shortSleepNights ?? 0) == 1 && sleepObservations >= 1
+            message = oneBadNight
+                ? "One shorter night is not an automatic rest command. Train according to warm-up feel and technique, then prioritize recovery without assuming tomorrow will make up for lost sleep."
+                : "No sustained recovery warning is established. You can pursue the planned stimulus while adjusting to actual effort and technique."
+            cues = styleName == "cautious" ? [
+                "Follow the plan with consistent technique and controlled progression",
+                "Use RIR or session effort to decide whether to add load",
+                "Protect sleep and recovery without treating one metric as permission or prohibition"
+            ] : [
+                "If warm-ups feel solid, pursue the planned sets or run goal",
+                "Push effort within good form; use RIR to adjust load rather than force failure",
+                "Track the response and keep tomorrow's recovery in the plan"
+            ]
+        }
+        let measured = [trainingDays > 0, sleepObservations >= 4,
+                        wellness != nil, checkIn != nil].filter { $0 }.count
+        let confidence = measured >= 3 ? "Moderate" :
+            measured >= 2 ? "Limited" : "Low"
+        return HCEitanCoachingPlan(mode: mode, title: title,
+            message: message, cues: cues, reasons: reasons,
+            recordedTrainingStreak: streak, recentTrainingDays: trainingDays,
+            recentHardDays: hardDays, shortSleepNights: shortSleepNights,
+            observedSleepNights: sleepObservations, confidence: confidence)
+    }
+}
+
 struct HCEitanSnapshot: Codable {
     let date: String
     let value: Int?
@@ -224,9 +353,12 @@ struct HCEitanSnapshot: Codable {
     let consecutiveLowDays: Int
     let sourceCount: Int
     let coverage: String
+    var coachingPlan: HCEitanCoachingPlan? = nil
 
     var isLow: Bool { (value ?? 100) < 60 }
-    var needsRecoveryConversation: Bool { consecutiveLowDays >= 3 }
+    var needsRecoveryConversation: Bool {
+        coachingPlan?.needsConversation ?? (consecutiveLowDays >= 3)
+    }
 
     // Not a medical or injury-risk prediction. The coach must ask before
     // changing running targets, strength volume or rest prescriptions.
