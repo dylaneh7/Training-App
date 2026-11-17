@@ -73,7 +73,7 @@ enum IMUNLiveWorkoutController {
             return
         }
         guard ActivityAuthorizationInfo().areActivitiesEnabled else { return }
-        guard let started = coach.phoneSessionStartedAt else {
+        guard let started = coach.activeWorkoutStartedAt else {
             lastState = ""
             for activity in active {
                 Task {
