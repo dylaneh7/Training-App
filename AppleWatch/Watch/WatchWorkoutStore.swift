@@ -69,6 +69,7 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
     private var latestSchedule: HCWatchSchedule?
     private var hasReceivedPhoneScheduleToday = false
     private var loadingCloudSchedule = false
+    private var latestFullCloudScheduleAt: Date?
     private var latestAppliedPhoneScheduleAt: Date?
     private let cloud = HCWatchCloudFallback()
     private var cloudUploadedIDs: Set<UUID> = []
@@ -184,7 +185,7 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
                         return
                     }
                     if let complete {
-                        self.applySchedule(complete)
+                        self.applySchedule(complete, fromFullCloud: true)
                         self.cloudStatus = complete.runPlan != nil
                             ? "Cloud running and strength plan loaded"
                             : "Cloud training schedule loaded"
@@ -823,6 +824,7 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
         latestSchedule = nil
         hasReceivedPhoneScheduleToday = false
         latestAppliedPhoneScheduleAt = nil
+        latestFullCloudScheduleAt = nil
         runPlan = nil
         hasScheduledLift = false
         try? FileManager.default.removeItem(at: directory.appendingPathComponent("run-plan.json"))
@@ -833,14 +835,19 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
         }
     }
 
-    private func applySchedule(_ schedule: HCWatchSchedule, fromPhone: Bool = false) {
+    private func applySchedule(_ schedule: HCWatchSchedule,
+                               fromPhone: Bool = false,
+                               fromFullCloud: Bool = false) {
         guard schedule.date == Self.today() else {
             invalidatePreviousDayIfNeeded()
             return
         }
         if fromPhone, let latestAppliedPhoneScheduleAt,
            latestAppliedPhoneScheduleAt > schedule.generatedAt {
-            // Ignore an out-of-order older iPhone delivery.
+            return
+        }
+        if fromFullCloud, let latestFullCloudScheduleAt,
+           latestFullCloudScheduleAt > schedule.generatedAt {
             return
         }
         if let previous = latestSchedule, previous.date == schedule.date {
@@ -850,10 +857,14 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
             if previous.state == "ready" && schedule.state == "loading" {
                 return
             }
-            if previous.generatedAt > schedule.generatedAt && !fromPhone { return }
+            if previous.generatedAt > schedule.generatedAt &&
+               !fromPhone && !fromFullCloud { return }
         }
         if fromPhone && schedule.state == "ready" {
             latestAppliedPhoneScheduleAt = schedule.generatedAt
+        }
+        if fromFullCloud && schedule.state == "ready" {
+            latestFullCloudScheduleAt = schedule.generatedAt
         }
         latestSchedule = schedule
         isRequestingSchedule = false
