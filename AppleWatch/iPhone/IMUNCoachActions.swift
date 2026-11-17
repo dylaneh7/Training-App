@@ -21,6 +21,7 @@ enum IMUNCoachExerciseOperation: String, CaseIterable, Identifiable {
 struct IMUNCoachWorkoutEditHint {
     let operation: IMUNCoachExerciseOperation
     let exerciseName: String?
+    var newName: String? = nil
     let sets: Int?
     let repMin: Int?
     let repMax: Int?
@@ -203,12 +204,18 @@ enum IMUNCoachActionInterpreter {
                     pattern: #"(?:add|insert|replace|swap)\s+(?:an?\s+)?(?:exercise\s+)?([a-z][a-z0-9 '\-]{1,75}?)(?:\s+(?:to|with|for|at|into|in)\b|\s+\d|\s*$)"#,
                     group: 1)?.trimmingCharacters(in: .whitespacesAndNewlines)
             }()
+            let replacementName: String? = {
+                guard operation == .replace else { return nil }
+                return capture(value,
+                    pattern: #"(?:with|to)s+([a-z][a-z0-9 '-]{1,75}?)(?:s+d|s*$)"#,
+                    group: 1)?.trimmingCharacters(in: .whitespacesAndNewlines)
+            }()
             return proposal(.editStrength, "Edit today's strength workout",
                 "Select an exercise and review the exact change before saving. Prescribed targets can change; completed set records are preserved.",
                 workoutID: workout?.id,
                 workoutEdit: IMUNCoachWorkoutEditHint(
                     operation: operation, exerciseName: candidateName,
-                    sets: targets.sets, repMin: targets.repMin,
+                    newName: replacementName, sets: targets.sets, repMin: targets.repMin,
                     repMax: targets.repMax, restSeconds: targets.rest,
                     weightLb: targets.weight))
         }
@@ -474,6 +481,9 @@ enum IMUNCoachActionInterpreter {
                 workoutID: workout.id,
                 workoutEdit: IMUNCoachWorkoutEditHint(
                     operation: operation, exerciseName: candidate,
+                    newName: (object["replacementName"] as? String).map {
+                        String($0.prefix(80))
+                    },
                     sets: sets, repMin: repMin, repMax: repMax,
                     restSeconds: restValid, weightLb: safeWeight))
         case "moveWorkout":
