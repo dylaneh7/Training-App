@@ -1231,6 +1231,7 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
             transfer.cancel()
         }
 
+        var contextError: String?
         do {
             var context = session.applicationContext
             for (key, value) in packet where key != HCPayload.kind {
@@ -1238,19 +1239,28 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
             }
             try session.updateApplicationContext(context)
         } catch {
-            eitanWatchSyncStatus = "EITAN latest-state update failed: " +
-                error.localizedDescription
-            return
+            contextError = error.localizedDescription
         }
         if !session.isReachable {
-            eitanWatchSyncStatus =
-                "EITAN saved for background delivery · open iMun on Watch to receive"
+            if let contextError {
+                eitanWatchSyncStatus =
+                    "Watch unavailable; EITAN state could not be queued: " +
+                    contextError
+            } else {
+                eitanWatchSyncStatus =
+                    "EITAN saved for background delivery · open iMun on Watch to receive"
+            }
             return
         }
+        // A failed application-context update must not prevent an immediate
+        // delivery while both apps are reachable.
+
 
         // A short interactive message is only used while BOTH apps are awake.
         // If it times out, replaceable applicationContext is still pending.
-        eitanWatchSyncStatus = "EITAN sent · waiting for Watch acknowledgment"
+        eitanWatchSyncStatus = contextError == nil ?
+            "EITAN sent · waiting for Watch acknowledgment" :
+            "Trying live EITAN delivery · background state failed: " + contextError!
         session.sendMessage(packet, replyHandler: { [weak self] reply in
             DispatchQueue.main.async {
                 guard let self else { return }
