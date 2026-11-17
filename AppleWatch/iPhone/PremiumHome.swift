@@ -2595,6 +2595,94 @@ private struct HCHealthTrendChart: View {
 
 /// One understated metric surface, with source-attributed readings inside.
 /// Never presents a blended HRV or "combined" sleep value.
+/// Provider-specific analysis; HRV SDNN and RMSSD are never combined.
+private struct IMUNHealthMetricDetail: View {
+    let reading: HCRecoverySignal
+    @State private var windowDays = 30
+
+    private var points: [HCPlotMark] {
+        let cutoff = Calendar.current.date(byAdding: .day,
+                                           value: -windowDays, to: Date()) ?? .distantPast
+        return reading.points.filter { $0.date >= cutoff }
+            .sorted { $0.date < $1.date }
+    }
+    private var rangeAverage: Double? {
+        guard !points.isEmpty else { return nil }
+        return points.reduce(0) { $0 + $1.value } / Double(points.count)
+    }
+
+    var body: some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 17) {
+                PremiumHeader(eyebrow: "HEALTH / METRIC", title: reading.label,
+                              subtitle: HCMetricFamily.sourceName(reading.source) +
+                                  " · Same-source history only")
+                HCCard(accent: HCDesign.electric) {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text(reading.formattedValue)
+                            .font(HCDesign.display(38))
+                            .monospacedDigit()
+                        Text("Recorded " + reading.date + " · " + reading.source)
+                            .font(.system(size: 12))
+                            .foregroundStyle(HCDesign.secondary)
+                        Text(reading.comparison)
+                            .font(.system(size: 12))
+                            .foregroundStyle(HCDesign.secondary)
+                    }
+                }
+                Picker("History", selection: $windowDays) {
+                    Text("7D").tag(7)
+                    Text("30D").tag(30)
+                    Text("90D").tag(90)
+                }
+                .pickerStyle(.segmented)
+                HCCard {
+                    VStack(alignment: .leading, spacing: 12) {
+                        if points.count > 1 {
+                            Chart {
+                                ForEach(points) { point in
+                                    LineMark(x: .value("Date", point.date),
+                                             y: .value("Value", point.value))
+                                        .foregroundStyle(HCDesign.electric)
+                                }
+                                if let baseline = reading.baseline {
+                                    RuleMark(y: .value("Personal baseline", baseline))
+                                        .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 4]))
+                                        .foregroundStyle(HCDesign.secondary)
+                                }
+                            }
+                            .frame(height: 226)
+                        } else {
+                            Text("More same-source readings are needed for a trend.")
+                                .font(.system(size: 13))
+                                .foregroundStyle(HCDesign.secondary)
+                                .frame(maxWidth: .infinity, minHeight: 80)
+                        }
+                        if let average = rangeAverage {
+                            HCMetricBlock(label: "Period average",
+                                          value: String(format: "%.1f %@", average, reading.unit))
+                        }
+                        if let baseline = reading.baseline {
+                            Text("\(reading.baselineLabel) personal baseline: " +
+                                 String(format: "%.1f %@", baseline, reading.unit))
+                                .font(.system(size: 12))
+                                .foregroundStyle(HCDesign.secondary)
+                        }
+                    }
+                }
+                Text("Readings are informational, not diagnostic. Values from different devices or HRV methods are not blended.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(HCDesign.secondary)
+            }
+            .padding(18)
+        }
+        .scrollIndicators(.hidden)
+        .hcPage()
+        .navigationTitle(reading.label)
+        .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
 private struct HCMetricFamilyCard: View {
     let family: HCMetricFamily
     @Binding var expandedTrends: Set<String>
@@ -2644,6 +2732,14 @@ private struct HCMetricFamilyCard: View {
                         .foregroundStyle(reading.severity > 0 && reading.baseline != nil
                             ? HCDesign.caution : HCDesign.secondary)
                         .fixedSize(horizontal: false, vertical: true)
+                    NavigationLink {
+                        IMUNHealthMetricDetail(reading: reading)
+                    } label: {
+                        Label("View history and personal baseline",
+                              systemImage: "chart.xyaxis.line")
+                            .font(.system(size: 11, weight: .semibold))
+                    }
+                    .foregroundStyle(HCDesign.electric)
                     HStack {
                         Text(reading.date)
                             .font(.system(size: 11))
