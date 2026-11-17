@@ -30,7 +30,8 @@ struct IMUNDesignStudioPage: View {
         [preset, mode, String(customPalette), String(customGeometry),
          accentHex, backgroundHex, surfaceHex, textHex, shape,
          buttonShape, headingFont, density, motif, navigation,
-         progress, String(reduceMotion), String(shareWithWatch)]
+         progress, String(reduceMotion), String(shareWithWatch),
+         String(coach.signedIn)]
             .joined(separator: "|")
     }
 
@@ -52,6 +53,16 @@ struct IMUNDesignStudioPage: View {
                     .font(.caption2)
                     .foregroundStyle(HCDesign.secondary)
                 previews
+
+                HCCard {
+                    VStack(alignment: .leading, spacing: 11) {
+                        IMUNThemeEmblem(area: "training")
+                        IMUNThemeTimerFace(seconds: 75, countsDown: true)
+                        Text("Live style sample · 1:15 rest timer. No training clock is running.")
+                            .font(.caption2)
+                            .foregroundStyle(HCDesign.secondary)
+                    }
+                }
 
                 HCSectionTitle(title: "Choose an identity", detail: "Tap a preset")
                 LazyVGrid(columns: [GridItem(.flexible(), spacing: 10),
