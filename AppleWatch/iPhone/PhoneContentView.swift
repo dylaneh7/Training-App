@@ -1004,7 +1004,7 @@ enum IMUNEitanWellnessEngine {
                                  activityDays: activityDays,
                                  preferredSource: preferredSource)
         var streak = 0
-        if let score = todayResult.score, score < 50 {
+        if let score = todayResult.score, score < 60 {
             streak = 1
             // Reconstruct prior days from actual recorded history, even when
             // the app was not opened each day. Missing days break the streak.
@@ -1015,7 +1015,7 @@ enum IMUNEitanWellnessEngine {
                 let prior = assess(date: date, samples: samples,
                                    activityDays: activityDays,
                                    preferredSource: preferredSource)
-                guard let value = prior.score, value < 50 else { break }
+                guard let value = prior.score, value < 60 else { break }
                 streak += 1
             }
         }
@@ -1026,8 +1026,8 @@ enum IMUNEitanWellnessEngine {
             factors: todayResult.factors,
             status: todayResult.score == nil ? "Building your personal baseline" :
                 (streak >= 3 ? "Recovery deserves attention" :
-                    todayResult.score! < 50 ? "Consider a lighter day" :
-                    todayResult.score! < 70 ? "Stay attentive to recovery" :
+                    todayResult.score! < 60 ? "Consider a lighter day" :
+                    todayResult.score! < 75 ? "Stay attentive to recovery" :
                     "Your trends look steady"),
             coaching: message, consecutiveLowDays: streak,
             sourceCount: todayResult.sourceCount,
