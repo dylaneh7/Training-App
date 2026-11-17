@@ -325,7 +325,7 @@ private struct PremiumStrengthPage: View {
     private var plan: HCWorkout? { coach.workout }
     private var doneSets: [HCLoggedSet] {
         guard let plan else { return [] }
-        return coach.loggedSets.filter { $0.workoutID == plan.id }
+        return coach.completedSets(for: plan)
     }
     private var volume: Double {
         doneSets.reduce(0) { $0 + ($1.weightLb ?? 0) * Double($1.reps) }
@@ -375,7 +375,13 @@ private struct PremiumStrengthPage: View {
                                                   } ?? 0))
                                 }
                             }
-                            if coach.phoneSessionStartedAt == nil {
+                            if doneSets.count >= plan.prescribedSetCount &&
+                               plan.prescribedSetCount > 0 &&
+                               coach.phoneSessionStartedAt == nil {
+                                HCStatusLine(text: "Today's prescribed sets are complete on your devices.",
+                                             symbol: "checkmark.seal.fill",
+                                             tint: HCDesign.good)
+                            } else if coach.phoneSessionStartedAt == nil {
                                 HCFilledButton(title: "START WORKOUT", icon: "play.fill") {
                                     coach.startPhoneWorkout()
                                 }
@@ -638,8 +644,8 @@ private struct PremiumExerciseSession: View {
     private var ex: HCExercise? { coach.workout?.exercises.first { $0.id == exerciseID } }
     private var completed: [HCLoggedSet] {
         guard let p = coach.workout else { return [] }
-        return coach.loggedSets.filter { $0.workoutID == p.id && $0.exerciseID == exerciseID }
-            .sorted { $0.index < $1.index }
+        return coach.completedSets(for: p)
+            .filter { $0.exerciseID == exerciseID }
     }
     private var active: Bool { coach.phoneSetExerciseID == exerciseID && coach.phoneSetStartedAt != nil }
 
