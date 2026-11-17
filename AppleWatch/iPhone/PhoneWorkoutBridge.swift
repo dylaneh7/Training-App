@@ -39,6 +39,11 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
     @Published private(set) var eitanWatchSyncStatus = "EITAN has not synced with Watch yet"
     @Published private(set) var eitanWatchAcknowledgedAt: Date?
     private var lastEitanPacketStamp: TimeInterval = 0
+    // EITAN content revision changes ONLY when wellness or privacy preferences
+    // change. A calendar refresh must not invent a newer, different EITAN
+    // timestamp for the SAME payload; doing so caused stale-score races.
+    private var cachedEitanFingerprint: String?
+    private var lastEitanDeliveryAttemptAt = Date.distantPast
     // A delayed acknowledgment or failed old send cannot replace a newer
     // score/opt-out with a previously sent wellness snapshot.
     private var latestEitanDedicatedStamp: TimeInterval = 0
@@ -1181,21 +1186,34 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
         let enabled = preferences.object(forKey: "hcEitanEnabled") as? Bool ?? true
         let useHealth = preferences.object(forKey: "hcEitanUseHealth") as? Bool ?? true
         let coaching = preferences.object(forKey: "hcEitanCoachingEnabled") as? Bool ?? true
+        let primary = preferences.string(forKey: "hcEitanPrimaryWearable") ?? "Auto"
         let fresh = eitanSnapshot?.date == HCPlanBuilder.dateString(Date())
             ? eitanSnapshot : nil
         let bytes = enabled && useHealth
             ? fresh.flatMap { try? encoder.encode($0) } ?? Data() : Data()
-        let stamp = max(Date().timeIntervalSince1970, lastEitanPacketStamp + 0.001)
-        lastEitanPacketStamp = stamp
+        let signature = [
+            enabled ? "1" : "0", useHealth ? "1" : "0",
+            coaching ? "1" : "0", primary,
+            bytes.base64EncodedString()
+        ].joined(separator: "|")
+        if cachedEitanFingerprint != signature || lastEitanPacketStamp == 0 {
+            cachedEitanFingerprint = signature
+            lastEitanPacketStamp = max(Date().timeIntervalSince1970,
+                                       lastEitanPacketStamp + 0.001)
+            latestEitanDedicatedStamp = lastEitanPacketStamp
+            eitanWatchAcknowledgedAt = nil
+        }
         return [
             HCPayload.kind: HCPayload.eitanSync,
             HCPayload.eitanSnapshot: bytes,
-            HCPayload.eitanStamp: stamp,
+            HCPayload.eitanStamp: lastEitanPacketStamp,
             "hcEitanEnabled": enabled,
             "hcEitanUseHealth": useHealth,
             "hcEitanCoachingEnabled": coaching,
-            "hcEitanPrimaryWearable": preferences.string(
-                forKey: "hcEitanPrimaryWearable") ?? "Auto"
+            "hcEitanPrimaryWearable": primary,
+            "hcEitanProtocolVersion": 3,
+            "hcEitanPhoneBuild": Bundle.main.infoDictionary?[
+                "CFBundleVersion"] as? String ?? "unknown"
         ]
     }
 
@@ -1221,7 +1239,18 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
         let packet = currentEitanPacket()
         let stamp = packet[HCPayload.eitanStamp] as? Double ?? 0
         latestEitanDedicatedStamp = stamp
-        eitanWatchAcknowledgedAt = nil
+        // Automatic refreshes should not flood WCSession with simultaneous
+        // schedule, training-set and EITAN messages. Manual Sync is explicit.
+        if !forceQueue &&
+           eitanWatchAcknowledgedAt?.timeIntervalSince1970 == stamp {
+            eitanWatchSyncStatus = "EITAN confirmed on Watch · latest revision"
+            return
+        }
+        if !forceQueue &&
+           Date().timeIntervalSince(lastEitanDeliveryAttemptAt) < 20 {
+            return
+        }
+        lastEitanDeliveryAttemptAt = Date()
 
         // The old implementation used reliable user-info queues for every
         // wellness refresh and manual retry. Cancel only those obsolete EITAN
@@ -1336,22 +1365,13 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
         context[HCPayload.weightIncrement] = prefs.object(forKey:"hcWeightIncrement") as? Double ?? 5.0
         context[HCPayload.restOverride] = prefs.integer(forKey:"hcRestOverrideSeconds")
         context[HCPayload.watchHaptics] = prefs.object(forKey:"hcWatchHaptics") as? Bool ?? true
-        let eitanEnabled = prefs.object(forKey: "hcEitanEnabled") as? Bool ?? true
-        let useEitanHealth = prefs.object(forKey: "hcEitanUseHealth") as? Bool ?? true
-        context["hcEitanEnabled"] = eitanEnabled
-        context["hcEitanUseHealth"] = useEitanHealth
-        context["hcEitanCoachingEnabled"] = prefs.object(
-            forKey: "hcEitanCoachingEnabled") as? Bool ?? true
-        context["hcEitanPrimaryWearable"] =
-            prefs.string(forKey: "hcEitanPrimaryWearable") ?? "Auto"
-        // An empty Data explicitly clears stale wellness readings if opted out.
-        context["hcEitanSnapshot"] = (eitanEnabled && useEitanHealth
-            ? eitanSnapshot.flatMap { try? encoder.encode($0) } : nil) ?? Data()
-        // Legacy schedule context still carries EITAN for Watch reinstalls,
-        // but a newer dedicated EITAN packet always wins by timestamp.
-        context[HCPayload.eitanStamp] =
-            max(Date().timeIntervalSince1970, lastEitanPacketStamp + 0.001)
-        lastEitanPacketStamp = context[HCPayload.eitanStamp] as? Double ?? lastEitanPacketStamp
+        // Use the EXACT same revision and snapshot as independent EITAN
+        // delivery. Workout calendar updates must not supersede EITAN with a
+        // newer timestamp attached to older or empty wellness bytes.
+        for (key, value) in currentEitanPacket()
+            where key != HCPayload.kind {
+            context[key] = value
+        }
         context["hcRunVoiceCues"] = prefs.object(forKey:"hcRunVoiceCues") as? Bool ?? false
         context["hcRunAutoLaps"] = prefs.object(forKey:"hcRunAutoLaps") as? Bool ?? true
         context["hcRunIntervals"] = prefs.object(forKey:"hcRunIntervals") as? Bool ?? false
