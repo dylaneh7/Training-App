@@ -31,7 +31,7 @@ struct PremiumHomeView: View {
     @StateObject private var runImporter = HCRunHealthImporter()
     @StateObject private var tredictImporter = HCTredictImporter()
     @StateObject private var tredictPlans = HCTredictWatchPlanSync()
-    @AppStorage("hcSelectedTab") private var selectedTab = "training"
+    @AppStorage("hcSelectedTab") private var selectedTab = "today"
     @AppStorage("hcTrainingActivity") private var visibleTrainingActivity = "weightlifting"
     @AppStorage("hcSelectedHealthCategory") private var visibleHealthCategory = "Overview"
     @AppStorage("hcSelectedHealthMetric") private var visibleHealthMetric = ""
@@ -66,6 +66,8 @@ struct PremiumHomeView: View {
         var details = ["Screen: " + selectedTab.capitalized,
                        "Date: " + HCPlanBuilder.dateString(Date())]
         switch selectedTab {
+        case "today":
+            details.append("Today: synced plan, health and active session")
         case "training":
             details.append("Activity: " + visibleTrainingActivity)
             if visibleTrainingActivity == "run", let plan = coach.runPlan {
@@ -105,6 +107,9 @@ struct PremiumHomeView: View {
 
     var body: some View {
         TabView(selection: $selectedTab) {
+            NavigationStack { IMUNTodayPage(appleHealth: appleHealth) }
+                .tabItem { Label("Today", systemImage: "sun.max.fill") }
+                .tag("today")
             NavigationStack { PremiumTrainingPage() }
                 .tabItem { Label("Training", systemImage: "figure.run.circle.fill") }
                 .tag("training")
