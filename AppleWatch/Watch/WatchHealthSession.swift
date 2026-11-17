@@ -70,6 +70,7 @@ final class WatchHealthSession: NSObject, ObservableObject,
             collector.beginCollection(withStart: now) { [weak self] success, error in
                 DispatchQueue.main.async {
                     guard let self else { return }
+                    guard self.session === next else { return }
                     self.isRunning = success
                     self.message = success
                         ? (requestedKind == .run ? "Apple Fitness run recording" : "Apple Fitness strength recording")
@@ -97,6 +98,24 @@ final class WatchHealthSession: NSObject, ObservableObject,
         guard isRunning && isPaused else { return }
         session?.resume()
         isPaused = false
+    }
+
+    /// Undo an in-progress workout without saving a HealthKit workout.
+    /// This is intentionally separate from Finish & Save.
+    func undo() {
+        guard let current = session else {
+            message = "Workout undone"
+            reset()
+            return
+        }
+        ending = false
+        builder?.discardWorkout()
+        current.end()
+        reset()
+        heartRateBPM = nil
+        averageHeartRateBPM = nil
+        distanceMeters = nil
+        message = "Workout undone · nothing saved to Apple Fitness"
     }
 
     /// Use stopActivity and wait for the stopped delegate state before finishing
