@@ -2350,9 +2350,17 @@ private struct PremiumRecoveryPage: View {
             rebuildSignalCache()
             appleHealth.refreshIfAuthorized()
         }
-        .onReceive(appleHealth.$metrics) { _ in rebuildSignalCache() }
-        .onReceive(appleHealth.$metricHistory) { _ in rebuildSignalCache() }
-        .onReceive(coach.$recoveryHistory) { _ in rebuildSignalCache() }
+        // @Published notifies before its stored property changes; defer the
+        // calculation to the following main-queue turn to use the new values.
+        .onReceive(appleHealth.$metrics) { _ in
+            DispatchQueue.main.async { rebuildSignalCache() }
+        }
+        .onReceive(appleHealth.$metricHistory) { _ in
+            DispatchQueue.main.async { rebuildSignalCache() }
+        }
+        .onReceive(coach.$recoveryHistory) { _ in
+            DispatchQueue.main.async { rebuildSignalCache() }
+        }
     }
 }
 
