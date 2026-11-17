@@ -1136,6 +1136,11 @@ private struct PremiumRunPage: View {
             IMUNMoveWorkoutSheet(entry: entry)
                 .environmentObject(coach)
         }
+        .sheet(isPresented: $showingStructuredRun) {
+            if let plan = coach.runPlan {
+                IMUNStructuredRunEditor(plan: plan)
+            }
+        }
     }
 }
 
@@ -1701,11 +1706,6 @@ private struct PremiumProgressPage: View {
         .sheet(item: $movingSession) { entry in
             IMUNMoveWorkoutSheet(entry: entry)
                 .environmentObject(coach)
-        }
-        .sheet(isPresented: $showingStructuredRun) {
-            if let plan = coach.runPlan {
-                IMUNStructuredRunEditor(plan: plan)
-            }
         }
     }
 }
