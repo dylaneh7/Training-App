@@ -530,11 +530,10 @@ struct IMUNIsaiahMark: View {
             .stroke(IMUNIsaiahBrand.cream, style: StrokeStyle(
                 lineWidth: max(1.4, size * 0.04), lineCap: .round, lineJoin: .round))
             HStack(spacing: -size * 0.045) {
-                Text("I").foregroundStyle(IMUNIsaiahBrand.cream)
-                Text("A").foregroundStyle(IMUNIsaiahBrand.cream)
+                Text("I").italic().foregroundStyle(IMUNIsaiahBrand.cream)
+                Text("A").italic().foregroundStyle(IMUNIsaiahBrand.cream)
             }
             .font(.system(size: size * 0.43, weight: .black, design: .rounded))
-            .italic()
             .offset(y: size * 0.055)
             Path { p in
                 p.move(to: CGPoint(x: size * 0.50, y: size * 0.20))
@@ -555,13 +554,14 @@ struct IMUNIsaiahWordmark: View {
 
     var body: some View {
         HStack(spacing: 0) {
-            Text("Is").foregroundStyle(IMUNIsaiahBrand.cream)
-            Text("AI").foregroundStyle(IMUNIsaiahBrand.crimson)
-            Text("ah").foregroundStyle(IMUNIsaiahBrand.cream)
+            Text("Is").italic().tracking(-size * 0.035)
+                .foregroundStyle(IMUNIsaiahBrand.cream)
+            Text("AI").italic().tracking(-size * 0.035)
+                .foregroundStyle(IMUNIsaiahBrand.crimson)
+            Text("ah").italic().tracking(-size * 0.035)
+                .foregroundStyle(IMUNIsaiahBrand.cream)
         }
         .font(.system(size: size, weight: .heavy, design: .rounded))
-        .italic()
-        .tracking(-size * 0.035)
         .fixedSize(horizontal: true, vertical: false)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("IsAIah")
