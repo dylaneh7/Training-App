@@ -45,6 +45,8 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
     @Published private(set) var sets: [HCLoggedSet] = []
     // Preserve all original records locally; cloud history is read-only.
     @Published private(set) var cloudSets: [HCLoggedSet] = []
+    @Published private(set) var undoRecords: [HCWorkoutUndo] = []
+    @Published private(set) var cloudUndoRecords: [HCWorkoutUndo] = []
     @Published private(set) var progressSyncStatus = "Cloud progress not checked"
     @Published private(set) var completedRuns: [HCRunFinished] = []
     @Published private(set) var liftClock: HCTrainingClock?
@@ -73,6 +75,7 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
     private var latestAppliedPhoneScheduleAt: Date?
     private let cloud = HCWatchCloudFallback()
     private var cloudUploadedIDs: Set<UUID> = []
+    private var uploadedUndoIDs: Set<UUID> = []
     private var isUploadingCloudSets = false
     private var isFetchingCloudSets = false
     private var isFetchingCloudAppearance = false
@@ -99,6 +102,10 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
             applySchedule(snapshot)
         }
         if let s: [HCLoggedSet] = load("sets.json") { sets = s }
+        if let s: [HCWorkoutUndo] = load("workout-undos.json") { undoRecords = s }
+        if let s: [UUID] = load("uploaded-undo-ids.json") {
+            uploadedUndoIDs = Set(s)
+        }
         if let s: [UUID] = load("queued-ids.json") { queuedIDs = Set(s) }
         if let s: [UUID] = load("confirmed-ids.json") { confirmedIDs = Set(s) }
         if let s: [UUID] = load("cloud-uploaded-ids.json") { cloudUploadedIDs = Set(s) }
@@ -271,11 +278,13 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
         Task { [weak self] in
             guard let self else { return }
             do {
+                let undoEntries = try await cloud.fetchWorkoutUndos(for: requested)
                 let entries = try await cloud.fetchCompletedSets(for: requested)
                 DispatchQueue.main.async {
                     self.isFetchingCloudSets = false
                     guard self.workout.id == requested.id,
                           self.workout.date == requested.date else { return }
+                    self.cloudUndoRecords = undoEntries
                     self.cloudSets = entries
                     self.progressSyncStatus = "Progress updated from iPhone + Watch"
                 }
@@ -293,26 +302,51 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
     /// a failed request simply remains pending for the next sync.
     func uploadPendingCloudSets() {
         guard cloudSignedIn, !isUploadingCloudSets else { return }
-        let pending = sets.filter { !cloudUploadedIDs.contains($0.id) }
-        guard !pending.isEmpty else { return }
+        let pendingUndo = undoRecords.filter { !uploadedUndoIDs.contains($0.id) }
+        let pending = sets.filter { item in
+            !cloudUploadedIDs.contains(item.id) &&
+            !allUndoRecords.contains(where: { $0.applies(to: item) })
+        }
+        guard !pendingUndo.isEmpty || !pending.isEmpty else { return }
         isUploadingCloudSets = true
         Task { [weak self] in
             guard let self else { return }
-            for entry in pending {
+            var failed = false
+            for undo in pendingUndo {
                 do {
-                    try await cloud.upload(entry)
+                    try await cloud.recordWorkoutUndo(undo)
                     DispatchQueue.main.async {
-                        self.cloudUploadedIDs.insert(entry.id)
-                        self.save(Array(self.cloudUploadedIDs),
-                                  name: "cloud-uploaded-ids.json")
-                        self.cloudStatus = "Logged sets saved to your account"
+                        self.uploadedUndoIDs.insert(undo.id)
+                        self.save(Array(self.uploadedUndoIDs),
+                                  name: "uploaded-undo-ids.json")
+                        self.cloudStatus = "Workout correction synced"
                     }
                 } catch {
+                    failed = true
                     DispatchQueue.main.async {
-                        self.cloudStatus = "Sets saved offline; cloud retry: " +
+                        self.cloudStatus = "Undo retained offline · retry: " +
                             error.localizedDescription
                     }
                     break
+                }
+            }
+            if !failed {
+                for entry in pending {
+                    do {
+                        try await cloud.upload(entry)
+                        DispatchQueue.main.async {
+                            self.cloudUploadedIDs.insert(entry.id)
+                            self.save(Array(self.cloudUploadedIDs),
+                                      name: "cloud-uploaded-ids.json")
+                            self.cloudStatus = "Logged sets saved to your account"
+                        }
+                    } catch {
+                        DispatchQueue.main.async {
+                            self.cloudStatus = "Sets saved offline; cloud retry: " +
+                                error.localizedDescription
+                        }
+                        break
+                    }
                 }
             }
             DispatchQueue.main.async {
@@ -336,13 +370,85 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
         }
     }
 
+    var allUndoRecords: [HCWorkoutUndo] {
+        HCWorkoutUndo.merged(local: undoRecords, cloud: cloudUndoRecords)
+    }
+
     var allRecordedSets: [HCLoggedSet] {
-        HCSetReconciliation.allRecords(local: sets, cloud: cloudSets)
+        HCSetReconciliation.allRecords(local: sets, cloud: cloudSets,
+                                      undos: allUndoRecords)
     }
 
     func completedSets(for exercise: HCExercise) -> [HCLoggedSet] {
         HCSetReconciliation.completed(for: workout, records: allRecordedSets)
             .filter { $0.exerciseID == exercise.id }
+    }
+
+    var lastUndoableSet: HCLoggedSet? {
+        HCSetReconciliation.completed(for: workout, records: allRecordedSets)
+            .max(by: { $0.completedAt < $1.completedAt })
+    }
+
+    /// Undo the last logged set. A corrected workout remains available and
+    /// the DB blocks retransmitted stale records from either device.
+    func undoSet(_ id: UUID) {
+        guard let entry = allRecordedSets.first(where: { $0.id == id }),
+              !allUndoRecords.contains(where: { $0.applies(to: entry) })
+        else { return }
+        appendUndo(HCWorkoutUndo.set(entry), forwardToPhone: true)
+        status = "Set undone · sync pending"
+    }
+
+    func undoLifting() {
+        guard let clock = liftClock, clock.isActive,
+              workout.id == clock.workoutID else { return }
+        let undo = HCWorkoutUndo.workout(workout, startedAt: clock.startedAt)
+        liftClock = nil
+        selectedGuidedSet = nil
+        queuedNextGuidedSet = nil
+        guidedExerciseID = workout.exercises.first?.id
+        for file in ["lifting-clock.json", "guided-set-selection.json",
+                     "queued-guided-set.json"] {
+            try? FileManager.default.removeItem(at: directory.appendingPathComponent(file))
+        }
+        appendUndo(undo, forwardToPhone: true)
+        status = "Workout undone. Ready to start again."
+    }
+
+    /// An in-progress run can be undone before it is saved to Apple Fitness
+    /// or uploaded; a completed historical run is not silently deleted.
+    func undoRun() {
+        guard let clock = runClock, clock.isActive else { return }
+        runClock = nil
+        try? FileManager.default.removeItem(at: directory.appendingPathComponent("running-clock.json"))
+        status = "Run undone. Ready to start again."
+    }
+
+    private func appendUndo(_ undo: HCWorkoutUndo, forwardToPhone: Bool) {
+        guard !undoRecords.contains(where: { $0.id == undo.id }) else { return }
+        undoRecords.append(undo)
+        save(undoRecords, name: "workout-undos.json")
+        if forwardToPhone, WCSession.isSupported(),
+           WCSession.default.activationState == .activated,
+           let data = try? encoder.encode(undo) {
+            let packet: [String: Any] = [
+                HCPayload.kind: HCPayload.workoutUndo, HCPayload.data: data
+            ]
+            WCSession.default.transferUserInfo(packet)
+            if WCSession.default.isReachable {
+                WCSession.default.sendMessage(packet,
+                    replyHandler: { [weak self] reply in
+                        guard reply["saved"] as? Bool == true else { return }
+                        DispatchQueue.main.async {
+                            self?.markConfirmed(undo.id)
+                        }
+                    }, errorHandler: { _ in })
+            }
+            queuedIDs.insert(undo.id)
+            save(Array(queuedIDs), name: "queued-ids.json")
+        }
+        uploadPendingCloudSets()
+        refreshCloudSets()
     }
 
     // MARK: - One-screen, set-by-set strength workflow
