@@ -19,6 +19,7 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
     private var cloudRecoveryHistory: [HCRecoveryDatum] = []
     private var tredictSnapshot = HCTredictSnapshot()
     @Published private(set) var movingWorkoutID: String?
+    @Published private(set) var completingWorkoutID: String?
     @Published private(set) var lastArchiveAt: Date?
     // Apple Health running results stay on device unless user elects to share them.
     private var importedHealthRuns: [HCProgressRun] = []
@@ -429,6 +430,36 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
                 DispatchQueue.main.async {
                     self.movingWorkoutID = nil
                     self.status = "Move failed: \(error.localizedDescription)"
+                }
+            }
+        }
+    }
+
+    /// Manual completion updates the authenticated calendar flag only.
+    /// This never inserts fake sets or recorded running performance.
+    func completePlannedWorkout(_ entry: HCPlannedSession) {
+        guard signedIn, completingWorkoutID == nil,
+              !entry.completed, UUID(uuidString: entry.id) != nil,
+              plannedSessions.contains(where: {
+                  $0.id == entry.id && $0.date == entry.date && !$0.completed
+              }) else {
+            status = "Choose a saved, unfinished calendar workout first."
+            return
+        }
+        completingWorkoutID = entry.id
+        status = "Confirming \(entry.title) completion in the calendar…"
+        Task {
+            do {
+                try await cloud.markPlannedWorkoutComplete(id: entry.id)
+                DispatchQueue.main.async {
+                    self.completingWorkoutID = nil
+                    self.status = "Confirmed \(entry.title) as completed in the calendar."
+                    self.refresh(date: Date())
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    self.completingWorkoutID = nil
+                    self.status = "Workout completion failed: " + error.localizedDescription
                 }
             }
         }
