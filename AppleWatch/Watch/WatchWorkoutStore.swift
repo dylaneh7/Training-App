@@ -1238,6 +1238,11 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
                 UserDefaults.standard.set(enabled, forKey: key)
             }
         }
+        if let preferred = packet["hcEitanPrimaryWearable"] as? String,
+           HCEitanWearableSource.choices.contains(preferred) {
+            UserDefaults.standard.set(preferred,
+                                      forKey: "hcEitanPrimaryWearable")
+        }
         UserDefaults.standard.set(stamp, forKey: "hcEitanReceivedTimestamp")
         eitanSnapshot = reading
         if let reading {
@@ -1262,13 +1267,14 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
     }
 
     private func queueEitanRequest(_ session: WCSession) {
-        let pending = session.outstandingUserInfoTransfers.contains {
-            ($0.userInfo[HCPayload.kind] as? String) == HCPayload.eitanRequest
+        // A wellness score is replaceable state, NOT a background event.
+        // Do not create transferUserInfo jobs that may repeatedly time out.
+        let stored = session.receivedApplicationContext
+        if stored[HCPayload.eitanStamp] != nil {
+            _ = applyEitanPacket(stored)
         }
-        if !pending {
-            session.transferUserInfo([HCPayload.kind: HCPayload.eitanRequest])
-        }
-        eitanSyncStatus = "EITAN refresh queued · open iMun on iPhone"
+        eitanSyncStatus =
+            "Latest available EITAN shown · open iMun on iPhone and Watch for a live refresh"
     }
 
     func requestEitanSync() {
@@ -1492,6 +1498,17 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
             DispatchQueue.main.async {
                 self.checkPhoneConnection()
                 self.sendPending()
+                let stored = session.receivedApplicationContext
+                if stored[HCPayload.eitanStamp] != nil {
+                    _ = self.applyEitanPacket(stored)
+                }
+                // Cancel only obsolete EITAN refresh requests from older builds.
+                // Workout and undo transfers must never be canceled here.
+                for transfer in session.outstandingUserInfoTransfers
+                    where transfer.userInfo[HCPayload.kind] as? String ==
+                        HCPayload.eitanRequest {
+                    transfer.cancel()
+                }
                 if self.hasScheduledLift && self.workout.date == Self.today() {
                     self.publishLiftSessionStatus(
                         startedAt: self.liftClock?.startedAt,
