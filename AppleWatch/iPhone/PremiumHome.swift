@@ -441,7 +441,6 @@ private struct PremiumStrengthPage: View {
                 if let plan {
                     HCCard(accent: HCDesign.electric) {
                         VStack(alignment: .leading, spacing: 17) {
-                            IMUNThemeEmblem(area: "training")
                             HCAccentTag(title: "TODAY'S PROGRAM", color: HCDesign.electric)
                             HStack(alignment: .center, spacing: 18) {
                                 VStack(alignment: .leading, spacing: 8) {
@@ -1586,7 +1585,6 @@ private struct PremiumProgressPage: View {
                               subtitle: "Your history, your momentum, and the next milestone.",
                               icon: "chart.line.uptrend.xyaxis",
                               tint: HCDesign.aqua) {
-                    IMUNThemeEmblem(area: "progress")
                     HStack(spacing: 18) {
                         HCMetricBlock(label: "Recorded sets",
                                       value: "\(coach.performanceHistory.count)",
@@ -1601,7 +1599,6 @@ private struct PremiumProgressPage: View {
                 }
                 HCCard(accent: HCDesign.electric) {
                     VStack(alignment: .leading, spacing: 8) {
-                        IMUNThemeEmblem(area: "progress")
                         IMUNThemeProgressView(
                             completed: coach.workout.map {
                                 coach.completedSets(for: $0).count
@@ -1610,17 +1607,6 @@ private struct PremiumProgressPage: View {
                         Text("TODAY'S PRESCRIBED WORKING SETS · RECORDED ON BOTH DEVICES")
                             .font(HCDesign.label(9))
                             .foregroundStyle(HCDesign.secondary)
-                    }
-                }
-                HStack(spacing: 11) {
-                    HCCard {
-                        HCMetricBlock(label: "Strength sets",
-                                      value: "\(coach.performanceHistory.count)",
-                                      tint: HCDesign.electric)
-                    }
-                    HCCard {
-                        HCMetricBlock(label: "Runs", value: "\(coach.runHistory.count)",
-                                      tint: HCDesign.aqua)
                     }
                 }
                 HCCard {
@@ -2582,17 +2568,6 @@ private struct PremiumCoachPage: View {
                                 .font(.system(size: 13))
                                 .foregroundStyle(HCDesign.secondary)
                         }
-                        Spacer()
-                        Image(systemName: "bubble.left.and.text.bubble.right.fill")
-                            .font(.system(size: 22))
-                            .foregroundStyle(HCDesign.electric)
-                            .frame(width: 49, height: 49)
-                            .background(HCDesign.electric.opacity(0.11),
-                                        in: RoundedRectangle(cornerRadius: 15))
-                    }
-
-                    HCCard {
-                        IMUNThemeEmblem(area: "coach")
                     }
 
                     if !coach.signedIn {
