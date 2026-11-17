@@ -389,3 +389,66 @@ struct IMUNThemeRestHeader: View {
         .accessibilityElement(children: .combine)
     }
 }
+
+
+/// Training completion now has its own voice and symbolic treatment for each
+/// identity, instead of showing a racing finish line in unrelated themes.
+/// Draws no new data and never changes the workout's stored completion state.
+struct IMUNThemeCompletionCallout: View {
+    @AppStorage("hcDesignPreset") private var presetName = "techno"
+    var compact: Bool = false
+
+    private var theme: IMUNPreset {
+        IMUNPreset(rawValue: presetName) ?? .techno
+    }
+    private var title: String {
+        switch theme {
+        case .heritage: return "THE LEDGER IS COMPLETE"
+        case .retro: return "FULL SCORE · SESSION FINISHED"
+        case .techno: return "ALL SYSTEMS · SESSION COMPLETE"
+        case .coast: return "TRAINING TIDE · HIGH WATER"
+        case .fieldNotes: return "ROUTE COMPLETED"
+        case .discipline: return "OBJECTIVE COMPLETE"
+        case .atelier: return "TODAY'S EDITION · COMPLETE"
+        case .rally: return "CHECKERED FLAG · FINISH LINE"
+        }
+    }
+    private var icon: String {
+        switch theme {
+        case .heritage: return "checkmark.seal.fill"
+        case .retro: return "stopwatch"
+        case .techno: return "waveform.path.ecg"
+        case .coast: return "water.waves"
+        case .fieldNotes: return "mappin.and.ellipse"
+        case .discipline: return "checkmark.square.fill"
+        case .atelier: return "book.closed.fill"
+        case .rally: return "flag.checkered"
+        }
+    }
+
+    var body: some View {
+        HStack(alignment: .center, spacing: compact ? 7 : 11) {
+            Image(systemName: icon)
+                .font(.system(size: compact ? 15 : 20, weight: .semibold))
+                .frame(width: compact ? 23 : 29)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title)
+                    .font(.system(size: compact ? 10 : 13, weight: .semibold,
+                                  design: IMUNStyle.headingDesign))
+                    .fixedSize(horizontal: false, vertical: true)
+                if !compact {
+                    Text("All of today's prescribed set slots are accounted for.")
+                        .font(.system(size: 11))
+                        .opacity(0.82)
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .foregroundStyle(IMUNStyle.palette.accent)
+        .padding(compact ? 9 : 13)
+        .background(IMUNStyle.palette.accent.opacity(0.11),
+                    in: IMUNPanelShape(shape: IMUNStyle.cardShape,
+                                       corner: compact ? 10 : 16))
+        .accessibilityElement(children: .combine)
+    }
+}
