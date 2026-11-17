@@ -2544,7 +2544,7 @@ private struct PremiumCoachPage: View {
                                 .font(HCDesign.display(32))
                                 .tracking(-1)
                                 .foregroundStyle(HCDesign.ink)
-                            Text("Ask anything about your training.")
+                            Text("Plan, review and take action.")
                                 .font(.system(size: 13))
                                 .foregroundStyle(HCDesign.secondary)
                         }
@@ -2769,19 +2769,18 @@ private struct PremiumCoachConversation: View {
     var body: some View {
         HCCard(accent: HCDesign.aqua) {
             VStack(alignment: .leading, spacing: 14) {
-                HStack(spacing: 11) {
-                    Image(systemName: "sparkles")
-                        .font(.system(size: 21, weight: .semibold))
-                        .foregroundStyle(HCDesign.aqua)
-                        .frame(width: 40, height: 40)
-                        .background(HCDesign.aqua.opacity(0.12),
-                                    in: RoundedRectangle(cornerRadius: 12))
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("imun Coach")
-                            .font(.system(size: 18, weight: .bold, design: .rounded))
+                HStack(alignment: .top, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("COACH / CONTROL CENTER")
+                            .font(.system(size: 10, weight: .semibold))
+                            .tracking(1.3)
+                            .foregroundStyle(HCDesign.secondary)
+                        Text("Make the next move.")
+                            .font(.system(size: 20, weight: .semibold))
+                            .tracking(-0.4)
                             .foregroundStyle(HCDesign.ink)
-                        Text("Here for your next workout—and everything between.")
-                            .font(.system(size: 11))
+                        Text("Plan, adjust, and manage your training.")
+                            .font(.system(size: 12))
                             .foregroundStyle(HCDesign.secondary)
                     }
                     Spacer(minLength: 5)
@@ -2805,24 +2804,16 @@ private struct PremiumCoachConversation: View {
 
                 if turns.isEmpty {
                     VStack(alignment: .leading, spacing: 11) {
-                        Text("What can I help you with?")
-                            .font(HCDesign.display(22))
+                        Text("Start with an action")
+                            .font(.system(size: 15, weight: .semibold))
                             .foregroundStyle(HCDesign.ink)
-                        Text("Ask a question, review your progress, or get help making sense of your training.")
-                            .font(.system(size: 13))
+                        Text("You can ask naturally. Coach will show you any changes before applying them.")
+                            .font(.system(size: 12))
                             .foregroundStyle(HCDesign.secondary)
-                        suggestion("What's my focus this week?")
-                        suggestion("How can I improve my running?")
-                        suggestion("How are my workouts progressing?")
-                        suggestion("Edit my workout")
-                        suggestion("What can you control in iMun?")
+                        suggestion("Edit today's workout")
                         suggestion("Move tomorrow's workout to Friday")
-                        suggestion("Mark today's run complete")
-                        suggestion("Sync today's workout to my Watch")
-                        suggestion("Change the theme to Heritage")
                         suggestion("Create an easy 40-minute run")
-                        suggestion("Open my Health tab")
-                        suggestion("Set rest timer to 90 seconds")
+                        suggestion("What can you control in iMun?")
                     }
                     .padding(.vertical, 10)
                 } else {
@@ -2834,12 +2825,11 @@ private struct PremiumCoachConversation: View {
                                         if turn.role == "user" {
                                             Spacer(minLength: 25)
                                         } else {
-                                            Image(systemName: "sparkle")
-                                                .font(.system(size: 12, weight: .bold))
-                                                .foregroundStyle(HCDesign.aqua)
-                                                .frame(width: 26, height: 26)
-                                                .background(HCDesign.aqua.opacity(0.11),
-                                                            in: Circle())
+                                            Text("COACH")
+                                                .font(.system(size: 9, weight: .semibold))
+                                                .tracking(0.7)
+                                                .foregroundStyle(HCDesign.secondary)
+                                                .frame(width: 39, alignment: .leading)
                                         }
                                         Text(turn.text)
                                             .font(.system(size: 14))
@@ -2848,9 +2838,9 @@ private struct PremiumCoachConversation: View {
                                             .padding(.horizontal, 13)
                                             .padding(.vertical, 11)
                                             .background(turn.role == "user" ?
-                                                        HCDesign.electric.opacity(0.15) :
+                                                        HCDesign.raised :
                                                         HCDesign.canvas.opacity(0.65),
-                                                        in: RoundedRectangle(cornerRadius: 15))
+                                                        in: RoundedRectangle(cornerRadius: 10))
                                         if turn.role != "user" {
                                             Spacer(minLength: 25)
                                         }
@@ -2997,20 +2987,20 @@ private struct PremiumCoachConversation: View {
             question = text
             composerFocused = true
         } label: {
-            HStack {
-                Image(systemName: "bubble.left")
-                    .foregroundStyle(HCDesign.aqua)
+            HStack(spacing: 12) {
                 Text(text)
                     .foregroundStyle(HCDesign.ink)
-                Spacer()
-                Image(systemName: "arrow.up.left")
+                    .multilineTextAlignment(.leading)
+                Spacer(minLength: 8)
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(HCDesign.secondary)
             }
-            .font(.system(size: 12, weight: .medium))
-            .padding(.horizontal, 12)
-            .padding(.vertical, 11)
-            .background(HCDesign.canvas.opacity(0.52),
-                        in: RoundedRectangle(cornerRadius: 11))
+            .font(.system(size: 13, weight: .medium))
+            .padding(.horizontal, 14)
+            .padding(.vertical, 13)
+            .background(HCDesign.raised.opacity(0.55),
+                        in: RoundedRectangle(cornerRadius: 10))
         }
         .buttonStyle(.plain)
     }
