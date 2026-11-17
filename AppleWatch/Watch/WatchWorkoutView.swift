@@ -315,25 +315,33 @@ private struct IMUNEitanScore {
 
 private struct IMUNEitanHomeTile: View {
     @EnvironmentObject private var store: WatchWorkoutStore
+    @AppStorage("hcEitanUseHealth") private var useHealth = true
+
+    private var wellness: HCEitanSnapshot? {
+        guard useHealth, let snapshot = store.eitanSnapshot,
+              snapshot.date == WatchWorkoutStore.today() else { return nil }
+        return snapshot
+    }
 
     var body: some View {
-        let score = IMUNEitanScore.calculate(store)
+        let training = IMUNEitanScore.calculate(store)
+        let displayed = useHealth ? wellness?.value : training.value
         VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .top, spacing: 6) {
                 VStack(alignment: .leading, spacing: 3) {
                     Text("EITAN")
-                        .font(.system(size: 14, weight: .bold,
+                        .font(.system(size: 16, weight: .bold,
                                       design: IMUNStyle.headingDesign))
-                        .tracking(1.4)
+                        .tracking(1.3)
                         .foregroundStyle(IMUNStyle.palette.ink)
                         .lineLimit(1)
                         .minimumScaleFactor(0.85)
-                    Text("TRAINING MOMENTUM")
+                    Text(useHealth ? "BODY WELLNESS" : "TRAINING MOMENTUM")
                         .font(.system(size: 8, weight: .medium))
                         .tracking(0.35)
                         .foregroundStyle(WTheme.muted)
                         .lineLimit(1)
-                        .minimumScaleFactor(0.75)
+                        .minimumScaleFactor(0.8)
                 }
                 Spacer(minLength: 0)
                 Image(systemName: "info.circle")
@@ -342,9 +350,8 @@ private struct IMUNEitanHomeTile: View {
                     .accessibilityHidden(true)
             }
             HStack(alignment: .firstTextBaseline, spacing: 4) {
-                Text(score.value.map(String.init) ?? "—")
-                    .font(.system(size: 39, weight: .semibold,
-                                  design: .rounded))
+                Text(displayed.map(String.init) ?? "—")
+                    .font(.system(size: 39, weight: .semibold, design: .rounded))
                     .monospacedDigit()
                     .foregroundStyle(IMUNStyle.palette.ink)
                     .lineLimit(1)
@@ -362,86 +369,159 @@ private struct IMUNEitanHomeTile: View {
                     Capsule().fill(WTheme.muted.opacity(0.2))
                     Capsule().fill(WTheme.lime)
                         .frame(width: geometry.size.width *
-                               CGFloat(score.value ?? 0) / 100)
+                               CGFloat(displayed ?? 0) / 100)
                 }
             }
             .frame(height: 5)
-            HStack(spacing: 4) {
-                ForEach(["action", "rhythm", "sleep"], id: \.self) { key in
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(key == "action" ? "ACTION" :
-                             key == "rhythm" ? "RHYTHM" : "SLEEP")
-                            .font(.system(size: 8, weight: .medium))
-                            .foregroundStyle(WTheme.muted)
-                        Text(score.score(for: key))
-                            .font(.system(size: 13, weight: .semibold,
-                                          design: .rounded))
-                            .monospacedDigit()
-                            .foregroundStyle(IMUNStyle.palette.ink)
+            if useHealth {
+                if let wellness {
+                    HStack(spacing: 6) {
+                        ForEach(Array(wellness.factors.sorted {
+                            $0.weight > $1.weight
+                        }.prefix(3))) { factor in
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(factor.title.uppercased())
+                                    .font(.system(size: 7, weight: .medium))
+                                    .foregroundStyle(WTheme.muted)
+                                    .lineLimit(1)
+                                    .minimumScaleFactor(0.7)
+                                Text(String(factor.value))
+                                    .font(.system(size: 13, weight: .semibold,
+                                                  design: .rounded))
+                                    .monospacedDigit()
+                                    .foregroundStyle(IMUNStyle.palette.ink)
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        }
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    Text(wellness.status)
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(WTheme.aqua)
+                        .lineLimit(2)
+                } else {
+                    Text("Sync iPhone Health to build your personal baseline")
+                        .font(.system(size: 10))
+                        .foregroundStyle(WTheme.muted)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
+            } else {
+                HStack(spacing: 4) {
+                    ForEach(["action", "rhythm"], id: \.self) { key in
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(key == "action" ? "ACTION" : "RHYTHM")
+                                .font(.system(size: 8, weight: .medium))
+                                .foregroundStyle(WTheme.muted)
+                            Text(training.score(for: key))
+                                .font(.system(size: 13, weight: .semibold,
+                                              design: .rounded))
+                                .monospacedDigit()
+                                .foregroundStyle(IMUNStyle.palette.ink)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
+                Text(training.headline)
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(WTheme.aqua)
+                    .lineLimit(2)
             }
-            Text(score.headline)
-                .font(.system(size: 10, weight: .medium))
-                .foregroundStyle(WTheme.aqua)
-                .lineLimit(2)
-                .minimumScaleFactor(0.9)
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 11)
         .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("Eitan training momentum: " +
-            (score.value.map { "\($0) out of 100" } ?? "awaiting training records") +
-            ". " + score.headline)
+        .accessibilityLabel("Eitan " + (useHealth ? "body wellness: " : "training momentum: ") +
+            (displayed.map { "\($0) out of 100" } ?? "not enough data"))
     }
 }
 
 private struct IMUNEitanExplanation: View {
     @EnvironmentObject private var store: WatchWorkoutStore
+    @AppStorage("hcEitanUseHealth") private var useHealth = true
+
     var body: some View {
-        let score = IMUNEitanScore.calculate(store)
+        let training = IMUNEitanScore.calculate(store)
+        let wellness = store.eitanSnapshot?.date == WatchWorkoutStore.today()
+            ? store.eitanSnapshot : nil
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
-                Text("EITAN")
-                    .font(.system(size: 20, weight: .semibold))
-                    .tracking(1)
+                Text("EITAN · אֵיתָן")
+                    .font(.system(size: 19, weight: .semibold))
                     .foregroundStyle(IMUNStyle.palette.ink)
-                Text("Enduring and steadfast")
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+                Text("Enduring · steadfast · strong")
                     .font(.system(size: 11))
                     .foregroundStyle(WTheme.muted)
-                Text(score.value.map { "\($0) / 100" } ?? "Gathering records")
-                    .font(.system(size: 28, weight: .semibold, design: .rounded))
+                Text((useHealth ? wellness?.value : training.value)
+                        .map { "\($0) / 100" } ?? "Building baseline")
+                    .font(.system(size: 27, weight: .semibold, design: .rounded))
                     .monospacedDigit()
                     .foregroundStyle(WTheme.lime)
-                ForEach(score.parts) { part in
-                    VStack(alignment: .leading, spacing: 5) {
-                        HStack {
-                            Text(part.title)
-                                .font(.system(size: 11, weight: .semibold))
-                            Spacer()
-                            Text("\(part.score)")
-                                .font(.system(size: 12, weight: .bold))
-                        }
-                        Text(part.explanation)
+                    .minimumScaleFactor(0.7)
+                if useHealth {
+                    if let wellness {
+                        Text(wellness.coverage)
                             .font(.system(size: 10))
                             .foregroundStyle(WTheme.muted)
+                        ForEach(wellness.factors) { factor in
+                            VStack(alignment: .leading, spacing: 6) {
+                                HStack {
+                                    Text(factor.title)
+                                        .font(.system(size: 11, weight: .semibold))
+                                    Spacer()
+                                    Text("\(factor.value)")
+                                        .font(.system(size: 12, weight: .bold))
+                                }
+                                Text(factor.detail)
+                                    .font(.system(size: 10))
+                                    .foregroundStyle(WTheme.muted)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                            .padding(10)
+                            .background(WTheme.panel,
+                                        in: RoundedRectangle(cornerRadius: 12))
+                        }
+                        Text(wellness.coaching)
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(WTheme.aqua)
                             .fixedSize(horizontal: false, vertical: true)
+                    } else {
+                        Text("Open iMun on iPhone to sync authorized Health measurements. EITAN needs comparable readings to show a wellness score.")
+                            .font(.system(size: 11))
+                            .foregroundStyle(WTheme.muted)
                     }
-                    .padding(10)
-                    .background(WTheme.panel,
-                                in: RoundedRectangle(cornerRadius: 12))
+                    Text("Personal trends are observational, not diagnostic. Missing measurements do not count as zero; incompatible HRV methods and duplicate devices are not averaged. Coaching advice never changes a workout automatically.")
+                        .font(.system(size: 10))
+                        .foregroundStyle(WTheme.muted)
+                } else {
+                    ForEach(training.parts.filter { $0.id != "sleep" }) { part in
+                        VStack(alignment: .leading, spacing: 5) {
+                            HStack {
+                                Text(part.title)
+                                    .font(.system(size: 11, weight: .semibold))
+                                Spacer()
+                                Text("\(part.score)")
+                                    .font(.system(size: 12, weight: .bold))
+                            }
+                            Text(part.explanation)
+                                .font(.system(size: 10))
+                                .foregroundStyle(WTheme.muted)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        .padding(10)
+                        .background(WTheme.panel,
+                                    in: RoundedRectangle(cornerRadius: 12))
+                    }
+                    Text("Training-only mode uses action and weekly rhythm, with no physiological Health measurements.")
+                        .font(.system(size: 10))
+                        .foregroundStyle(WTheme.muted)
                 }
-                Text("EITAN (אֵיתָן) is an authentic Biblical Hebrew word associated with endurance, firmness and strength. iMun uses it as a name for consistent training effort; it is not a literal Hebrew translation of readiness.")
+                Text("EITAN (אֵיתָן) is a genuine Biblical Hebrew word associated with firmness, endurance and strength. It is iMun's chosen score name, not a Hebrew word for medical readiness.")
                     .font(.system(size: 10))
                     .foregroundStyle(WTheme.muted)
                     .fixedSize(horizontal: false, vertical: true)
-                Text("Your EITAN score combines today's training follow-through (45%), seven-day rhythm (35%) and recent recorded sleep duration (20%). Missing components are omitted and available weights are rescaled. It does not estimate medical readiness, fitness, or recovery quality.")
-                    .font(.system(size: 10))
-                    .foregroundStyle(WTheme.muted)
-                    .fixedSize(horizontal: false, vertical: true)
-                Text("Values refresh when synced records arrive.")
+                Text("Change EITAN and Health preferences in iPhone Settings.")
                     .font(.system(size: 10))
                     .foregroundStyle(WTheme.aqua)
             }
@@ -456,6 +536,7 @@ private struct IMUNEitanExplanation: View {
 /// watchOS. Large Strength and Run targets are immediately reachable.
 struct WatchWorkoutView: View {
     @EnvironmentObject private var store: WatchWorkoutStore
+    @AppStorage("hcEitanEnabled") private var eitanEnabled = true
     @AppStorage("hcAccentStyle") private var accent = "crimson"
     @AppStorage("hcDesignPreset") private var visualPreset = "techno"
     @AppStorage("hcDesignCustomGeometry") private var visualCustom = false
@@ -476,6 +557,7 @@ struct WatchWorkoutView: View {
         NavigationStack {
             List {
                 Section {
+                    if eitanEnabled {
                     NavigationLink {
                         IMUNEitanExplanation()
                     } label: {
@@ -491,6 +573,8 @@ struct WatchWorkoutView: View {
                                 startPoint: .topLeading,
                                 endPoint: .bottomTrailing))
                     )
+
+                    }
 
                     // This control is visible without scrolling through
                     // iPhone-link diagnostics. One cloud sign-in lets users
