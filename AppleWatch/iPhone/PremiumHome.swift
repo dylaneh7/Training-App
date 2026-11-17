@@ -951,7 +951,7 @@ private struct PremiumRunPage: View {
                                        tint: HCDesign.aqua, disabled: coach.runPlan == nil) {
                             showingStructuredRun = true
                         }
-                        Text("Set warm-up, intervals, recovery and heart-rate targets in Apple's Workout app.")
+                        Text("Set warm-up, intervals, recovery and heart-rate targets for Apple's Workout app.")
                             .font(.caption2).foregroundStyle(HCDesign.secondary)
                         if let entry = coach.plannedSessions.first(where: {
                             $0.date == HCPlanBuilder.dateString(date) && $0.kind == "run"
