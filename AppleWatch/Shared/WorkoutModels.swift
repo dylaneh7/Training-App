@@ -58,6 +58,17 @@ struct HCLoggedSet: Codable, Identifiable, Hashable {
     var source: String? = nil
 }
 
+/// A running step that can be displayed on both iPhone and iMun Watch.
+/// Time/distance and BPM values only come from an actual prescribed workout.
+struct HCRunStep: Codable, Hashable {
+    let title: String
+    let phase: String
+    let seconds: Double?
+    let distanceMeters: Double?
+    let minBPM: Int?
+    let maxBPM: Int?
+}
+
 /// A run from the Command Center calendar. Runs are separate from lifting
 /// sessions so one can't accidentally mark the other as completed.
 struct HCRunPlan: Codable, Identifiable, Hashable {
@@ -67,6 +78,8 @@ struct HCRunPlan: Codable, Identifiable, Hashable {
     let notes: String
     let targetDistanceMiles: Double?
     let isCompleted: Bool
+    // Optional with a default to decode previously cached iPhone/Watch plans.
+    var structuredSteps: [HCRunStep] = []
 }
 
 struct HCRunFinished: Codable, Identifiable, Hashable {
