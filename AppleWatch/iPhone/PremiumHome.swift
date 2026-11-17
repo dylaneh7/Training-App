@@ -3057,6 +3057,8 @@ private struct PremiumCoachConversation: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(HCDesign.canvas.ignoresSafeArea())
+        .toolbarBackground(IMUNIsaiahBrand.graphite, for: .navigationBar)
+        .toolbarBackground(.visible, for: .navigationBar)
         .safeAreaInset(edge: .bottom, spacing: 0) { composer }
         .onAppear {
             if let decoded = try? JSONDecoder().decode([IMUNCoachTurn].self,
@@ -3161,10 +3163,12 @@ private struct PremiumCoachConversation: View {
                 .foregroundStyle(HCDesign.secondary)
             }
             .tint(HCDesign.electric)
-            Text("Health sharing is optional. Data is sent only with your message.")
-                .font(.system(size: 10))
-                .foregroundStyle(HCDesign.secondary)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            if !composerFocused {
+                Text("Health sharing is optional. Data is sent only with your message.")
+                    .font(.system(size: 10))
+                    .foregroundStyle(HCDesign.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
         }
         .padding(.horizontal, 14)
         .padding(.top, 12)
