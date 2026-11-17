@@ -2156,38 +2156,6 @@ private struct PremiumRecoveryPage: View {
     // change, rather than every scrolling/layout pass on the Health tab.
     @State private var cachedSignals: [HCRecoverySignal] = []
 
-    private func isSleepSignal(_ signal: HCRecoverySignal) -> Bool {
-        let name = signal.label.lowercased()
-        return name.contains("sleep") || name.contains("asleep")
-    }
-
-    private func sleepSourceName(_ original: String) -> String {
-        let source = original.lowercased()
-        if source.contains("whoop") { return "WHOOP" }
-        if source.contains("apple watch") || source.contains("watch") {
-            return "Apple Watch"
-        }
-        return original
-    }
-
-    /// A sleep value is never averaged across devices. Multiple readings
-    /// from the same provider are displayed as its most recent representative
-    /// reading; all underlying readings remain in their original source.
-    private func uniqueSleepSources(_ values: [HCRecoverySignal]) -> [HCRecoverySignal] {
-        let grouped = Dictionary(grouping: values.filter(isSleepSignal)) {
-            sleepSourceName($0.source)
-        }
-        return grouped.keys.sorted().compactMap { key in
-            grouped[key]?.sorted { left, right in
-                if left.date != right.date { return left.date > right.date }
-                if left.points.count != right.points.count {
-                    return left.points.count > right.points.count
-                }
-                return left.label.localizedCompare(right.label) == .orderedAscending
-            }.first
-        }
-    }
-
     private let categoryOrder = ["Heart & Vitals", "Sleep", "Activity & Energy",
                                  "Running & Cycling", "Mobility",
                                  "Body Measurements", "Metabolic & Nutrition", "Workouts"]
@@ -2208,8 +2176,9 @@ private struct PremiumRecoveryPage: View {
         case "Overview":
             groupFiltered = signals.filter {
                 let name = $0.label.lowercased()
-                return name.contains("hrv") || name.contains("sleep") ||
-                       name.contains("asleep") ||
+                return name.contains("hrv") ||
+                       name.contains("heart rate variability") ||
+                       name.contains("sleep") || name.contains("asleep") ||
                        name.contains("resting heart") || name.contains("respiratory") ||
                        name.contains("blood oxygen") || name.contains("daily low hr")
             }
