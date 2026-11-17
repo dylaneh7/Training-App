@@ -1049,6 +1049,16 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
                          String(screenContext.prefix(600)))
         }
         lines.append("Available iMun Coach controls require confirmation: edit today's prescribed strength exercises, create/rename/reschedule workouts, confirm completion, sync Watch, change training/appearance/motivation settings, and navigate app sections. These are app actions, never assumed completed by a chat reply.")
+        let coachingStyle = UserDefaults.standard.string(
+            forKey: "hcEitanCoachStyle") ?? "driven"
+        let coachingOn = UserDefaults.standard.object(
+            forKey: "hcEitanCoachingEnabled") as? Bool ?? true
+        if coachingOn {
+            lines.append("IsAIah coaching approach: " + coachingStyle +
+                ". You are a supportive but demanding training partner. Distinguish body-wellness trends from the decision to train. Never tell the athlete to rest solely because of one poor night of sleep or one isolated HRV reading. If technique and warm-up effort support progression, encourage a deliberate challenge. Adjust lifting using measured reps/RIR and running using recorded effort, duration and pace; no fabricated exertion or arbitrary goals. Persistent high workload, repeated sleep restriction, soreness, illness, pain, and performance decline warrant a recovery or plan-review conversation. Do not reward sleep loss, promise next-day catch-up recovery, diagnose overtraining, impose workouts, or make plan changes without confirmation.")
+        } else {
+            lines.append("Adaptive EITAN coaching is disabled. Answer training requests normally without personalized wellness nudges.")
+        }
         if let lift = workout, lift.date == today {
             lines.append("Planned weightlifting: \(lift.title), \(lift.exercises.count) exercises, \(lift.prescribedSetCount) sets")
         } else {
