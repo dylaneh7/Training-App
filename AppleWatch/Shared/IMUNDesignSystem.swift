@@ -596,3 +596,45 @@ struct IMUNIsaiahWordmark: View {
         .accessibilityLabel("IsAIah")
     }
 }
+
+
+// MARK: - IsAIah floating access
+// The approved IA mark is unchanged; only its theme-aware frame glows.
+struct IMUNIsaiahLauncherButton: View {
+    let glow: Color
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .fill(IMUNIsaiahBrand.graphite)
+
+                // An illuminated outline rather than a solid accent block.
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .strokeBorder(glow.opacity(0.27), lineWidth: 5)
+                    .blur(radius: 6)
+
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .strokeBorder(glow.opacity(0.86), lineWidth: 1.3)
+
+                IMUNIsaiahMark(size: 48)
+            }
+            .frame(width: 62, height: 62)
+            .shadow(color: glow.opacity(0.32), radius: 13)
+            .shadow(color: .black.opacity(0.23), radius: 8, y: 4)
+            .contentShape(RoundedRectangle(cornerRadius: 18))
+        }
+        .buttonStyle(IMUNIsaiahLauncherPressStyle())
+        .accessibilityLabel("Ask IsAIah about this screen")
+        .accessibilityHint("Open your contextual assistant")
+    }
+}
+
+private struct IMUNIsaiahLauncherPressStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.95 : 1)
+            .animation(.easeOut(duration: 0.16), value: configuration.isPressed)
+    }
+}
