@@ -813,13 +813,13 @@
 		0000000000000000000000B1 = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
-			files = (, );
+			files = ();
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 		0000000000000000000000B2 = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
-			files = (, );
+			files = ();
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 		0000000000000000000000B3 = {
