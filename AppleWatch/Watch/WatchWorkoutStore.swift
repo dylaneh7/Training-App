@@ -179,7 +179,13 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
                 DispatchQueue.main.async {
                     self.loadingCloudSchedule = false
                     guard day == Self.today() else { return }
-                    if self.hasReceivedPhoneScheduleToday {
+                    // Accept a newer published cloud plan even if the Watch
+                    // previously received an older plan through the iPhone.
+                    // Live reachability is not required for freshness.
+                    let newerThanPhone = complete.map {
+                        $0.generatedAt > (self.latestAppliedPhoneScheduleAt ?? .distantPast)
+                    } ?? false
+                    if self.hasReceivedPhoneScheduleToday && !newerThanPhone {
                         self.cloudStatus = "Phone plan already current · cloud available as backup"
                         self.refreshCloudSets()
                         return
@@ -846,6 +852,10 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
            latestAppliedPhoneScheduleAt > schedule.generatedAt {
             return
         }
+        if fromPhone, let latestFullCloudScheduleAt,
+           latestFullCloudScheduleAt > schedule.generatedAt {
+            return
+        }
         if fromFullCloud, let latestFullCloudScheduleAt,
            latestFullCloudScheduleAt > schedule.generatedAt {
             return
@@ -853,7 +863,12 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
         if let previous = latestSchedule, previous.date == schedule.date {
             // A cloud-strength fallback can have a newer timestamp than the
             // actual iPhone running plan. The iPhone is authoritative for runs.
-            if !fromPhone && hasReceivedPhoneScheduleToday { return }
+            if !fromPhone && hasReceivedPhoneScheduleToday &&
+               (!fromFullCloud ||
+                schedule.generatedAt <=
+                    (latestAppliedPhoneScheduleAt ?? .distantPast)) {
+                return
+            }
             if previous.state == "ready" && schedule.state == "loading" {
                 return
             }
