@@ -1221,6 +1221,7 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
         let packet = currentEitanPacket()
         let stamp = packet[HCPayload.eitanStamp] as? Double ?? 0
         latestEitanDedicatedStamp = stamp
+        eitanWatchAcknowledgedAt = nil
 
         // The old implementation used reliable user-info queues for every
         // wellness refresh and manual retry. Cancel only those obsolete EITAN
@@ -1869,6 +1870,19 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
         if kind == HCPayload.eitanRequest {
             DispatchQueue.main.async {
                 replyHandler(self.currentEitanPacket())
+            }
+            return
+        }
+        if kind == HCPayload.eitanReceipt {
+            DispatchQueue.main.async {
+                let stamp = message[HCPayload.eitanStamp] as? Double ?? 0
+                if stamp >= self.latestEitanDedicatedStamp &&
+                   stamp >= (self.eitanWatchAcknowledgedAt?.timeIntervalSince1970 ?? 0) {
+                    self.eitanWatchAcknowledgedAt = Date(timeIntervalSince1970: stamp)
+                    self.eitanWatchSyncStatus = "EITAN confirmed by Watch · " +
+                        Date().formatted(date: .omitted, time: .shortened)
+                }
+                replyHandler(["received": true])
             }
             return
         }
