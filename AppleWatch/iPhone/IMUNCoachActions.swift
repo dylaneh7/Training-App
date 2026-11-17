@@ -54,7 +54,7 @@ extension HCWorkout {
 
 /// Narrow, validated app commands. The assistant's narrative never executes
 /// directly. Every matching command is reviewed in the iMun Coach UI.
-enum IMUNCoachActionKind: Equatable {
+enum IMUNCoachActionKind: String, CaseIterable {
     case moveWorkout
     case completeRun
     case completeScheduledWorkout
@@ -83,6 +83,78 @@ struct IMUNCoachActionProposal: Identifiable {
     let themeID: String?
     var parameter: String? = nil
     var workoutEdit: IMUNCoachWorkoutEditHint? = nil
+}
+
+/// One source of truth for which app operations Coach can offer.
+/// Adding a capability means wiring a validated proposal and native action,
+/// not granting the language model access to arbitrary internal objects.
+struct IMUNCoachActionDescriptor: Identifiable {
+    let kind: IMUNCoachActionKind
+    let domain: String
+    let title: String
+    let summary: String
+    let access: String
+    var id: String { kind.rawValue }
+}
+
+enum IMUNCoachActionCatalog {
+    static let available: [IMUNCoachActionDescriptor] = [
+        .init(kind: .editStrength, domain: "Training", title: "Edit exercises",
+              summary: "Add, replace, remove, reorder and change sets, reps, rest or suggested load.",
+              access: "Review and confirm"),
+        .init(kind: .createStrength, domain: "Training", title: "Create strength workout",
+              summary: "Create a blank workout for today.", access: "Review and confirm"),
+        .init(kind: .renameStrength, domain: "Training", title: "Rename a workout",
+              summary: "Rename today's prescribed strength workout.", access: "Review and confirm"),
+        .init(kind: .createRun, domain: "Training", title: "Create a run",
+              summary: "Create a timed running plan with optional heart-rate targets.", access: "Review and confirm"),
+        .init(kind: .moveWorkout, domain: "Calendar", title: "Reschedule a session",
+              summary: "Move a real planner session after choosing its date.", access: "Review and confirm"),
+        .init(kind: .completeScheduledWorkout, domain: "Calendar", title: "Mark a workout done",
+              summary: "Confirm a saved scheduled workout is complete, without invented metrics.", access: "Review and confirm"),
+        .init(kind: .completeRun, domain: "Running", title: "Confirm completed run",
+              summary: "Confirm today's run without inserting sensor values.", access: "Review and confirm"),
+        .init(kind: .syncWatch, domain: "Watch", title: "Sync the Watch",
+              summary: "Refresh the existing signed-in cloud and Watch workout schedule.", access: "Review and confirm"),
+        .init(kind: .setTheme, domain: "Appearance", title: "Change theme",
+              summary: "Switch any available visual preset.", access: "Review and confirm"),
+        .init(kind: .setMotivation, domain: "Motivation", title: "Change motivation",
+              summary: "Select Scripture, original, performance, custom or off.", access: "Review and confirm"),
+        .init(kind: .setRestDuration, domain: "Training", title: "Change rest timer",
+              summary: "Adjust planned strength rest preference.", access: "Review and confirm"),
+        .init(kind: .setWatchHaptics, domain: "Watch", title: "Watch haptics",
+              summary: "Enable or disable workout vibration preference.", access: "Review and confirm"),
+        .init(kind: .setRunVoiceCues, domain: "Running", title: "Running voice cues",
+              summary: "Enable or disable speech cues.", access: "Review and confirm"),
+        .init(kind: .setRunAutoLaps, domain: "Running", title: "Automatic laps",
+              summary: "Enable or disable automatic lap cues.", access: "Review and confirm"),
+        .init(kind: .selectTraining, domain: "Navigation", title: "Change sport",
+              summary: "Switch between Strength and Running.", access: "Review and confirm"),
+        .init(kind: .openTab, domain: "Navigation", title: "Navigate app",
+              summary: "Open Training, Progress, Health, Coach or Settings.", access: "Review and confirm")
+    ]
+
+    static let viewOnly: [(area: String, scope: String)] = [
+        ("Health measurements", "Inspect authorized records and source-specific trends; no invented data or unsupported HealthKit edits"),
+        ("Recorded workout history", "Inspect source recordings; corrections must use a separate authenticated record-specific operation"),
+        ("Accounts and permissions", "Navigate to settings; system permissions and sign-in require the user"),
+        ("External workout providers", "Read or export only through approved provider integrations")
+    ]
+
+    static var modelAllowlist: String {
+        available.map { "\($0.kind.rawValue): \($0.summary)" }.joined(separator: "\n")
+    }
+
+    static var userFacingSummary: String {
+        let groups = Dictionary(grouping: available, by: \.domain)
+        let domains = groups.keys.sorted().map { domain in
+            domain + ": " + (groups[domain] ?? []).map(\.title).joined(separator: ", ")
+        }
+        return "I can prepare app changes across iMun. Every edit is shown for your approval.\n" +
+            domains.joined(separator: "\n") +
+            "\nHealth records and permissions stay source-controlled. " +
+            "If an operation isn't yet connected, I'll explain the limitation rather than claiming I changed it."
+    }
 }
 
 /// Parses explicit user commands into *proposals*, not side effects. The
@@ -323,7 +395,8 @@ enum IMUNCoachActionInterpreter {
         return containsAny(text, ["please ", "can you ", "could you ",
             "move", "reschedule", "mark", "schedule", "create", "add ",
             "change", "switch", "set ", "turn ", "open ", "show ",
-            "finish", "complete", "adjust", "rename", "update"]) &&
+            "finish", "complete", "adjust", "rename", "update", "edit ",
+            "replace", "remove", "delete", "reorder"]) &&
             containsAny(text, ["workout", "run", "strength", "lifting",
                 "training", "health", "coach", "theme", "appearance",
                 "rest", "watch", "motivation", "haptics", "voice", "laps",
