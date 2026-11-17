@@ -361,12 +361,10 @@ private struct PremiumStrengthPage: View {
                                         .font(.subheadline).foregroundStyle(HCDesign.secondary)
                                 }
                                 Spacer(minLength: 0)
-                                HCProgressRing(
-                                    progress: plan.prescribedSetCount > 0 ?
-                                        Double(doneSets.count) / Double(plan.prescribedSetCount) : 0,
-                                    value: "\(min(doneSets.count,plan.prescribedSetCount))",
-                                    subtitle: "Sets done",
-                                    tint: HCDesign.electric, diameter: 91)
+                                IMUNThemeProgressView(
+                                    completed: doneSets.count,
+                                    planned: plan.prescribedSetCount,
+                                    compact: true)
                             }
 
                             HStack(spacing: 7) {
@@ -1798,6 +1796,48 @@ private struct PremiumRecoveryPage: View {
                                 .font(.system(size: 14, weight: .bold, design: .rounded))
                             Text("Ring shows available comparisons, not a made-up recovery score.")
                                 .font(.caption).foregroundStyle(HCDesign.secondary)
+                        }
+                    }
+                }
+
+                HCSectionTitle(title: "Your theme dashboard",
+                               detail: IMUNStyle.preset.title)
+                HCCard(accent: HCDesign.electric) {
+                    VStack(alignment: .leading, spacing: 12) {
+                        HStack {
+                            Image(systemName: IMUNStyle.preset.symbol)
+                                .foregroundStyle(HCDesign.electric)
+                            Text(IMUNStyle.preset.title.uppercased() + " / TRAINING PROGRESS")
+                                .font(HCDesign.label(11))
+                                .tracking(1)
+                            Spacer()
+                        }
+                        IMUNThemeProgressView(
+                            completed: coach.workout.map {
+                                coach.completedSets(for: $0).count
+                            } ?? 0,
+                            planned: coach.workout?.prescribedSetCount ?? 0)
+                        Text("The visual tracks prescribed sets completed today across iPhone and Watch—not a recovery score.")
+                            .font(.caption2)
+                            .foregroundStyle(HCDesign.secondary)
+                        if let latest = signals.first {
+                            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                                Text("RECENT RECOVERY SIGNAL")
+                                    .font(HCDesign.label(9))
+                                    .tracking(0.8)
+                                    .foregroundStyle(HCDesign.secondary)
+                                Spacer()
+                                Text(latest.label + " · " + latest.formattedValue)
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(HCDesign.ink)
+                            }
+                            Text("Measured by " + latest.source + " · " + latest.date)
+                                .font(.caption2)
+                                .foregroundStyle(HCDesign.secondary)
+                        } else {
+                            Text("Recovery readings appear here once Apple Health or an authorized source provides them.")
+                                .font(.caption2)
+                                .foregroundStyle(HCDesign.secondary)
                         }
                     }
                 }
