@@ -239,7 +239,8 @@ private struct IMUNEitanTodayCard: View {
                                         .font(.system(size: 12))
                                         .foregroundStyle(HCDesign.ink)
                                         .fixedSize(horizontal: false, vertical: true)
-                                    if snapshot.value != nil {
+                                    if snapshot.value != nil ||
+                                       snapshot.coachingPlan?.needsConversation == true {
                                         Button {
                                             openCoach()
                                         } label: {
@@ -4620,6 +4621,17 @@ private struct PremiumCoachConversation: View {
             "/100. Consecutive lower-score days: \(snapshot.consecutiveLowDays). " +
             "Coverage: \(snapshot.coverage). Factors: \(observations). " +
             "Suggestions: \(snapshot.coaching). " +
+            (snapshot.coachingPlan.map { plan in
+                "IsAIah training approach: \(plan.mode), \(plan.title). " +
+                "Observed: \(plan.recordedTrainingStreak) consecutive recorded training days, " +
+                "\(plan.recentHardDays) high-effort days in seven days, " +
+                "\(plan.shortSleepNights.map(String.init) ?? "insufficient data") short-sleep nights across " +
+                "\(plan.observedSleepNights) observed nights. Evidence confidence: \(plan.confidence). " +
+                "Reasons: \(plan.reasons.joined(separator: "; ")). " +
+                "Training suggestions: \(plan.cues.joined(separator: "; ")). "
+            } ?? "") +
+            "A single poor night does not require rest; adapt to warm-up feel, RIR and actual performance. " +
+            "Sustained strain matters more than any one biomarker. " +
             "Suggest graduated training changes, easy activity, adequate sleep or rest when warranted; " +
             "do not automatically change the plan or promise injury prevention. " +
             "EITAN is not a validated clinical readiness or illness-risk model."
