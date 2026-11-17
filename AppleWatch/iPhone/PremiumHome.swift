@@ -350,6 +350,7 @@ private struct PremiumStrengthPage: View {
                 if let plan {
                     HCCard(accent: HCDesign.electric) {
                         VStack(alignment: .leading, spacing: 17) {
+                            IMUNThemeEmblem(area: "training")
                             HCAccentTag(title: "TODAY'S PROGRAM", color: HCDesign.electric)
                             HStack(alignment: .center, spacing: 18) {
                                 VStack(alignment: .leading, spacing: 8) {
@@ -1367,6 +1368,7 @@ private struct PremiumProgressPage: View {
                               subtitle: "Your history, your momentum, and the next milestone.",
                               icon: "chart.line.uptrend.xyaxis",
                               tint: HCDesign.aqua) {
+                    IMUNThemeEmblem(area: "progress")
                     HStack(spacing: 18) {
                         HCMetricBlock(label: "Recorded sets",
                                       value: "\(coach.performanceHistory.count)",
@@ -1856,6 +1858,12 @@ private struct PremiumRecoveryPage: View {
 
                 HCSectionTitle(title: "Your theme dashboard",
                                detail: IMUNStyle.preset.title)
+                HCCard(accent: HCDesign.aqua) {
+                    IMUNThemeRecoveryBrief(
+                        compared: baselineCount,
+                        flagged: warningCount,
+                        sources: Set(allSignals.map(\.source)).count)
+                }
                 HCCard(accent: HCDesign.electric) {
                     VStack(alignment: .leading, spacing: 12) {
                         HStack {
@@ -2226,6 +2234,10 @@ private struct PremiumCoachPage: View {
                             .frame(width: 49, height: 49)
                             .background(HCDesign.electric.opacity(0.11),
                                         in: RoundedRectangle(cornerRadius: 15))
+                    }
+
+                    HCCard {
+                        IMUNThemeEmblem(area: "coach")
                     }
 
                     if !coach.signedIn {
