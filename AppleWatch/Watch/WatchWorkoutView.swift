@@ -303,123 +303,67 @@ struct WatchWorkoutView: View {
                     }
                     .listRowBackground(WTheme.panel)
                 }
-                Section("TODAY · TRAINING PLAN") {
-                    VStack(alignment: .leading, spacing: 5) {
+                Section("IsAIah · TODAY") {
+                    WatchIsaiahDailyBrief()
+                        .listRowBackground(WTheme.panel)
+                }
+                Section("TRAINING PLAN") {
+                    VStack(alignment: .leading, spacing: 6) {
                         Text(store.scheduleState == "ready" ?
-                             (store.hasScheduledLift ? store.workout.title : "No lift planned today") :
-                             (store.scheduleState == "signedOut" ? "Sign in on iPhone" : "Checking iPhone…"))
-                            .font(.system(size: 12, weight: .semibold))
+                             (store.hasScheduledLift ? store.workout.title :
+                              "No strength workout scheduled") :
+                             (store.scheduleState == "signedOut" ?
+                              "Sign in on iPhone" : "Syncing today's plan"))
+                            .font(.system(size: 13, weight: .semibold))
                         Text(store.runPlan?.title ?? "No run scheduled")
-                            .font(.system(size: 11)).foregroundStyle(WTheme.muted)
+                            .font(.system(size: 11))
+                            .foregroundStyle(WTheme.muted)
                         if let last = store.scheduleUpdatedAt {
-                            Text("Synced " + last.formatted(date: .omitted, time: .shortened))
-                                .font(WTheme.label(10)).foregroundStyle(WTheme.aqua)
+                            Label("Updated " + last.formatted(date: .omitted,
+                                                              time: .shortened),
+                                  systemImage: "checkmark.circle")
+                                .font(.system(size: 10))
+                                .foregroundStyle(WTheme.aqua)
                         }
-                        HStack(spacing: 8) {
-                            Button {
-                                store.requestCurrentSchedule(manual: true)
-                            } label: {
-                                Label(store.isRequestingSchedule ? "Checking…" : "Refresh",
-                                      systemImage: "arrow.clockwise")
-                            }
-                            .disabled(store.isRequestingSchedule)
-                            Button {
-                                store.sendToPhone()
-                            } label: {
-                                Label("Send to iPhone", systemImage: "iphone.gen3")
-                            }
-                        }
-                        .font(.system(size: 11, weight: .semibold))
-                        .buttonStyle(.bordered)
-                        .tint(WTheme.aqua)
-                        Button {
-                            store.checkPhoneConnection()
-                        } label: {
-                            Label("Check iPhone link", systemImage: "antenna.radiowaves.left.and.right")
-                        }
-                        .font(.system(size: 11, weight: .semibold))
-                        .buttonStyle(.bordered)
-                        .tint(WTheme.aqua)
-                        Text(store.phoneConnectionStatus)
-                            .font(.system(size: 10))
-                            .foregroundStyle(WTheme.aqua)
-                            .fixedSize(horizontal: false, vertical: true)
-                        Button {
-                            store.testPhoneLink()
-                        } label: {
-                            Label("Test live iPhone link", systemImage: "waveform.path")
-                        }
-                        .font(.system(size: 11, weight: .semibold))
-                        .buttonStyle(.bordered)
-                        .tint(WTheme.aqua)
-                        Text(store.phonePingStatus)
-                            .font(.system(size: 10))
-                            .foregroundStyle(WTheme.muted)
-                            .fixedSize(horizontal: false, vertical: true)
-                        if store.cloudSignedIn {
-                            Button {
-                                store.refreshCloudWorkout()
-                                store.uploadPendingCloudSets()
-                            } label: {
-                                Label("Load workout from cloud", systemImage: "icloud.and.arrow.down")
-                            }
-                            .font(.system(size: 11, weight: .semibold))
-                            .buttonStyle(.bordered)
-                            .tint(WTheme.aqua)
-                        } else {
-                            NavigationLink {
-                                WatchCloudBackupSetup()
-                            } label: {
-                                Label("Connect direct cloud backup", systemImage: "icloud")
-                            }
-                            .font(.system(size: 11, weight: .semibold))
-                        }
-                        Text(store.cloudStatus)
-                            .font(.system(size: 10))
-                            .foregroundStyle(WTheme.muted)
-                            .fixedSize(horizontal: false, vertical: true)
-                        Text(store.progressSyncStatus)
-                            .font(.system(size: 10))
-                            .foregroundStyle(WTheme.muted)
-                            .fixedSize(horizontal: false, vertical: true)
-                        Text(store.status)
-                            .font(.system(size: 10))
-                            .foregroundStyle(WTheme.muted)
-                            .fixedSize(horizontal: false, vertical: true)
                     }
+                    .listRowBackground(WTheme.panel)
                 }
                 if let recovery = store.recoverySummary {
-                    Section("RECOVERY SIGNALS") {
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text(recovery.source + " · " + recovery.date)
-                                .font(WTheme.label(10)).foregroundStyle(WTheme.muted)
-                            HStack(spacing: 14) {
-                                VStack(alignment: .leading, spacing: 3) {
-                                    Text("HRV · RMSSD")
-                                        .font(WTheme.label(9)).foregroundStyle(WTheme.muted)
-                                    Text(recovery.hrvMS.map { String(format: "%.0f", $0) } ?? "—")
-                                        .font(WTheme.metric(23)).foregroundStyle(WTheme.aqua)
-                                }
-                                VStack(alignment: .leading, spacing: 3) {
-                                    Text("SLEEP")
-                                        .font(WTheme.label(9)).foregroundStyle(WTheme.muted)
-                                    Text(recovery.sleepSeconds.map {
-                                        String(format: "%.1fh", $0 / 3600)
-                                    } ?? "—")
-                                        .font(WTheme.metric(23)).foregroundStyle(.white)
-                                }
-                            }
-                            Text("See personal baselines and alerts on iPhone.")
-                                .font(.system(size: 10)).foregroundStyle(WTheme.muted)
+                    Section("HEALTH · " + recovery.source.uppercased()) {
+                        HStack(alignment: .firstTextBaseline, spacing: 10) {
+                            WatchSmallHealthMetric(title: "SLEEP",
+                                value: recovery.sleepSeconds.map {
+                                    String(format: "%.1fh", $0 / 3600)
+                                } ?? "—")
+                            WatchSmallHealthMetric(title: "HRV",
+                                value: recovery.hrvMS.map {
+                                    String(format: "%.0f", $0) + "ms"
+                                } ?? "—")
+                            WatchSmallHealthMetric(title: "LOW HR",
+                                value: recovery.dailyLowHR.map {
+                                    String(format: "%.0f", $0) + "bpm"
+                                } ?? "—")
                         }
                         .listRowBackground(WTheme.panel)
+                        Text("Recorded " + recovery.date +
+                             " · Source values are not combined")
+                            .font(.system(size: 10))
+                            .foregroundStyle(WTheme.muted)
+                            .listRowBackground(WTheme.panel)
+                    }
+                } else {
+                    Section("HEALTH") {
+                        Text("No connected recovery readings yet. Check iPhone Health sync.")
+                            .font(.system(size: 11))
+                            .foregroundStyle(WTheme.muted)
+                            .listRowBackground(WTheme.panel)
                     }
                 }
                 Section("PREFERENCES") {
                     NavigationLink {
                         WatchPreferences()
                     } label: {
-                        Label("APPEARANCE & CONTROLS", systemImage: "slider.horizontal.3")
+                        Label("SETTINGS & DIAGNOSTICS", systemImage: "gearshape")
                             .font(.system(size: 12, weight: .bold))
                     }
                     Text("imun " +
@@ -521,6 +465,83 @@ private struct WDestination: View {
             Spacer(minLength: 0)
         }
         .frame(minHeight: 64)
+    }
+}
+
+/// Compact, source-attributed numbers, never a fabricated composite score.
+private struct WatchSmallHealthMetric: View {
+    let title: String
+    let value: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title)
+                .font(.system(size: 9, weight: .bold))
+                .foregroundStyle(WTheme.muted)
+            Text(value)
+                .font(.system(size: 17, weight: .bold,
+                              design: IMUNStyle.headingDesign))
+                .minimumScaleFactor(0.6)
+                .lineLimit(1)
+                .foregroundStyle(IMUNStyle.palette.ink)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+/// IsAIah's on-device daily brief is derived only from today's actual synced
+/// plan and source-labelled readings. It never pretends a new model reply ran.
+private struct WatchIsaiahDailyBrief: View {
+    @EnvironmentObject private var store: WatchWorkoutStore
+
+    private var trainingFocus: String {
+        guard store.scheduleState == "ready" else {
+            return "Your training plan is syncing. Open iMun on iPhone if it stays unavailable."
+        }
+        if store.hasScheduledLift, let run = store.runPlan {
+            return "Strength: " + store.workout.title + ". Run: " + run.title + "."
+        }
+        if store.hasScheduledLift {
+            return "Strength today: " + store.workout.title + "."
+        }
+        if let run = store.runPlan {
+            return "Running today: " + run.title + "."
+        }
+        return "No sessions scheduled today. Use this space to prepare for the next one."
+    }
+
+    private var recoveryContext: String {
+        guard let r = store.recoverySummary else {
+            return "No recovery data synced yet. Train by your planned effort and how you feel."
+        }
+        let sleep = r.sleepSeconds.map { String(format: "%.1f h", $0 / 3600) }
+        let hrv = r.hrvMS.map { String(format: "%.0f ms", $0) }
+        let summary = [sleep.map { "sleep " + $0 }, hrv.map { "HRV " + $0 }]
+            .compactMap { $0 }
+            .joined(separator: " · ")
+        return r.source + " (" + r.date + "): " +
+            (summary.isEmpty ? "No sleep or HRV reading." : summary + ".") 
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 9) {
+            HStack(spacing: 8) {
+                IMUNIsaiahMark(size: 31)
+                Text("TODAY'S BRIEF")
+                    .font(WTheme.label(11))
+                    .foregroundStyle(IMUNStyle.palette.ink)
+                Spacer(minLength: 0)
+            }
+            Text(trainingFocus)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(IMUNStyle.palette.ink)
+                .fixedSize(horizontal: false, vertical: true)
+            Text(recoveryContext)
+                .font(.system(size: 10))
+                .foregroundStyle(WTheme.muted)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.vertical, 5)
     }
 }
 
