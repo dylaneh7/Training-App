@@ -14,7 +14,7 @@
   <key>WKCompanionAppBundleIdentifier</key><string>$(HC_IOS_BUNDLE_ID)</string>
   <key>WKApplication</key><true/>
   <key>WKWatchOnly</key><false/>
-  <key>WKRunsIndependentlyOfCompanionApp</key><true/>
+  <key>WKRunsIndependentlyOfCompanionApp</key><false/>
   <key>WKBackgroundModes</key><array><string>workout-processing</string></array>
   <key>NSHealthShareUsageDescription</key><string>Health Coach reads workout heart rate while you train.</string>
   <key>NSHealthUpdateUsageDescription</key><string>Health Coach saves your strength workout to Apple Fitness when you choose Start.</string>
