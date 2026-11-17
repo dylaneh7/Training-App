@@ -38,6 +38,7 @@ struct PremiumHomeView: View {
     @AppStorage("hcDesignBackgroundHex") private var designBackgroundHex = "070C16"
     @Environment(\.scenePhase) private var scenePhase
     private let scheduleRefresh = Timer.publish(every: 60, on: .main, in: .common).autoconnect()
+    private let progressRefresh = Timer.publish(every: 15, on: .main, in: .common).autoconnect()
 
     var body: some View {
         TabView {
@@ -49,8 +50,8 @@ struct PremiumHomeView: View {
                 .tabItem { Label("Health", systemImage: "heart.text.square.fill") }
             NavigationStack { PremiumCoachPage() }
                 .tabItem { Label("Coach", systemImage: "bubble.left.and.text.bubble.right") }
-            NavigationStack { IMUNDesignStudioPage() }
-                .tabItem { Label("Studio", systemImage: "paintpalette.fill") }
+            NavigationStack { PremiumSettingsPage() }
+                .tabItem { Label("Settings", systemImage: "gearshape.fill") }
         }
         .tint(HCDesign.electric)
         .preferredColorScheme(IMUNStyle.preferredScheme)
@@ -68,6 +69,11 @@ struct PremiumHomeView: View {
             if phase == .active {
                 runImporter.startIfAuthorized()
                 if coach.signedIn { coach.refresh(date: Date()) }
+            }
+        }
+        .onReceive(progressRefresh) { _ in
+            if scenePhase == .active && coach.signedIn {
+                coach.refreshCloudProgress()
             }
         }
         .onReceive(scheduleRefresh) { _ in
@@ -88,6 +94,7 @@ struct PremiumHomeView: View {
         .onChange(of: designBackgroundHex) { _, _ in configureTabAppearance() }
         .onAppear {
             if coach.signedIn && coach.workout == nil { coach.refresh(date: Date()) }
+            if coach.signedIn { coach.refreshCloudProgress() }
             configureTabAppearance()
         }
     }
