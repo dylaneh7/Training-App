@@ -1027,6 +1027,22 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
                 lines.append(summary)
             }
         }
+        // Place explicitly shared Health records before the long training
+        // history; backend request context has a bounded size.
+        lines.append("Never invent missing readings, PRs or pace comparisons.")
+        if shareRecovery {
+            // All loaded Health-screen cards, even those not scrolled into view.
+            if !healthSnapshot.isEmpty {
+                lines.append(String(healthSnapshot.prefix(16_000)))
+            }
+            for datum in recoveryHistory.prefix(48) {
+                let hrv = datum.hrvMS.map { String(format: "%.0f ms", $0) } ?? "missing"
+                let sleep = datum.sleepSeconds.map { String(format: "%.1f h", $0 / 3600) }
+                    ?? "missing"
+                let hr = datum.dailyLowHR.map { String(format: "%.0f bpm", $0) } ?? "missing"
+                lines.append("Recovery \(datum.source) \(datum.date): HRV RMSSD \(hrv), sleep \(sleep), low HR \(hr)")
+            }
+        }
         // Include enough actual session history to answer trends and PR queries.
         // Derived running pace uses measured distance and elapsed time only.
         let windows: [(String, Int, Int)] = [
@@ -1072,19 +1088,6 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
                 pace = "pace unavailable"
             }
             lines.append("Measured run \(run.date) \(run.title): \(distance), \(pace), source \(run.source)")
-        }
-        if shareRecovery {
-            // All loaded Health-screen cards, even those not scrolled into view.
-            if !healthSnapshot.isEmpty {
-                lines.append(String(healthSnapshot.prefix(16_000)))
-            }
-            for datum in recoveryHistory.prefix(48) {
-                let hrv = datum.hrvMS.map { String(format: "%.0f ms", $0) } ?? "missing"
-                let sleep = datum.sleepSeconds.map { String(format: "%.1f h", $0 / 3600) }
-                    ?? "missing"
-                let hr = datum.dailyLowHR.map { String(format: "%.0f bpm", $0) } ?? "missing"
-                lines.append("Recovery \(datum.source) \(datum.date): HRV RMSSD \(hrv), sleep \(sleep), low HR \(hr)")
-            }
         }
         let prior = recentConversation.trimmingCharacters(in: .whitespacesAndNewlines)
         if !prior.isEmpty {
