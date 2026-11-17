@@ -178,6 +178,50 @@ private struct IMUNTodayWidgetFamilyView: View {
     }
 }
 
+/// Direct Lock Screen entry to the active training view.
+private struct IMUNWorkoutShortcutView: View {
+    @Environment(\.widgetFamily) private var family
+    var body: some View {
+        Group {
+            if family == .accessoryCircular {
+                VStack(spacing: 2) {
+                    Image(systemName: "dumbbell.fill")
+                        .font(.system(size: 19, weight: .semibold))
+                    Text("IMUN")
+                        .font(.system(size: 8, weight: .bold))
+                }
+            } else {
+                HStack(spacing: 9) {
+                    Image(systemName: "dumbbell.fill")
+                        .font(.system(size: 19))
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("iMun Training")
+                            .font(.system(size: 12, weight: .semibold))
+                        Text("Tap to resume or start a workout")
+                            .font(.system(size: 10))
+                            .lineLimit(1)
+                    }
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .containerBackground(for: .widget) { Color.clear }
+        .widgetURL(URL(string: "imun://training"))
+    }
+}
+
+private struct IMUNWorkoutShortcutWidget: Widget {
+    var body: some WidgetConfiguration {
+        StaticConfiguration(kind: "imun.workout-shortcut",
+                            provider: IMUNTodayProvider()) { _ in
+            IMUNWorkoutShortcutView()
+        }
+        .configurationDisplayName("iMun Workout")
+        .description("Open your current workout straight from the Lock Screen.")
+        .supportedFamilies([.accessoryCircular, .accessoryRectangular])
+    }
+}
+
 private struct IMUNWorkoutActivityWidget: Widget {
     var body: some WidgetConfiguration {
         ActivityConfiguration(for: IMUNWorkoutActivityAttributes.self) { context in
@@ -240,6 +284,7 @@ private struct IMUNWorkoutActivityWidget: Widget {
 struct IMUNWidgetBundle: WidgetBundle {
     var body: some Widget {
         IMUNTodayWidget()
+        IMUNWorkoutShortcutWidget()
         IMUNWorkoutActivityWidget()
     }
 }
