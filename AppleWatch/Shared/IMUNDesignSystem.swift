@@ -386,48 +386,14 @@ struct IMUNPanelShape: Shape {
     }
 }
 
-/// Low-contrast vector motifs: no photos/downloads and no extra permissions.
+/// Content-first page backdrop. Theme patterns are reserved for intentional
+/// artwork or identity surfaces, not repeated behind charts and controls.
 struct IMUNBackdrop: View {
     var body: some View {
-        ZStack {
-            IMUNStyle.palette.canvas
-            if IMUNStyle.motif == "glow" {
-                RadialGradient(colors: [IMUNStyle.palette.accent.opacity(0.20), .clear],
-                               center: .topTrailing, startRadius: 10, endRadius: 480)
-            } else if IMUNStyle.motif != "none" {
-                Canvas { context, size in
-                    let motif = IMUNStyle.motif
-                    let spacing: CGFloat = motif == "grid" ? 30 : 54
-                    let color = IMUNStyle.palette.supporting.opacity(0.11)
-                    if motif == "stripes" {
-                        for v in stride(from: CGFloat(-size.height), through: size.width, by: spacing) {
-                            var line = Path()
-                            line.move(to: CGPoint(x:v,y:0))
-                            line.addLine(to: CGPoint(x:v+size.height,y:size.height))
-                            context.stroke(line, with:.color(color), lineWidth:1)
-                        }
-                    } else {
-                        for x in stride(from: CGFloat(0), through: size.width, by: spacing) {
-                            var line = Path()
-                            line.move(to: CGPoint(x:x,y:0))
-                            line.addLine(to: CGPoint(x:x,y:size.height))
-                            context.stroke(line, with:.color(color), lineWidth:0.7)
-                        }
-                        if motif == "grid" || motif == "contours" {
-                            for y in stride(from: CGFloat(0), through: size.height, by: spacing) {
-                                var line = Path()
-                                line.move(to: CGPoint(x:0,y:y))
-                                line.addLine(to: CGPoint(x:size.width,y:y))
-                                context.stroke(line, with:.color(color), lineWidth:0.7)
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        .ignoresSafeArea()
-        .allowsHitTesting(false)
-        .accessibilityHidden(true)
+        IMUNStyle.palette.canvas
+            .ignoresSafeArea()
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
     }
 }
 
@@ -449,28 +415,73 @@ enum IMUNMotivation {
     static var line: String? {
         let day = Calendar.current.ordinality(of: .day, in: .era, for: Date()) ?? 0
         switch source {
-        case "original":
-            let options = [
-                "Preparation is a kind of courage.",
-                "Do the work that will still matter tomorrow.",
-                "Make your actions match the standard you set.",
-                "Consistency compounds quietly.",
-                "Progress is earned in the repetitions nobody sees."
+        case "original", "performance":
+            // Content choices and tone are independent of the visual theme.
+            // Distinct voice sets make the tone picker an actual preference,
+            // not a future-looking setting that changes nothing.
+            let quiet = source == "original" ? [
+                "The standard is built in the hours nobody observes.",
+                "You can be tired and still choose precision.",
+                "Let preparation remove the need for bravado.",
+                "The ordinary session is where trust in yourself develops.",
+                "Patience is a skill you practice under resistance.",
+                "Progress can be real before it is visible.",
+                "Return to the work; not every day needs a verdict."
+            ] : [
+                "Good training leaves evidence, not theatrics.",
+                "Recovery is part of the workload, not its opposite.",
+                "One session is a data point. Your habits are the trend.",
+                "Build capacity deliberately; don't chase noise.",
+                "Repeat the useful work before adding more."
             ]
-            return options[day % options.count]
-        case "performance":
-            let options = [
-                "Train the process. Measure the result.",
-                "The next repetition is the only one you can complete.",
-                "Precision first. Effort follows.",
-                "Show up prepared. Finish with intent.",
-                "Your pace is data, not your identity."
+            let direct = source == "original" ? [
+                "Keep the appointment you made with yourself.",
+                "Finish the task before negotiating with your mood.",
+                "Set the standard. Meet it again tomorrow.",
+                "Take the harder useful action.",
+                "Don't confuse activity with finished work.",
+                "Do what the plan calls for, not what feels impressive.",
+                "Make the next decision count."
+            ] : [
+                "Hit the target. Record the result. Adjust.",
+                "Hold the easy pace when the plan says easy.",
+                "Train the weakness you keep noticing.",
+                "Protect the next session from today's ego.",
+                "Control the rep before increasing the load.",
+                "Run the assigned interval—not a faster imitation."
             ]
+            let rigorous = source == "original" ? [
+                "Consistency is a system of decisions, not a personality trait.",
+                "An unmeasured promise is not an executed plan.",
+                "Difficulty is information. Respond with preparation.",
+                "Attention is a resource; allocate it to the task.",
+                "Your method should survive an unmotivated day.",
+                "Deliberate effort compounds when the process is repeatable."
+            ] : [
+                "Separate adaptation from fatigue before adding volume.",
+                "Maintain the prescribed intensity to control training load.",
+                "Trend the work over weeks; don't overread one session.",
+                "Record what happened, not what you hoped happened.",
+                "Progress the stimulus only when execution stays stable.",
+                "Design training you can recover from and repeat."
+            ]
+            let options: [String]
+            switch tone {
+            case "direct": options = direct
+            case "rigorous": options = rigorous
+            default: options = quiet
+            }
             return options[day % options.count]
         case "scripture":
-            let options = ["1 Corinthians 9:24–27", "Hebrews 12:1–2",
-                           "Colossians 3:23", "James 1:12", "Proverbs 16:3"]
-            return options[day % options.count] + " · " + translation + " reference"
+            // ESV and LSB are referenced, not reproduced without a license.
+            let references = [
+                "1 Corinthians 9:24–27", "Hebrews 12:1–2",
+                "Colossians 3:23", "James 1:12", "Proverbs 16:3",
+                "2 Timothy 2:3–6", "Galatians 6:9", "Proverbs 24:10",
+                "1 Peter 5:8", "Psalm 90:12", "Ecclesiastes 9:10",
+                "Romans 5:3–5", "Philippians 3:13–14", "Proverbs 13:4"
+            ]
+            return references[day % references.count] + " · " + translation + " reference"
         case "custom":
             let text = custom.trimmingCharacters(in: .whitespacesAndNewlines)
             return text.isEmpty ? nil : text

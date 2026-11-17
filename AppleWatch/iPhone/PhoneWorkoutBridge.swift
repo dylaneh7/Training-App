@@ -19,6 +19,7 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
     private var cloudRecoveryHistory: [HCRecoveryDatum] = []
     private var tredictSnapshot = HCTredictSnapshot()
     @Published private(set) var movingWorkoutID: String?
+    @Published private(set) var completingWorkoutID: String?
     @Published private(set) var lastArchiveAt: Date?
     // Apple Health running results stay on device unless user elects to share them.
     private var importedHealthRuns: [HCProgressRun] = []
@@ -26,6 +27,7 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
     private var tredictScheduledRuns: [HCTredictPlannedRun] = []
     private var preferredTredictRuns: [String: String] = [:]
     private var manuallyCompletedRunKeys = Set<String>()
+    private var locallyCreatedRun: HCRunPlan?
     @Published private(set) var recoveryHistory: [HCRecoveryDatum] = []
     @Published private(set) var performanceHistory: [HCPerformanceSet] = []
     @Published private(set) var status = "Preparing Health Coach…"
@@ -133,6 +135,7 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
         preferredTredictRuns = read("imun-selected-tredict-plans.json") ?? [:]
         preferredTredictRunID = preferredTredictRuns[HCPlanBuilder.dateString(Date())]
         manuallyCompletedRunKeys = Set(read("imun-manually-completed-runs.json") ?? [String]())
+        locallyCreatedRun = read("imun-local-running-plan.json")
         uploadedIDs = Set(read("uploaded-watch-set-ids.json") ?? [])
         pendingEditedWorkout = read("pending-edited-workout.json")
         phoneSessionStartedAt = read("iphone-session-start.json")
@@ -257,7 +260,7 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
                     }
                     self.confirmedScheduleDate = dateText
                     self.workout = active
-                    self.runPlan = self.enrichedRunPlan(run)
+                    self.runPlan = self.enrichedRunPlan(self.preferredLocalRun(over: run))
                     self.plannedSessions = HCPlanBuilder.upcomingWithRotation(from: snapshot.planner)
                     self.cloudTrainingActivities = activities
                     self.mergeHistoricalSources()
@@ -335,7 +338,7 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
                         : baseline.map { self.smartTargets($0,
                                                 history: self.performanceHistory,
                                                 preserveExisting: published != nil) }
-                    self.runPlan = self.enrichedRunPlan(HCPlanBuilder.run(for: Date(), planner: snapshot.planner))
+                    self.runPlan = self.enrichedRunPlan(self.preferredLocalRun(over: HCPlanBuilder.run(for: Date(), planner: snapshot.planner)))
                     self.plannedSessions = HCPlanBuilder.upcomingWithRotation(from: snapshot.planner)
                     self.save(self.plannedSessions, name: "imun-planned-workouts.json")
                     self.confirmedScheduleDate = day
@@ -432,6 +435,36 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
         }
     }
 
+    /// Manual completion updates the authenticated calendar flag only.
+    /// This never inserts fake sets or recorded running performance.
+    func completePlannedWorkout(_ entry: HCPlannedSession) {
+        guard signedIn, completingWorkoutID == nil,
+              !entry.completed, UUID(uuidString: entry.id) != nil,
+              plannedSessions.contains(where: {
+                  $0.id == entry.id && $0.date == entry.date && !$0.completed
+              }) else {
+            status = "Choose a saved, unfinished calendar workout first."
+            return
+        }
+        completingWorkoutID = entry.id
+        status = "Confirming \(entry.title) completion in the calendar…"
+        Task {
+            do {
+                try await cloud.markPlannedWorkoutComplete(id: entry.id)
+                DispatchQueue.main.async {
+                    self.completingWorkoutID = nil
+                    self.status = "Confirmed \(entry.title) as completed in the calendar."
+                    self.refresh(date: Date())
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    self.completingWorkoutID = nil
+                    self.status = "Workout completion failed: " + error.localizedDescription
+                }
+            }
+        }
+    }
+
     func newWorkout(date: Date, title: String) {
         let day = HCPlanBuilder.dateString(date)
         let key = HCPlanBuilder.sessionKey(for:date)
@@ -450,6 +483,159 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
         status = "Workout saved locally; syncing to watch and cloud…"
         sendToWatch()
         retryPendingWorkout()
+    }
+
+    /// Edit the prescribed workout, not completed exercise records.
+    /// The same saveEditedWorkout pipeline persists offline, queues cloud
+    /// save and publishes the revised plan to iMun Watch.
+    @discardableResult
+    func applyCoachWorkoutEdit(_ edit: IMUNCoachWorkoutEdit) -> String? {
+        guard signedIn, let plan = workout,
+              plan.id == edit.workoutID,
+              plan.date == HCPlanBuilder.dateString(Date()),
+              !plan.isPreview,
+              !edit.expectedSignature.isEmpty,
+              plan.coachEditSignature == edit.expectedSignature else {
+            status = "Workout changed since Coach prepared the edit. Review the latest plan again."
+            return nil
+        }
+        guard (1...12).contains(edit.sets),
+              (1...30).contains(edit.repMin),
+              (edit.repMin...40).contains(edit.repMax),
+              (15...360).contains(edit.restSeconds),
+              edit.restSeconds.isMultiple(of: 15),
+              edit.suggestedWeightLb.map({ $0.isFinite &&
+                  (0...1500).contains($0) }) ?? true else {
+            status = "Review sets, reps, rest and any suggested weight before saving."
+            return nil
+        }
+        var exercises = plan.exercises
+        let located = edit.exerciseID.flatMap { id in
+            exercises.firstIndex(where: { $0.id == id })
+        }
+        let completed = completedSets(for: plan)
+        let hasLog = edit.exerciseID.map { id in
+            completed.contains(where: { $0.exerciseID == id })
+        } ?? false
+        let isActive = edit.exerciseID == phoneSetExerciseID &&
+                       phoneSetStartedAt != nil
+        let name = edit.newName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let updatedName = String(name.prefix(80))
+
+        switch edit.operation {
+        case .update:
+            guard let index = located else {
+                status = "Choose an exercise from the current workout."
+                return nil
+            }
+            let old = exercises[index]
+            let completedCount = completed.filter { $0.exerciseID == old.id }.count
+            guard edit.sets >= completedCount else {
+                status = "Cannot prescribe fewer sets than have already been recorded."
+                return nil
+            }
+            var revised = HCExercise(
+                id: old.id, name: old.name, originalName: old.originalName,
+                exerciseIndex: old.exerciseIndex,
+                prescribedSets: edit.sets, repMin: edit.repMin,
+                repMax: edit.repMax,
+                suggestedWeightLb: edit.suggestedWeightLb,
+                restSeconds: edit.restSeconds)
+            revised.instructions = old.instructions
+            exercises[index] = revised
+        case .add:
+            let nextIndex = (exercises.map(\.exerciseIndex).max() ?? -1) + 1
+            guard !updatedName.isEmpty, exercises.count < 35,
+                  nextIndex <= 40,
+                  !exercises.contains(where: {
+                      $0.name.localizedCaseInsensitiveCompare(updatedName) == .orderedSame
+                  }) else {
+                status = "Select a different exercise or check the plan's exercise limit."
+                return nil
+            }
+            var created = HCExercise(
+                id: UUID().uuidString, name: updatedName,
+                originalName: updatedName, exerciseIndex: nextIndex,
+                prescribedSets: edit.sets, repMin: edit.repMin,
+                repMax: edit.repMax,
+                suggestedWeightLb: edit.suggestedWeightLb,
+                restSeconds: edit.restSeconds)
+            created.instructions = edit.newInstructions
+            exercises.append(created)
+        case .replace:
+            guard let index = located, !hasLog, !isActive,
+                  !updatedName.isEmpty else {
+                status = "Choose an exercise with no completed or active sets to replace."
+                return nil
+            }
+            let old = exercises[index]
+            var replacement = HCExercise(
+                id: old.id, name: updatedName,
+                originalName: updatedName,
+                exerciseIndex: old.exerciseIndex,
+                prescribedSets: edit.sets, repMin: edit.repMin,
+                repMax: edit.repMax,
+                suggestedWeightLb: edit.suggestedWeightLb,
+                restSeconds: edit.restSeconds)
+            replacement.instructions = edit.newInstructions
+            exercises[index] = replacement
+        case .remove:
+            guard let index = located, !hasLog, !isActive else {
+                status = "Can't remove an exercise with completed or active sets."
+                return nil
+            }
+            exercises.remove(at: index)
+        case .moveUp, .moveDown:
+            guard let index = located else {
+                status = "Choose an exercise to reorder."
+                return nil
+            }
+            let next = index + (edit.operation == .moveUp ? -1 : 1)
+            guard exercises.indices.contains(next) else {
+                status = "The exercise is already at that end of the workout."
+                return nil
+            }
+            exercises.swapAt(index, next)
+        }
+
+        // The Watch and exercise editor both rely on exerciseIndex as well
+        // as array order. Keep them consistent after a move or removal while
+        // preserving stable exercise IDs and all historical logged sets.
+        if edit.operation == .moveUp || edit.operation == .moveDown ||
+           edit.operation == .remove {
+            exercises = exercises.enumerated().map { index, exercise in
+                var normalized = HCExercise(
+                    id: exercise.id, name: exercise.name,
+                    originalName: exercise.originalName, exerciseIndex: index,
+                    prescribedSets: exercise.prescribedSets,
+                    repMin: exercise.repMin, repMax: exercise.repMax,
+                    suggestedWeightLb: exercise.suggestedWeightLb,
+                    restSeconds: exercise.restSeconds)
+                normalized.instructions = exercise.instructions
+                return normalized
+            }
+        }
+
+        guard exercises != plan.exercises else {
+            status = "No prescription change to save."
+            return nil
+        }
+        let editedPlan = HCWorkout(
+            id: plan.id, date: plan.date, sessionKey: plan.sessionKey,
+            title: plan.title, exercises: exercises, isPreview: false)
+        saveEditedWorkout(editedPlan)
+        let label = edit.operation == .add ? updatedName :
+            (located.map { plan.exercises[$0].name } ?? "exercise")
+        let summary: String
+        switch edit.operation {
+        case .update: summary = "Updated \(label)'s sets, reps, rest and load targets"
+        case .add: summary = "Added \(label) to today's workout"
+        case .replace: summary = "Replaced \(label) with \(updatedName)"
+        case .remove: summary = "Removed \(label) from today's prescription"
+        case .moveUp: summary = "Moved \(label) earlier in the workout"
+        case .moveDown: summary = "Moved \(label) later in the workout"
+        }
+        return summary + ". The plan is saved locally and queued for Watch/cloud sync."
     }
 
     func retryPendingWorkout() {
@@ -477,6 +663,58 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
                 }
             }
         }
+    }
+
+    /// Create an opt-in prescribed run on an otherwise unscheduled day.
+    /// This is a local training instruction, not a fabricated HealthKit record.
+    @discardableResult
+    func createRunToday(title: String, minutes: Int,
+                        minimumBPM: Int? = nil, maximumBPM: Int? = nil) -> Bool {
+        let day = HCPlanBuilder.dateString(Date())
+        let sanitized = String(title.trimmingCharacters(in: .whitespacesAndNewlines).prefix(80))
+        guard signedIn, runPlan == nil, !sanitized.isEmpty,
+              (1...360).contains(minutes) else {
+            status = "To create a run, select an empty running day and enter 1–360 minutes."
+            return false
+        }
+        if minimumBPM != nil || maximumBPM != nil {
+            guard let minimumBPM, let maximumBPM,
+                  (35...230).contains(minimumBPM),
+                  (35...230).contains(maximumBPM),
+                  minimumBPM <= maximumBPM else {
+                status = "Enter a valid heart-rate range, or leave both targets off."
+                return false
+            }
+        }
+        let step = HCRunStep(title: "Run", phase: "work",
+                             seconds: Double(minutes) * 60,
+                             distanceMeters: nil, minBPM: minimumBPM,
+                             maxBPM: maximumBPM)
+        let created = HCRunPlan(
+            id: "imun-local-" + UUID().uuidString,
+            date: day, title: sanitized, notes: "Created in iMun on iPhone",
+            targetDistanceMiles: nil, isCompleted: false,
+            structuredSteps: [step])
+        locallyCreatedRun = created
+        // An explicit custom run replaces any previous Tredict preference
+        // for today; don't let a later provider refresh reinterpret it.
+        preferredTredictRuns.removeValue(forKey: day)
+        preferredTredictRunID = nil
+        save(preferredTredictRuns, name: "imun-selected-tredict-plans.json")
+        save(created, name: "imun-local-running-plan.json")
+        runPlan = created
+        mergeRunHistory()
+        status = "Created \(minutes)-minute \(sanitized)."
+        // The same plan is sent over both working Build 30 delivery routes.
+        confirmedScheduleDate = day
+        sendToWatch(forceQueue: true)
+        return true
+    }
+
+    private func preferredLocalRun(over calendar: HCRunPlan?) -> HCRunPlan? {
+        guard calendar == nil, let local = locallyCreatedRun,
+              local.date == HCPlanBuilder.dateString(Date()) else { return calendar }
+        return local
     }
 
     /// The iPhone's current running plan is the same plan sent to iMun Watch.
@@ -520,6 +758,10 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
 
     private func enrichedRunPlan(_ original: HCRunPlan?) -> HCRunPlan? {
         let today = HCPlanBuilder.dateString(Date())
+        if let original, original.id.hasPrefix("imun-local-"),
+           preferredTredictRuns[today] == nil {
+            return original
+        }
         let candidates = tredictScheduledRuns.filter {
             $0.date == today && $0.unsupportedReason == nil && !$0.steps.isEmpty
         }
@@ -708,12 +950,36 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
         }
     }
 
+    /// Action proposal only. Workout data stays on the signed-in user's
+    /// authenticated route, and no recovery metrics are sent to this mode.
+    func classifyIMUNCoachAction(request: String) async throws -> String {
+        guard signedIn else { throw HCCloudError.malformedResponse }
+        let today = HCPlanBuilder.dateString(Date())
+        var available: [String] = ["Today: " + today]
+        if let plan = workout, plan.date == today {
+            available.append("Current strength workout: " + plan.title)
+            available.append("Edit permissions: prescribed exercise targets only")
+            for exercise in plan.exercises.prefix(35) {
+                available.append(
+                    "Exercise: " + exercise.name +
+                    ", \(exercise.prescribedSets) sets of \(exercise.repMin)-\(exercise.repMax) reps" +
+                    ", rest \(exercise.restSeconds) sec")
+            }
+        } else { available.append("No editable strength plan loaded for today") }
+        if let run = runPlan, run.date == today {
+            available.append("Running plan: " + run.title)
+        }
+        return try await cloud.classifyIMUNCoachAction(
+            request: request, context: available.joined(separator: "\n"))
+    }
+
     /// No AI context is uploaded until a user explicitly taps Ask Coach.
     /// A Health/Recovery snapshot is transmitted only with the extra opt-in.
     func askIMUNCoach(question: String, shareRecovery: Bool,
                       recentConversation: String = "") async throws -> String {
         let today = HCPlanBuilder.dateString(Date())
         var lines = ["Today: \(today)", "Source: IMUN training calendar and recorded workout history"]
+        lines.append("Available iMun Coach controls require confirmation: edit today's prescribed strength exercises, create/rename/reschedule workouts, confirm completion, sync Watch, change training/appearance/motivation settings, and navigate app sections. These are app actions, never assumed completed by a chat reply.")
         if let lift = workout, lift.date == today {
             lines.append("Planned weightlifting: \(lift.title), \(lift.exercises.count) exercises, \(lift.prescribedSetCount) sets")
         } else {

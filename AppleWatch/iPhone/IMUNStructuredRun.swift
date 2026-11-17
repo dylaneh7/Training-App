@@ -53,6 +53,33 @@ private struct IMUNRunDraft: Codable, Equatable {
     var segments: [IMUNRunSegment]
 
     static func initial(for plan: HCRunPlan) -> Self {
+        // Prefer actual typed prescriptions from iMun/Tredict. Never turn
+        // a known interval workout into an open/free run on Apple Workout.
+        if let prescribed = plan.structuredSteps, !prescribed.isEmpty {
+            let segments: [IMUNRunSegment] = prescribed.compactMap { item in
+                guard let phase = IMUNRunPhase(rawValue: item.phase) else { return nil }
+                var value = IMUNRunSegment.new(phase)
+                value.label = item.title
+                if let seconds = item.seconds, seconds > 0 {
+                    value.goal = .minutes
+                    value.amount = seconds / 60.0
+                } else if let meters = item.distanceMeters, meters > 0 {
+                    value.goal = .miles
+                    value.amount = meters / 1609.344
+                } else {
+                    value.goal = .open
+                }
+                if let low = item.minBPM, let high = item.maxBPM {
+                    value.hasHeartRate = true
+                    value.minBPM = low
+                    value.maxBPM = high
+                }
+                return value
+            }
+            if segments.count == prescribed.count {
+                return .init(plannerID: plan.id, date: plan.date, segments: segments)
+            }
+        }
         // Don't invent Garmin intervals from free-form calendar notes.
         // Preserve the distance prescribed by the existing planner when known.
         var base = IMUNRunSegment.new(.work)
