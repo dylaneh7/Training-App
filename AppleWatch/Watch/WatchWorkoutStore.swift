@@ -1126,7 +1126,16 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
     }
 
     func sessionReachabilityDidChange(_ session: WCSession) {
-        DispatchQueue.main.async { self.checkPhoneConnection() }
+        DispatchQueue.main.async {
+            self.checkPhoneConnection()
+            guard session.activationState == .activated, session.isReachable else { return }
+            // Reconcile both sides after a temporary Bluetooth/phone disconnect.
+            // UserInfo is durable, and sendPending avoids duplicating an in-flight ID.
+            self.sendPending(forceResend: true)
+            // A Watch may have an old plan even though iPhone already published
+            // today's workout; request the current date-scoped snapshot again.
+            self.requestCurrentSchedule()
+        }
     }
 
     func session(_ session: WCSession, didReceiveApplicationContext context: [String: Any]) {
