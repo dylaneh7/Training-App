@@ -4472,6 +4472,28 @@ private struct PremiumCoachConversation: View {
         persist()
     }
 
+    // This is added to the remote chat ONLY after the athlete enables the
+    // separately visible Health-sharing toggle and actively taps Send.
+    private var eitanSharedCoachContext: String {
+        guard let snapshot = coach.eitanSnapshot,
+              snapshot.date == HCPlanBuilder.dateString(Date()),
+              (UserDefaults.standard.object(forKey: "hcEitanEnabled") as? Bool ?? true),
+              (UserDefaults.standard.object(forKey: "hcEitanUseHealth") as? Bool ?? true),
+              (UserDefaults.standard.object(forKey: "hcEitanCoachingEnabled") as? Bool ?? true)
+        else { return "" }
+        let observations = snapshot.factors.map {
+            "\($0.title): \($0.value)/100 (\($0.detail))"
+        }.joined(separator: "; ")
+        return "\nEITAN observational body-wellness score: " +
+            (snapshot.value.map(String.init) ?? "insufficient data") +
+            "/100. Consecutive lower-score days: \(snapshot.consecutiveLowDays). " +
+            "Coverage: \(snapshot.coverage). Factors: \(observations). " +
+            "Suggestions: \(snapshot.coaching). " +
+            "Suggest graduated training changes, easy activity, adequate sleep or rest when warranted; " +
+            "do not automatically change the plan or promise injury prevention. " +
+            "EITAN is not a validated clinical readiness or illness-risk model."
+    }
+
     private func send() {
         let questionText = question.trimmingCharacters(in: .whitespacesAndNewlines)
         guard canSend else { return }
@@ -4527,10 +4549,11 @@ private struct PremiumCoachConversation: View {
                     recentConversation: history,
                     screenContext: launchContext,
                     healthSnapshot: shareRecovery ?
-                        appleHealth.isaiahHealthSnapshot(
+                        (appleHealth.isaiahHealthSnapshot(
                             selectedCategory: selectedHealthCategory,
                             selectedMetric: selectedHealthMetric,
-                            question: questionText) : "")
+                            question: questionText) +
+                         eitanSharedCoachContext) : "")
                 await MainActor.run {
                     turns.append(IMUNCoachTurn(role: "assistant", text: reply))
                     isSending = false
