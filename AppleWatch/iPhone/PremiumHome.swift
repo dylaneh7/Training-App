@@ -2262,6 +2262,7 @@ private struct PremiumRecoveryPage: View {
     @State private var showHistory = false
     @State private var showRawReadings = false
     @AppStorage("hcSelectedHealthCategory") private var selectedHealthCategory = "Overview"
+    @AppStorage("hcSelectedHealthMetric") private var selectedHealthMetric = ""
     @State private var metricSearch = ""
     @State private var expandedTrends: Set<String> = []
     // Trends and baselines are expensive; only rebuild when source records
@@ -2604,6 +2605,10 @@ private struct PremiumRecoveryPage: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbarBackground(HCDesign.canvas, for: .navigationBar)
         .toolbarBackground(.visible, for: .navigationBar)
+        .onChange(of: selectedHealthCategory) { _, _ in
+            // Avoid describing a stale metric after switching health sections.
+            selectedHealthMetric = ""
+        }
         .onAppear {
             rebuildSignalCache()
             appleHealth.refreshIfAuthorized()
