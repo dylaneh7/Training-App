@@ -45,6 +45,15 @@ struct PremiumHomeView: View {
     private let scheduleRefresh = Timer.publish(every: 60, on: .main, in: .common).autoconnect()
     private let progressRefresh = Timer.publish(every: 15, on: .main, in: .common).autoconnect()
 
+    // A single observer covers all styling tokens. Chaining a dozen
+    // separate .onChange modifiers exceeded SwiftUI's type-check budget.
+    private var designSignature: String {
+        [designPreset, designMode, String(customPalette),
+         designAccentHex, designBackgroundHex, designSurfaceHex,
+         designTextHex, designCardShape, designFont,
+         String(designCustomGeometry)].joined(separator: "|")
+    }
+
     var body: some View {
         TabView {
             NavigationStack { PremiumTrainingPage() }
@@ -92,16 +101,7 @@ struct PremiumHomeView: View {
             configureTabAppearance()
             coach.sendToWatch()
         }
-        .onChange(of: designPreset) { _, _ in configureTabAppearance() }
-        .onChange(of: designMode) { _, _ in configureTabAppearance() }
-        .onChange(of: customPalette) { _, _ in configureTabAppearance() }
-        .onChange(of: designAccentHex) { _, _ in configureTabAppearance() }
-        .onChange(of: designBackgroundHex) { _, _ in configureTabAppearance() }
-        .onChange(of: designSurfaceHex) { _, _ in configureTabAppearance() }
-        .onChange(of: designTextHex) { _, _ in configureTabAppearance() }
-        .onChange(of: designCardShape) { _, _ in configureTabAppearance() }
-        .onChange(of: designFont) { _, _ in configureTabAppearance() }
-        .onChange(of: designCustomGeometry) { _, _ in configureTabAppearance() }
+        .onChange(of: designSignature) { _, _ in configureTabAppearance() }
         .onAppear {
             if coach.signedIn && coach.workout == nil { coach.refresh(date: Date()) }
             if coach.signedIn { coach.refreshCloudProgress() }
