@@ -391,3 +391,89 @@ final class HCTredictWatchPlanSync: ObservableObject {
         return true
     }
 }
+
+
+/// Training-tab surface for selecting exactly which Tredict sessions to add.
+/// Multiple parallel Tredict plans can overlap, so nothing is auto-selected.
+struct IMUNTredictWorkoutCard: View {
+    @StateObject private var calendar = HCTredictWatchPlanSync()
+    @State private var selected = Set<String>()
+
+    var body: some View {
+        HCCard(accent: HCDesign.aqua) {
+            VStack(alignment: .leading, spacing: 13) {
+                HCAccentTag(title: "TREDICT → APPLE WORKOUT", color: HCDesign.aqua)
+                Text("Send your actual running plan")
+                    .font(.system(size: 18, weight: .bold, design: .rounded))
+                Text("Choose the runs you want in Apple's Workout app. Your interval timings and exact heart-rate ranges are preserved.")
+                    .font(.subheadline)
+                    .foregroundStyle(HCDesign.secondary)
+                HStack {
+                    HCOutlineButton(title: calendar.loading ? "Loading…" : "Load Tredict runs",
+                                    icon: "arrow.clockwise") {
+                        calendar.refresh()
+                    }
+                    .disabled(calendar.loading || calendar.sending)
+                    Spacer()
+                    Link(destination: URL(string: "https://www.tredict.com/app/training")!) {
+                        Image(systemName: "arrow.up.right.square")
+                        Text("Calendar")
+                    }
+                    .font(.caption)
+                }
+                Text(calendar.status)
+                    .font(.caption)
+                    .foregroundStyle(HCDesign.secondary)
+                if !calendar.connected {
+                    Text("Connect your Tredict Personal API token under Settings first. Your token stays in iPhone Keychain.")
+                        .font(.caption2)
+                        .foregroundStyle(HCDesign.secondary)
+                }
+                ForEach(calendar.runs) { run in
+                    VStack(alignment: .leading, spacing: 7) {
+                        Toggle(isOn: Binding(
+                            get: { selected.contains(run.id) },
+                            set: { enabled in
+                                if enabled { selected.insert(run.id) }
+                                else { selected.remove(run.id) }
+                            })) {
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(run.date).font(HCDesign.label(11))
+                                    .foregroundStyle(HCDesign.aqua)
+                                Text(run.title)
+                                    .font(.system(size: 15, weight: .semibold))
+                            }
+                        }
+                        .disabled(!run.canSend || calendar.sending)
+                        if run.hasExecutedActivity {
+                            Text("Completed in Tredict — not sent again.")
+                                .font(.caption2).foregroundStyle(HCDesign.secondary)
+                        } else if let problem = run.unsupportedReason {
+                            Text("Requires review: \(problem)")
+                                .font(.caption2).foregroundStyle(.orange)
+                        } else {
+                            Text(run.detail)
+                                .font(.caption2).foregroundStyle(HCDesign.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                    .padding(.vertical, 7)
+                }
+                if !calendar.runs.isEmpty {
+                    HCFilledButton(title: calendar.sending ? "SENDING…" : "SEND SELECTED RUNS",
+                                   icon: "applewatch", tint: HCDesign.aqua,
+                                   disabled: selected.isEmpty || calendar.sending) {
+                        calendar.sendSelected(selected)
+                    }
+                }
+                Text("Only the selected workouts are scheduled. Sending is not completion; completed runs are imported separately through Apple Health.")
+                    .font(.caption2).foregroundStyle(HCDesign.secondary)
+            }
+        }
+        .onAppear {
+            if calendar.connected && calendar.runs.isEmpty {
+                calendar.refresh()
+            }
+        }
+    }
+}
