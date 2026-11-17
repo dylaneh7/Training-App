@@ -1031,19 +1031,21 @@ enum IMUNEitanWellnessEngine {
                 streak += 1
             }
         }
-        let message = HCEitanSnapshot.advice(for: todayResult.score, streak: streak)
-        return HCEitanSnapshot(
+        let coachingPlan = IMUNEitanTrainingCoach.evaluate(
+            today: today, coach: coach, health: health,
+            preferredSource: preferredSource, wellness: todayResult.score,
+            lowDays: streak)
+        var result = HCEitanSnapshot(
             date: HCPlanBuilder.dateString(today),
             value: todayResult.score,
             factors: todayResult.factors,
-            status: todayResult.score == nil ? "Building your personal baseline" :
-                (streak >= 3 ? "Recovery deserves attention" :
-                    todayResult.score! < 60 ? "Consider a lighter day" :
-                    todayResult.score! < 75 ? "Stay attentive to recovery" :
-                    "Your trends look steady"),
-            coaching: message, consecutiveLowDays: streak,
+            status: todayResult.score == nil
+                ? "Building your personal baseline" : coachingPlan.title,
+            coaching: coachingPlan.message, consecutiveLowDays: streak,
             sourceCount: todayResult.sourceCount,
             coverage: todayResult.coverage)
+        result.coachingPlan = coachingPlan
+        return result
     }
 
     private static func assess(date: Date, samples: [Reading],
@@ -1278,6 +1280,121 @@ enum IMUNEitanWellnessEngine {
             "At least two recent wellness signals and five historical readings for a baseline are required"
         return Assessment(score: value, factors: parts,
                           sourceCount: sources.count, coverage: coverage)
+    }
+}
+
+/// Longitudinal training context: record training frequency, observed hard
+/// sessions, and repeated short sleep without pretending a single biomarker
+/// predicts readiness or overtraining. No Health data is uploaded here.
+private enum IMUNEitanTrainingCoach {
+    private struct SleepNight {
+        let source: String
+        let date: String
+        let hours: Double
+    }
+
+    static func evaluate(today: Date, coach: PhoneWorkoutBridge,
+                         health: HCAppleHealthReader, preferredSource: String,
+                         wellness: Int?, lowDays: Int) -> HCEitanCoachingPlan {
+        let cal = Calendar.current
+        func dateKey(_ offset: Int) -> String {
+            HCPlanBuilder.dateString(
+                cal.date(byAdding: .day, value: offset, to: today) ?? today)
+        }
+        let todayKey = dateKey(0)
+        let start7 = dateKey(-6)
+        let start28 = dateKey(-27)
+
+        // Distinct recorded dates; an absent app log does not demonstrate
+        // actual rest. Workout or run imports from two devices count once.
+        let recordedDays = Set(
+            coach.loggedSets.map(\.workoutDate) +
+            coach.cloudRecordedSets.map(\.workoutDate) +
+            coach.runHistory.map(\.date) +
+            coach.completedWatchRuns.map {
+                HCPlanBuilder.dateString($0.startedAt)
+            } +
+            coach.trainingActivities.map(\.date)
+        ).filter { $0 >= start28 && $0 <= todayKey }
+        let weekDays = recordedDays.filter { $0 >= start7 }.count
+        // Today's planned workout is not treated as completed.
+        let latestIndex = recordedDays.contains(todayKey) ? 0 : -1
+        var streak = 0
+        for offset in (0..<21).map({ latestIndex - $0 }) {
+            if recordedDays.contains(dateKey(offset)) { streak += 1 }
+            else { break }
+        }
+
+        // RIR and recorded session-RPE are effort evidence, not interchangeable
+        // with daily step totals, calorie counts, or exercise duration.
+        let allSets = Dictionary(grouping:
+            (coach.loggedSets + coach.cloudRecordedSets).filter {
+                $0.workoutDate >= start7 && $0.workoutDate <= todayKey
+            }, by: \.id).compactMap { $0.value.first }
+        var hardDayDates = Set(allSets.compactMap { row -> String? in
+            guard let rir = row.rir, rir.isFinite, rir >= 0 && rir <= 1
+            else { return nil }
+            return row.workoutDate
+        })
+        for item in coach.trainingActivities {
+            guard item.date >= start7 && item.date <= todayKey,
+                  let exertion = item.perceivedEffort,
+                  exertion.isFinite && exertion >= 7 && exertion <= 10 else {
+                continue
+            }
+            hardDayDates.insert(item.date)
+        }
+        let hardDays = hardDayDates.count
+
+        // Choose one consistent provider and day per night. HRV SDNN/RMSSD
+        // remain separate in the EITAN wellness calculation.
+        var raw: [SleepNight] = health.metricHistory.compactMap { item in
+            guard item.name == "Total asleep", item.value >= 2,
+                  item.value <= 15, item.value.isFinite,
+                  item.date >= start7, item.date <= todayKey else { return nil }
+            return SleepNight(source: item.source, date: item.date,
+                              hours: item.value)
+        }
+        for reading in coach.recoveryHistory {
+            guard reading.date >= start7 && reading.date <= todayKey,
+                  let seconds = reading.sleepSeconds,
+                  seconds.isFinite, seconds >= 7200, seconds <= 54000 else {
+                continue
+            }
+            raw.append(SleepNight(source: reading.source, date: reading.date,
+                                  hours: seconds / 3600))
+        }
+        if preferredSource != "Auto" {
+            raw = raw.filter {
+                $0.source.localizedCaseInsensitiveContains(preferredSource)
+            }
+        }
+        let grouped = Dictionary(grouping: raw, by: \.source)
+        let selected = grouped.values.sorted { a, b in
+            let aDays = Set(a.map(\.date))
+            let bDays = Set(b.map(\.date))
+            if aDays.count != bDays.count { return aDays.count > bDays.count }
+            return (a.map(\.date).max() ?? "") > (b.map(\.date).max() ?? "")
+        }.first ?? []
+        let perDay = Dictionary(grouping: selected, by: \.date)
+        let nights = perDay.compactMap { _, readings -> Double? in
+            let values = readings.map(\.hours).sorted()
+            guard !values.isEmpty else { return nil }
+            let center = values.count / 2
+            return values.count.isMultiple(of: 2) ?
+                (values[center - 1] + values[center]) / 2 : values[center]
+        }
+        let shortSleep = nights.count >= 4 ?
+            nights.filter { $0 < 7 }.count : nil
+
+        let style = UserDefaults.standard.string(forKey: "hcEitanCoachStyle")
+            ?? "driven"
+        return HCEitanCoachingPolicy.evaluate(
+            wellness: wellness, lowDays: lowDays,
+            streak: streak, trainingDays: weekDays,
+            hardDays: hardDays, shortSleepNights: shortSleep,
+            sleepObservations: nights.count,
+            checkIn: coach.todayEitanCheckIn, style: style)
     }
 }
 

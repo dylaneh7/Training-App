@@ -32,6 +32,10 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
     private var locallyCreatedRun: HCRunPlan?
     @Published private(set) var recoveryHistory: [HCRecoveryDatum] = []
     @Published private(set) var eitanSnapshot: HCEitanSnapshot?
+    @Published private(set) var eitanCheckIns: [HCEitanDailyCheckIn] = []
+    var todayEitanCheckIn: HCEitanDailyCheckIn? {
+        eitanCheckIns.first { $0.date == HCPlanBuilder.dateString(Date()) }
+    }
     @Published private(set) var eitanWatchSyncStatus = "EITAN has not synced with Watch yet"
     @Published private(set) var eitanWatchAcknowledgedAt: Date?
     private var lastEitanPacketStamp: TimeInterval = 0
@@ -153,6 +157,7 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
         uploadedUndoIDs = Set(read("imun-uploaded-undo-ids.json") ?? [])
         lastArchiveAt = read("imun-source-archive-date.json")
         plannedSessions = read("imun-planned-workouts.json") ?? []
+        eitanCheckIns = read("imun-eitan-check-ins.json") ?? []
         cloudTrainingActivities = read("imun-training-activity-history.json") ?? []
         trainingActivities = cloudTrainingActivities
         importedHealthRuns = read("apple-health-imported-runs.json") ?? []
@@ -902,6 +907,25 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
         recoveryHistory = combined
     }
 
+    /// Store subjective athlete feedback privately for up to 90 days. Missing
+    /// check-ins are unknown, never fabricated as a good or bad recovery day.
+    func recordEitanCheckIn(energy: Int, soreness: Int, stress: Int,
+                            motivation: Int, painOrIllness: Bool) {
+        let today = HCPlanBuilder.dateString(Date())
+        let item = HCEitanDailyCheckIn(
+            date: today, energy: min(5, max(1, energy)),
+            soreness: min(5, max(1, soreness)),
+            stress: min(5, max(1, stress)),
+            motivation: min(5, max(1, motivation)),
+            painOrIllness: painOrIllness)
+        let cutoff = HCPlanBuilder.dateString(
+            Calendar.current.date(byAdding: .day, value: -90, to: Date()) ?? Date())
+        eitanCheckIns = ([item] + eitanCheckIns.filter {
+            $0.date != today && $0.date >= cutoff
+        }).sorted { $0.date > $1.date }
+        save(eitanCheckIns, name: "imun-eitan-check-ins.json")
+    }
+
     /// Recompute locally from authorized data; send only a compact summary
     /// to the paired Watch. Keep existing workout reconciliation untouched.
     func updateEitan(_ snapshot: HCEitanSnapshot?) {
@@ -1025,6 +1049,16 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
                          String(screenContext.prefix(600)))
         }
         lines.append("Available iMun Coach controls require confirmation: edit today's prescribed strength exercises, create/rename/reschedule workouts, confirm completion, sync Watch, change training/appearance/motivation settings, and navigate app sections. These are app actions, never assumed completed by a chat reply.")
+        let coachingStyle = UserDefaults.standard.string(
+            forKey: "hcEitanCoachStyle") ?? "driven"
+        let coachingOn = UserDefaults.standard.object(
+            forKey: "hcEitanCoachingEnabled") as? Bool ?? true
+        if coachingOn {
+            lines.append("IsAIah coaching approach: " + coachingStyle +
+                ". You are a supportive but demanding training partner. Distinguish body-wellness trends from the decision to train. Never tell the athlete to rest solely because of one poor night of sleep or one isolated HRV reading. If technique and warm-up effort support progression, encourage a deliberate challenge. Adjust lifting using measured reps/RIR and running using recorded effort, duration and pace; no fabricated exertion or arbitrary goals. Persistent high workload, repeated sleep restriction, soreness, illness, pain, and performance decline warrant a recovery or plan-review conversation. Do not reward sleep loss, promise next-day catch-up recovery, diagnose overtraining, impose workouts, or make plan changes without confirmation.")
+        } else {
+            lines.append("Adaptive EITAN coaching is disabled. Answer training requests normally without personalized wellness nudges.")
+        }
         if let lift = workout, lift.date == today {
             lines.append("Planned weightlifting: \(lift.title), \(lift.exercises.count) exercises, \(lift.prescribedSetCount) sets")
         } else {

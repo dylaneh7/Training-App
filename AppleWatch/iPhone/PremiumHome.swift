@@ -239,7 +239,8 @@ private struct IMUNEitanTodayCard: View {
                                         .font(.system(size: 12))
                                         .foregroundStyle(HCDesign.ink)
                                         .fixedSize(horizontal: false, vertical: true)
-                                    if snapshot.value != nil {
+                                    if snapshot.value != nil ||
+                                       snapshot.coachingPlan?.needsConversation == true {
                                         Button {
                                             openCoach()
                                         } label: {
@@ -265,6 +266,33 @@ private struct IMUNEitanTodayCard: View {
                         Text("Health measurements are excluded from EITAN. Training momentum remains available on Apple Watch.")
                             .font(.system(size: 12))
                             .foregroundStyle(HCDesign.secondary)
+                    }
+                    if coachingEnabled {
+                        if let strategy = coach.eitanSnapshot?.coachingPlan, healthEnabled {
+                            HStack(spacing: 8) {
+                                Image(systemName: strategy.mode == "challenge"
+                                      ? "bolt.fill" : strategy.mode == "adapt"
+                                      ? "slider.horizontal.3" : "moon.stars.fill")
+                                Text("IsAIah · " + strategy.title)
+                                    .font(.system(size: 13, weight: .semibold))
+                                Spacer()
+                                Text(strategy.confidence + " evidence")
+                                    .font(.system(size: 10))
+                                    .foregroundStyle(HCDesign.secondary)
+                            }
+                            .foregroundStyle(HCDesign.electric)
+                            Text("\(strategy.recordedTrainingStreak) consecutive recorded training days · \(strategy.recentHardDays) high-effort days this week")
+                                .font(.system(size: 11))
+                                .foregroundStyle(HCDesign.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                            ForEach(strategy.cues.prefix(2), id: \.self) { cue in
+                                Label(cue, systemImage: "circle.small.fill")
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(HCDesign.ink)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                        }
+                        IMUNEitanCheckInEditor()
                     }
                     Divider().overlay(HCDesign.outline)
                     HStack(spacing: 10) {
@@ -293,6 +321,66 @@ private struct IMUNEitanTodayCard: View {
                         .foregroundStyle(HCDesign.secondary)
                 }
             }
+        }
+    }
+}
+
+/// Brief private athlete check-in: complements physiological monitoring.
+private struct IMUNEitanCheckInEditor: View {
+    @EnvironmentObject private var coach: PhoneWorkoutBridge
+    @State private var expanded = false
+    @State private var energy = 3
+    @State private var soreness = 2
+    @State private var stress = 2
+    @State private var motivation = 3
+    @State private var painOrIllness = false
+
+    var body: some View {
+        DisclosureGroup(isExpanded: $expanded) {
+            VStack(alignment: .leading, spacing: 9) {
+                Text("Tell IsAIah how training actually feels. All entries stay on-device until you explicitly choose to share Health details.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(HCDesign.secondary)
+                Stepper("Energy \(energy)/5", value: $energy, in: 1...5)
+                Stepper("Soreness \(soreness)/5", value: $soreness, in: 1...5)
+                Stepper("Stress \(stress)/5", value: $stress, in: 1...5)
+                Stepper("Motivation \(motivation)/5", value: $motivation, in: 1...5)
+                Toggle("Pain or illness affecting training", isOn: $painOrIllness)
+                    .tint(HCDesign.electric)
+                Button {
+                    coach.recordEitanCheckIn(
+                        energy: energy, soreness: soreness, stress: stress,
+                        motivation: motivation, painOrIllness: painOrIllness)
+                    expanded = false
+                } label: {
+                    Label("Save today's check-in", systemImage: "checkmark")
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(HCDesign.electric)
+            }
+            .font(.system(size: 12))
+            .padding(.top, 8)
+        } label: {
+            HStack {
+                Image(systemName: "figure.mind.and.body")
+                Text(coach.todayEitanCheckIn == nil
+                    ? "How are you feeling today?" : "Update today's check-in")
+                    .font(.system(size: 12, weight: .semibold))
+                Spacer()
+                if coach.todayEitanCheckIn != nil {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundStyle(HCDesign.electric)
+                }
+            }
+        }
+        .tint(HCDesign.electric)
+        .onAppear {
+            guard let entry = coach.todayEitanCheckIn else { return }
+            energy = entry.energy
+            soreness = entry.soreness
+            stress = entry.stress
+            motivation = entry.motivation
+            painOrIllness = entry.painOrIllness
         }
     }
 }
@@ -419,6 +507,7 @@ struct PremiumHomeView: View {
     @AppStorage("hcEitanEnabled") private var eitanEnabled = true
     @AppStorage("hcEitanUseHealth") private var eitanUseHealth = true
     @AppStorage("hcEitanCoachingEnabled") private var eitanCoachingEnabled = true
+    @AppStorage("hcEitanCoachStyle") private var eitanCoachStyle = "driven"
     @AppStorage("hcPreferredHealthSource") private var eitanSource = "Auto"
     @Environment(\.scenePhase) private var scenePhase
     private let scheduleRefresh = Timer.publish(every: 60, on: .main, in: .common).autoconnect()
@@ -581,6 +670,10 @@ struct PremiumHomeView: View {
         .onReceive(coach.$trainingActivities) { _ in
             DispatchQueue.main.async { updateEitan() }
         }
+        .onReceive(coach.$eitanCheckIns) { _ in
+            DispatchQueue.main.async { updateEitan() }
+        }
+        .onChange(of: eitanCoachStyle) { _, _ in updateEitan() }
         .onChange(of: eitanEnabled) { _, _ in
             updateEitan()
             coach.sendEitanToWatch(forceQueue: true)
@@ -4528,6 +4621,17 @@ private struct PremiumCoachConversation: View {
             "/100. Consecutive lower-score days: \(snapshot.consecutiveLowDays). " +
             "Coverage: \(snapshot.coverage). Factors: \(observations). " +
             "Suggestions: \(snapshot.coaching). " +
+            (snapshot.coachingPlan.map { plan in
+                "IsAIah training approach: \(plan.mode), \(plan.title). " +
+                "Observed: \(plan.recordedTrainingStreak) consecutive recorded training days, " +
+                "\(plan.recentHardDays) high-effort days in seven days, " +
+                "\(plan.shortSleepNights.map(String.init) ?? "insufficient data") short-sleep nights across " +
+                "\(plan.observedSleepNights) observed nights. Evidence confidence: \(plan.confidence). " +
+                "Reasons: \(plan.reasons.joined(separator: "; ")). " +
+                "Training suggestions: \(plan.cues.joined(separator: "; ")). "
+            } ?? "") +
+            "A single poor night does not require rest; adapt to warm-up feel, RIR and actual performance. " +
+            "Sustained strain matters more than any one biomarker. " +
             "Suggest graduated training changes, easy activity, adequate sleep or rest when warranted; " +
             "do not automatically change the plan or promise injury prevention. " +
             "EITAN is not a validated clinical readiness or illness-risk model."
@@ -4620,6 +4724,7 @@ private struct PremiumSettingsPage: View {
     @AppStorage("hcEitanEnabled") private var eitanEnabled = true
     @AppStorage("hcEitanUseHealth") private var eitanUseHealth = true
     @AppStorage("hcEitanCoachingEnabled") private var eitanCoachingEnabled = true
+    @AppStorage("hcEitanCoachStyle") private var eitanCoachStyle = "driven"
     @EnvironmentObject private var tredict: HCTredictImporter
     @State private var tredictToken = ""
     @AppStorage("hcAggressiveProgression") private var aggressive = true
@@ -4724,12 +4829,23 @@ private struct PremiumSettingsPage: View {
                                 VStack(alignment: .leading, spacing: 3) {
                                     Text("Adaptive IsAIah suggestions")
                                         .font(.system(size: 14, weight: .semibold))
-                                    Text("Offer recovery or progression guidance. Three consecutive lower-wellness days trigger an optional plan-review prompt. No automatic workout edits.")
+                                    Text("Challenge when appropriate, adapt by RIR and effort, and discuss recovery after accumulating strain. No automatic workout edits.")
                                         .font(.system(size: 11))
                                         .foregroundStyle(HCDesign.secondary)
                                 }
                             }
                             .tint(HCDesign.electric)
+                            if eitanCoachingEnabled {
+                                Picker("IsAIah coaching approach", selection: $eitanCoachStyle) {
+                                    Text("Driven").tag("driven")
+                                    Text("Balanced").tag("balanced")
+                                    Text("Recovery-first").tag("cautious")
+                                }
+                                .tint(HCDesign.electric)
+                                Text("Style changes coaching tone, not the safety signals or your control of workout edits.")
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(HCDesign.secondary)
+                            }
                             Text("Score calculations stay on your devices. IsAIah receives Health readings only if you separately opt in when sending a chat message.")
                                 .font(.system(size: 11))
                                 .foregroundStyle(HCDesign.secondary)
