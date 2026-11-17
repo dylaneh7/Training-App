@@ -68,7 +68,7 @@ export default {
       "Allowed actions: editStrength, createStrength, createRun, renameStrength, moveWorkout, completeRun, completeScheduledWorkout, syncWatch, setTheme, selectTraining, openTab, setMotivation, setRestDuration, setWatchHaptics, setRunVoiceCues, setRunAutoLaps, none.",
       "If an action isn't on that list, if user only seeks advice, or if input is ambiguous, use action none.",
       "For editStrength you may include operation: update, add, replace, remove, moveUp, moveDown.",
-      "Optional editStrength fields: exerciseName string, sets integer 1-12, repMin integer 1-30, repMax integer 1-40, restSeconds integer 15-360 in multiples of 15, weightLb finite number 0-1500.",
+      "Optional editStrength fields: exerciseName string (current exercise to change), replacementName string (new exercise name when replacing), sets integer 1-12, repMin integer 1-30, repMax integer 1-40, restSeconds integer 15-360 in multiples of 15, weightLb finite number 0-1500.",
       "For createRun you may include minutes integer 1-360. Optional parameter string is for allowed settings and display names.",
       "Theme values: heritage, retro, techno, coast, fieldNotes, discipline, atelier, rally.",
       "Tab values: training, progress, health, coach, settings; sport values: run, weightlifting.",
