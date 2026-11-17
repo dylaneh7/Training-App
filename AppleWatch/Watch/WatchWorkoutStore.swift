@@ -43,6 +43,9 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
     @Published private(set) var runHistory: [HCProgressRun] = []
     @Published private(set) var recoverySummary: HCRecoveryDatum?
     @Published private(set) var sets: [HCLoggedSet] = []
+    // Preserve all original records locally; cloud history is read-only.
+    @Published private(set) var cloudSets: [HCLoggedSet] = []
+    @Published private(set) var progressSyncStatus = "Cloud progress not checked"
     @Published private(set) var completedRuns: [HCRunFinished] = []
     @Published private(set) var liftClock: HCTrainingClock?
     @Published private(set) var guidedExerciseID: String?
@@ -66,6 +69,7 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
     private let cloud = HCWatchCloudFallback()
     private var cloudUploadedIDs: Set<UUID> = []
     private var isUploadingCloudSets = false
+    private var isFetchingCloudSets = false
 
     static func today() -> String {
         let f = DateFormatter()
@@ -164,11 +168,41 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
                         date: day, workout: published,
                         runPlan: self.runPlan?.date == day ? self.runPlan : nil,
                         generatedAt: Date(), state: "ready"))
+                    self.refreshCloudSets()
                     self.cloudStatus = "Today's workout downloaded directly from cloud"
                 }
             } catch {
                 DispatchQueue.main.async {
                     self.cloudStatus = "Cloud download failed: " + error.localizedDescription
+                }
+            }
+        }
+    }
+
+    /// Read completed sets for this date and session from the authenticated
+    /// cloud, independent of the phone connection. Never import them into the
+    /// Watch's upload queue or overwrite local workout history.
+    func refreshCloudSets() {
+        guard cloudSignedIn, hasScheduledLift, workout.date == Self.today(),
+              !isFetchingCloudSets else { return }
+        let requested = workout
+        isFetchingCloudSets = true
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                let entries = try await cloud.fetchCompletedSets(for: requested)
+                DispatchQueue.main.async {
+                    self.isFetchingCloudSets = false
+                    guard self.workout.id == requested.id,
+                          self.workout.date == requested.date else { return }
+                    self.cloudSets = entries
+                    self.progressSyncStatus = "Progress updated from iPhone + Watch"
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    self.isFetchingCloudSets = false
+                    self.progressSyncStatus = "Offline progress retained: " +
+                        error.localizedDescription
                 }
             }
         }
@@ -200,7 +234,10 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
                     break
                 }
             }
-            DispatchQueue.main.async { self.isUploadingCloudSets = false }
+            DispatchQueue.main.async {
+                self.isUploadingCloudSets = false
+                self.refreshCloudSets()
+            }
         }
     }
 
@@ -218,9 +255,13 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
         }
     }
 
+    var allRecordedSets: [HCLoggedSet] {
+        HCSetReconciliation.allRecords(local: sets, cloud: cloudSets)
+    }
+
     func completedSets(for exercise: HCExercise) -> [HCLoggedSet] {
-        sets.filter { $0.workoutID == workout.id && $0.exerciseID == exercise.id }
-            .sorted { $0.index < $1.index }
+        HCSetReconciliation.completed(for: workout, records: allRecordedSets)
+            .filter { $0.exerciseID == exercise.id }
     }
 
     // MARK: - One-screen, set-by-set strength workflow
@@ -358,6 +399,7 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
     func startLifting() {
         invalidatePreviousDayIfNeeded()
         guard hasScheduledLift, workout.date == Self.today(), !workout.exercises.isEmpty,
+              !guidedAllFinished,
               liftClock?.isActive != true && runClock?.isActive != true else { return }
         liftClock = HCTrainingClock(workoutID: workout.id, startedAt: Date())
         let first = workout.exercises.first(where: {
@@ -1242,6 +1284,22 @@ private actor HCWatchCloudFallback {
                 ?? "Request failed (HTTP " + String(http.statusCode) + ")")
         }
         return data
+    }
+
+    func fetchCompletedSets(for workout: HCWorkout) async throws -> [HCLoggedSet] {
+        let session = try await authorized()
+        let data = try await request(path: "/rest/v1/health_coach_watch_sets",
+            query: [
+                URLQueryItem(name: "select", value:
+                    "id,workout_date,session_key,workout_title,exercise_id,exercise_name,exercise_index,set_index,weight_lb,reps,rir,completed_at,started_at,duration_seconds,source"),
+                URLQueryItem(name: "user_id", value: "eq." + session.userID),
+                URLQueryItem(name: "workout_date", value: "eq." + workout.date),
+                URLQueryItem(name: "session_key", value: "eq." + workout.sessionKey),
+                URLQueryItem(name: "limit", value: "500")
+            ], bearer: session.access)
+        guard let rows = try JSONSerialization.jsonObject(with: data) as? [[String: Any]]
+        else { throw HCWatchCloudError.malformed }
+        return HCSetReconciliation.decodeCloudRows(rows, workout: workout)
     }
 
     func fetchPublishedWorkout(date: String) async throws -> HCWorkout? {
