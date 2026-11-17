@@ -201,6 +201,253 @@ private struct WProgressHalo: View {
     }
 }
 
+// MARK: - VYRMUN (an iMun-native training-momentum metric)
+//
+// This is NOT a recovery, medical-readiness or physiological prediction.
+// Only recorded activity is used. Missing measurements never become zeroes.
+private struct IMUNVyrmunComponent: Identifiable {
+    let id: String
+    let title: String
+    let score: Int
+    let weight: Double
+    let explanation: String
+}
+
+private struct IMUNVyrmunScore {
+    let value: Int?
+    let parts: [IMUNVyrmunComponent]
+    let activeDays: Int
+
+    func score(for id: String) -> String {
+        parts.first(where: { $0.id == id }).map { String($0.score) } ?? "—"
+    }
+
+    var headline: String {
+        guard let value else { return "Building your baseline" }
+        if value >= 80 { return "Strong momentum this week" }
+        if value >= 60 { return "You're building momentum" }
+        if value >= 30 { return "Progress is taking shape" }
+        return "Every step builds momentum"
+    }
+
+    static func calculate(_ store: WatchWorkoutStore) -> IMUNVyrmunScore {
+        let today = WatchWorkoutStore.today()
+        let calendar = Calendar.current
+        let formatter = DateFormatter()
+        formatter.calendar = calendar
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM-dd"
+        let week = formatter.string(from: calendar.date(byAdding: .day, value: -6,
+                                                        to: Date()) ?? Date())
+        var active = Set(store.allRecordedSets.filter {
+            $0.workoutDate >= week && $0.workoutDate <= today
+        }.map(\.workoutDate))
+        active.formUnion(store.runHistory.filter {
+            $0.date >= week && $0.date <= today
+        }.map(\.date))
+        active.formUnion(store.completedRuns.filter {
+            formatter.string(from: $0.startedAt) >= week &&
+            formatter.string(from: $0.startedAt) <= today
+        }.map { formatter.string(from: $0.startedAt) })
+
+        var components: [IMUNVyrmunComponent] = []
+        var actions: [Double] = []
+        if store.hasScheduledLift && store.workout.date == today,
+           store.workout.prescribedSetCount > 0 {
+            actions.append(min(1, Double(store.guidedCompletedSets) /
+                               Double(store.workout.prescribedSetCount)))
+        }
+        if let run = store.runPlan, run.date == today {
+            let finished = run.isCompleted || store.completedRuns.contains {
+                $0.planID == run.id && $0.date == today
+            }
+            actions.append(finished ? 1 : 0)
+        }
+        if !actions.isEmpty {
+            let ratio = actions.reduce(0, +) / Double(actions.count)
+            components.append(IMUNVyrmunComponent(
+                id: "action", title: "ACTION",
+                score: Int((ratio * 100).rounded()), weight: 0.45,
+                explanation: "Today's prescribed strength sets and any scheduled run completion. Rest days are not counted as missed workouts."))
+        }
+
+        // Four active days is an adjustable future reference, not a clinical
+        // threshold. Count distinct days of real strength/run records.
+        let consistency = min(1, Double(active.count) / 4)
+        components.append(IMUNVyrmunComponent(
+            id: "rhythm", title: "RHYTHM",
+            score: Int((consistency * 100).rounded()), weight: 0.35,
+            explanation: "\(active.count) distinct logged training day(s) in the past seven days, against a four-day reference."))
+
+        if let recovery = store.recoverySummary,
+           recovery.date >= formatter.string(from: calendar.date(byAdding: .day,
+                                           value: -2, to: Date()) ?? Date()),
+           recovery.date <= today,
+           let seconds = recovery.sleepSeconds, seconds >= 2 * 3600,
+           seconds <= 15 * 3600 {
+            // Sleep duration is a simple 7.5-hour reference, NOT a sleep
+            // quality, medical risk, recovery or training-readiness score.
+            let sleep = min(1, seconds / (7.5 * 3600))
+            components.append(IMUNVyrmunComponent(
+                id: "sleep", title: "SLEEP",
+                score: Int((sleep * 100).rounded()), weight: 0.20,
+                explanation: String(format: "%.1f h of recorded sleep from %@ on %@, compared with a 7.5 h display reference.",
+                                    seconds / 3600, recovery.source, recovery.date)))
+        }
+
+        // With no logged training and no planned session, a positive-looking
+        // number would misrepresent sleep alone as personal progress.
+        let hasTrainingEvidence = !active.isEmpty || !actions.isEmpty
+        let total: Int?
+        if hasTrainingEvidence {
+            let w = components.reduce(0.0) { $0 + $1.weight }
+            let weighted = components.reduce(0.0) {
+                $0 + Double($1.score) * $1.weight
+            }
+            total = w > 0 ? max(0, min(100, Int((weighted / w).rounded()))) : nil
+        } else {
+            total = nil
+        }
+        return IMUNVyrmunScore(value: total, parts: components,
+                               activeDays: active.count)
+    }
+}
+
+private struct IMUNVyrmunHomeTile: View {
+    @EnvironmentObject private var store: WatchWorkoutStore
+
+    var body: some View {
+        let score = IMUNVyrmunScore.calculate(store)
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .top, spacing: 6) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("VYRMUN")
+                        .font(.system(size: 14, weight: .bold,
+                                      design: IMUNStyle.headingDesign))
+                        .tracking(1.4)
+                        .foregroundStyle(IMUNStyle.palette.ink)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.85)
+                    Text("IMUN / TRAINING MOMENTUM")
+                        .font(.system(size: 8, weight: .medium))
+                        .tracking(0.35)
+                        .foregroundStyle(WTheme.muted)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.75)
+                }
+                Spacer(minLength: 0)
+                Image(systemName: "info.circle")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(WTheme.aqua)
+                    .accessibilityHidden(true)
+            }
+            HStack(alignment: .firstTextBaseline, spacing: 4) {
+                Text(score.value.map(String.init) ?? "—")
+                    .font(.system(size: 39, weight: .semibold,
+                                  design: .rounded))
+                    .monospacedDigit()
+                    .foregroundStyle(IMUNStyle.palette.ink)
+                    .lineLimit(1)
+                Text("/ 100")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(WTheme.muted)
+                Spacer(minLength: 2)
+                Text(Date().formatted(.dateTime.weekday(.abbreviated).day()))
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(WTheme.muted)
+                    .lineLimit(1)
+            }
+            GeometryReader { geometry in
+                ZStack(alignment: .leading) {
+                    Capsule().fill(WTheme.muted.opacity(0.2))
+                    Capsule().fill(WTheme.lime)
+                        .frame(width: geometry.size.width *
+                               CGFloat(score.value ?? 0) / 100)
+                }
+            }
+            .frame(height: 5)
+            HStack(spacing: 4) {
+                ForEach(["action", "rhythm", "sleep"], id: \.self) { key in
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(key == "action" ? "ACTION" :
+                             key == "rhythm" ? "RHYTHM" : "SLEEP")
+                            .font(.system(size: 8, weight: .medium))
+                            .foregroundStyle(WTheme.muted)
+                        Text(score.score(for: key))
+                            .font(.system(size: 13, weight: .semibold,
+                                          design: .rounded))
+                            .monospacedDigit()
+                            .foregroundStyle(IMUNStyle.palette.ink)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+            Text(score.headline)
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(WTheme.aqua)
+                .lineLimit(2)
+                .minimumScaleFactor(0.9)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 11)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Vyrmun training momentum: " +
+            (score.value.map { "\($0) out of 100" } ?? "awaiting training records") +
+            ". " + score.headline)
+    }
+}
+
+private struct IMUNVyrmunExplanation: View {
+    @EnvironmentObject private var store: WatchWorkoutStore
+    var body: some View {
+        let score = IMUNVyrmunScore.calculate(store)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                Text("VYRMUN")
+                    .font(.system(size: 20, weight: .semibold))
+                    .tracking(1)
+                    .foregroundStyle(IMUNStyle.palette.ink)
+                Text("Your iMun training momentum")
+                    .font(.system(size: 11))
+                    .foregroundStyle(WTheme.muted)
+                Text(score.value.map { "\($0) / 100" } ?? "Gathering records")
+                    .font(.system(size: 28, weight: .semibold, design: .rounded))
+                    .monospacedDigit()
+                    .foregroundStyle(WTheme.lime)
+                ForEach(score.parts) { part in
+                    VStack(alignment: .leading, spacing: 5) {
+                        HStack {
+                            Text(part.title)
+                                .font(.system(size: 11, weight: .semibold))
+                            Spacer()
+                            Text("\(part.score)")
+                                .font(.system(size: 12, weight: .bold))
+                        }
+                        Text(part.explanation)
+                            .font(.system(size: 10))
+                            .foregroundStyle(WTheme.muted)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .padding(10)
+                    .background(WTheme.panel,
+                                in: RoundedRectangle(cornerRadius: 12))
+                }
+                Text("VYRMUN combines today's training follow-through (45%), seven-day rhythm (35%) and recent recorded sleep duration (20%). Missing components are omitted and available weights are rescaled. It does not estimate medical readiness, fitness, or recovery quality.")
+                    .font(.system(size: 10))
+                    .foregroundStyle(WTheme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text("Values refresh when synced records arrive.")
+                    .font(.system(size: 10))
+                    .foregroundStyle(WTheme.aqua)
+            }
+            .padding(12)
+        }
+        .background(WTheme.bg)
+        .navigationTitle("VYRMUN")
+    }
+}
+
 /// A List-based navigation hub fixes the page-gesture / scrolling conflict on
 /// watchOS. Large Strength and Run targets are immediately reachable.
 struct WatchWorkoutView: View {
