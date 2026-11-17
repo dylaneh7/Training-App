@@ -39,6 +39,28 @@ targets:
     dependencies:
       - target: HealthCoachWatch
         embed: true
+      - target: IMUNWidgets
+        embed: true
+  IMUNWidgets:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: Widgets
+        excludes:
+          - Info.plist
+          - IMUNWidgets.entitlements
+      - path: Shared/IMUNWidgetModels.swift
+    info:
+      path: Widgets/Info.plist
+    entitlements:
+      path: Widgets/IMUNWidgets.entitlements
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: "$(HC_IOS_BUNDLE_ID).widgets"
+        IPHONEOS_DEPLOYMENT_TARGET: "17.0"
+        GENERATE_INFOPLIST_FILE: NO
+        APPLICATION_EXTENSION_API_ONLY: YES
+        SWIFT_STRICT_CONCURRENCY: minimal
   HealthCoachWatch:
     type: application
     platform: watchOS
