@@ -27,6 +27,7 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
     @Published private(set) var status = "Preparing Health Coach…"
     @Published private(set) var watchSyncStatus = "Waiting for Watch connection"
     @Published private(set) var watchConnectionDetails = "Connection not checked"
+    @Published private(set) var designCloudStatus = "Appearance stored on iPhone"
     @Published private(set) var watchLastAcknowledgedAt: Date?
     private var sendAfterCalendarRefresh = false
     private var sendWhenWatchActivated = false
@@ -344,6 +345,34 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
                         self.sendAfterCalendarRefresh = false
                     }
                     self.status = "Calendar refresh failed; last confirmed plan preserved."
+                }
+            }
+        }
+    }
+
+    /// Independent appearance sync: no WCSession availability check and no
+    /// additional workout/schedule refresh. Existing Keychain credentials and
+    /// the private user-owned cloud row provide the connection.
+    func publishDesignToCloud() {
+        guard signedIn else {
+            designCloudStatus = "Sign in to sync appearance"
+            return
+        }
+        let payload = IMUNStyle.cloudDesignPayload()
+        designCloudStatus = "Saving appearance to cloud…"
+        Task {
+            do {
+                try await cloud.saveVisualPreferences(payload)
+                DispatchQueue.main.async {
+                    self.designCloudStatus =
+                        payload["watchSyncEnabled"] as? Bool == true
+                        ? "Design shared · open iMun Watch to apply"
+                        : "Watch sharing off · iPhone appearance kept"
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    self.designCloudStatus =
+                        "Could not sync appearance: " + error.localizedDescription
                 }
             }
         }
