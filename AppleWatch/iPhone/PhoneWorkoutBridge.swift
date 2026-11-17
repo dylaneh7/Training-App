@@ -961,6 +961,7 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
                       recentConversation: String = "") async throws -> String {
         let today = HCPlanBuilder.dateString(Date())
         var lines = ["Today: \(today)", "Source: IMUN training calendar and recorded workout history"]
+        lines.append("Available iMun Coach controls require confirmation: edit today's prescribed strength exercises, create/rename/reschedule workouts, confirm completion, sync Watch, change training/appearance/motivation settings, and navigate app sections. These are app actions, never assumed completed by a chat reply.")
         if let lift = workout, lift.date == today {
             lines.append("Planned weightlifting: \(lift.title), \(lift.exercises.count) exercises, \(lift.prescribedSetCount) sets")
         } else {
