@@ -32,6 +32,11 @@ struct PremiumHomeView: View {
     @StateObject private var tredictImporter = HCTredictImporter()
     @StateObject private var tredictPlans = HCTredictWatchPlanSync()
     @AppStorage("hcSelectedTab") private var selectedTab = "training"
+    @AppStorage("hcTrainingActivity") private var visibleTrainingActivity = "weightlifting"
+    @AppStorage("hcSelectedHealthCategory") private var visibleHealthCategory = "Overview"
+    @AppStorage("hcSelectedHealthMetric") private var visibleHealthMetric = ""
+    @State private var isIsaiahPresented = false
+    @State private var isaiahLaunchContext = ""
     @AppStorage("hcAccentStyle") private var accentStyle = "crimson"
     @AppStorage("hcDesignPreset") private var designPreset = "techno"
     @AppStorage("hcDesignMode") private var designMode = "dark"
@@ -56,6 +61,41 @@ struct PremiumHomeView: View {
          String(designCustomGeometry)].joined(separator: "|")
     }
 
+    // Snapshot of visible app context. No health measurements are included here.
+    private var screenContext: String {
+        var details = ["Screen: " + selectedTab.capitalized,
+                       "Date: " + HCPlanBuilder.dateString(Date())]
+        switch selectedTab {
+        case "training":
+            details.append("Activity: " + visibleTrainingActivity)
+            if visibleTrainingActivity == "run", let plan = coach.runPlan {
+                details.append("Selected run: " + plan.title + " [ID: " + plan.id + "]")
+            } else if let plan = coach.workout {
+                details.append("Selected strength workout: " + plan.title +
+                               " [ID: " + plan.id + "]")
+                details.append("Exercises: " +
+                               plan.exercises.prefix(16).map(\.name).joined(separator: ", "))
+            }
+        case "health":
+            details.append("Health category: " + visibleHealthCategory)
+            if !visibleHealthMetric.isEmpty {
+                details.append("Selected metric: " + visibleHealthMetric)
+            }
+            details.append("Health measurements are opt-in, not included in screen context")
+        case "progress":
+            details.append("Showing recorded progress and training history")
+        case "settings":
+            details.append("Showing appearance, sync and integration settings")
+        default: break
+        }
+        return details.joined(separator: "\n")
+    }
+
+    private func presentIsaiah() {
+        isaiahLaunchContext = screenContext
+        isIsaiahPresented = true
+    }
+
     var body: some View {
         TabView(selection: $selectedTab) {
             NavigationStack { PremiumTrainingPage() }
@@ -67,9 +107,6 @@ struct PremiumHomeView: View {
             NavigationStack { PremiumRecoveryPage(appleHealth: appleHealth) }
                 .tabItem { Label("Health", systemImage: "heart.text.square.fill") }
                 .tag("health")
-            NavigationStack { PremiumCoachPage() }
-                .tabItem { Label("IsAIah", systemImage: "bubble.left.and.text.bubble.right") }
-                .tag("coach")
             NavigationStack { PremiumSettingsPage() }
                 .tabItem { Label("Settings", systemImage: "gearshape.fill") }
                 .tag("settings")
@@ -79,6 +116,42 @@ struct PremiumHomeView: View {
         .environmentObject(runImporter)
         .environmentObject(tredictImporter)
         .environmentObject(tredictPlans)
+        .overlay(alignment: .bottomTrailing) {
+            Button(action: presentIsaiah) {
+                IMUNIsaiahMark(size: 53)
+                    .padding(3)
+                    .background(HCDesign.electric,
+                                in: RoundedRectangle(cornerRadius: 15))
+                    .shadow(color: .black.opacity(0.22), radius: 9, y: 4)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Ask IsAIah about this screen")
+            .accessibilityHint("Open your contextual assistant")
+            .padding(.trailing, 18)
+            .padding(.bottom, 70)
+        }
+        .sheet(isPresented: $isIsaiahPresented) {
+            NavigationStack {
+                PremiumCoachPage(launchContext: isaiahLaunchContext)
+                    .toolbar {
+                        ToolbarItem(placement: .topBarTrailing) {
+                            Button("Done") { isIsaiahPresented = false }
+                        }
+                    }
+            }
+            .environmentObject(coach)
+            .environmentObject(runImporter)
+            .environmentObject(tredictImporter)
+            .environmentObject(tredictPlans)
+            .presentationDetents([.large])
+            .presentationDragIndicator(.visible)
+        }
+        .onChange(of: selectedTab) { _, tab in
+            if tab == "coach" {
+                selectedTab = "training"
+                presentIsaiah()
+            }
+        }
         .onReceive(tredictPlans.$runs) { coach.updateTredictScheduledRuns($0) }
         .onReceive(tredictPlans.$lastSentTodayRunID) { id in
             guard let id,
@@ -118,6 +191,7 @@ struct PremiumHomeView: View {
         }
         .onChange(of: designSignature) { _, _ in configureTabAppearance() }
         .onAppear {
+            if selectedTab == "coach" { selectedTab = "training" }
             if coach.signedIn && coach.workout == nil { coach.refresh(date: Date()) }
             if coach.signedIn { coach.refreshCloudProgress() }
             configureTabAppearance()
@@ -2060,6 +2134,7 @@ private struct HCHealthTrendChart: View {
 private struct HCMetricFamilyCard: View {
     let family: HCMetricFamily
     @Binding var expandedTrends: Set<String>
+    @AppStorage("hcSelectedHealthMetric") private var selectedHealthMetric = ""
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -2112,6 +2187,7 @@ private struct HCMetricFamilyCard: View {
                         Spacer()
                         if reading.points.count > 1 {
                             Button {
+                                selectedHealthMetric = family.title + " / " + reading.label
                                 if expandedTrends.contains(reading.id) {
                                     expandedTrends.remove(reading.id)
                                 } else {
@@ -2185,7 +2261,7 @@ private struct PremiumRecoveryPage: View {
     @ObservedObject var appleHealth: HCAppleHealthReader
     @State private var showHistory = false
     @State private var showRawReadings = false
-    @State private var selectedHealthCategory = "Overview"
+    @AppStorage("hcSelectedHealthCategory") private var selectedHealthCategory = "Overview"
     @State private var metricSearch = ""
     @State private var expandedTrends: Set<String> = []
     // Trends and baselines are expensive; only rebuild when source records
