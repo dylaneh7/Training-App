@@ -5,6 +5,7 @@ import Foundation
 enum IMUNCoachActionKind: Equatable {
     case moveWorkout
     case completeRun
+    case completeScheduledWorkout
     case syncWatch
     case setTheme
     case createStrength
@@ -79,6 +80,26 @@ enum IMUNCoachActionInterpreter {
             return proposal(.renameStrength, "Rename today's strength workout",
                 "Change only the workout title. Preserve all prescribed exercises and completed sets.",
                 parameter: namedWorkout(value) ?? workout?.title)
+        }
+
+        if containsAny(value, ["mark ", "check off ", "complete "]) &&
+           containsAny(value, ["workout", "session", "lift", "strength"]) &&
+           containsAny(value, ["done", "complete", "finished", "completed"]) {
+            let requestedDate = matchingDate(value)
+                ?? Calendar.current.startOfDay(for: Date())
+            let dateKey = HCPlanBuilder.dateString(requestedDate)
+            let available = sessions.filter {
+                $0.date == dateKey && !$0.completed &&
+                UUID(uuidString: $0.id) != nil
+            }
+            let exact = available.filter {
+                value.contains($0.title.lowercased())
+            }
+            let selected = exact.count == 1 ? exact.first
+                : (available.count == 1 ? available.first : nil)
+            return proposal(.completeScheduledWorkout, "Mark calendar workout complete",
+                "Confirm the exact saved workout. Only the calendar completion flag is changed; no sets, pace, distance or heart-rate measurements are invented.",
+                workoutID: selected?.id)
         }
 
         if containsAny(value, ["complete", "completed", "finish", "finished",
