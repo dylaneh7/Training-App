@@ -30,6 +30,18 @@ private struct IMUNTodayEntry: TimelineEntry {
         guard let defaults = UserDefaults(suiteName: IMUNWidgetKeys.suite) else {
             return .placeholder
         }
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM-dd"
+        // Never label yesterday's saved training snapshot as today's plan.
+        guard defaults.string(forKey: IMUNWidgetKeys.date) ==
+              formatter.string(from: Date()) else {
+            return IMUNTodayEntry(date: Date(),
+                                  workout: "Open iMun to refresh today's plan",
+                                  progress: "—", running: "", sleep: nil, hrv: nil,
+                                  source: nil, healthEnabled: false)
+        }
         let sharedHealth = defaults.bool(forKey: IMUNWidgetKeys.healthEnabled)
         return IMUNTodayEntry(
             date: Date(),
