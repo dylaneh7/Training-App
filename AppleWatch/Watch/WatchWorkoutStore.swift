@@ -438,6 +438,7 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
             try? FileManager.default.removeItem(at: directory.appendingPathComponent(file))
         }
         appendUndo(undo, forwardToPhone: true)
+        publishLiftSessionStatus(startedAt: clock.startedAt, active: false)
         status = "Workout undone. Ready to start again."
     }
 
@@ -607,6 +608,30 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
         }
     }
 
+    private func publishLiftSessionStatus(startedAt: Date?, active: Bool) {
+        guard WCSession.isSupported() else { return }
+        let session = WCSession.default
+        guard session.activationState == .activated else { return }
+        let state = HCWatchLiftSessionStatus(
+            workoutID: workout.id,
+            workoutDate: workout.date,
+            startedAt: startedAt,
+            isActive: active,
+            reportedAt: Date()
+        )
+        guard let data = try? encoder.encode(state) else { return }
+        let packet: [String: Any] = [
+            HCPayload.kind: HCPayload.liftSessionStatus,
+            HCPayload.data: data
+        ]
+        // Background copy is durable; interactive copy updates the iPhone now.
+        session.transferUserInfo(packet)
+        if session.isReachable {
+            session.sendMessage(packet, replyHandler: { _ in },
+                                errorHandler: { _ in })
+        }
+    }
+
     // MARK: - Full strength session clock
 
     func startLifting() {
@@ -627,6 +652,7 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
             save(first.id, name: "guided-exercise-id.json")
         }
         save(liftClock, name: "lifting-clock.json")
+        publishLiftSessionStatus(startedAt: liftClock?.startedAt, active: true)
         // Pressing START WORKOUT starts the first working set immediately.
         if let first { startSet(for: first) }
     }
@@ -666,6 +692,7 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
         try? FileManager.default.removeItem(at: directory.appendingPathComponent("guided-set-selection.json"))
         try? FileManager.default.removeItem(at: directory.appendingPathComponent("queued-guided-set.json"))
         save(clock, name: "lifting-clock.json")
+        publishLiftSessionStatus(startedAt: clock.startedAt, active: false)
         if let latestSchedule { applySchedule(latestSchedule) }
         invalidatePreviousDayIfNeeded()
     }
