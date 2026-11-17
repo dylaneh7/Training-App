@@ -75,6 +75,13 @@ struct PremiumHomeView: View {
                                " [ID: " + plan.id + "]")
                 details.append("Exercises: " +
                                plan.exercises.prefix(16).map(\.name).joined(separator: ", "))
+                if coach.phoneSessionStartedAt != nil {
+                    details.append("An iPhone strength session is currently active")
+                }
+                if let activeID = coach.phoneSetExerciseID,
+                   let activeExercise = plan.exercises.first(where: { $0.id == activeID }) {
+                    details.append("Active strength set: " + activeExercise.name)
+                }
             }
         case "health":
             details.append("Health category: " + visibleHealthCategory)
