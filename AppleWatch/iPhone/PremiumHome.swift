@@ -2800,6 +2800,8 @@ private struct PremiumCoachConversation: View {
                         suggestion("What's my focus this week?")
                         suggestion("How can I improve my running?")
                         suggestion("How are my workouts progressing?")
+                        suggestion("Edit my workout")
+                        suggestion("What can you control in iMun?")
                         suggestion("Move tomorrow's workout to Friday")
                         suggestion("Mark today's run complete")
                         suggestion("Sync today's workout to my Watch")
@@ -3286,6 +3288,17 @@ private struct PremiumCoachConversation: View {
     private func send() {
         let questionText = question.trimmingCharacters(in: .whitespacesAndNewlines)
         guard canSend else { return }
+        if questionText.lowercased().contains("what can you control") ||
+           questionText.lowercased().contains("what can you do in imun") ||
+           questionText.lowercased().contains("what actions can you") {
+            question = ""
+            composerFocused = false
+            turns.append(IMUNCoachTurn(role: "user", text: questionText))
+            turns.append(IMUNCoachTurn(role: "assistant",
+                text: IMUNCoachActionCatalog.userFacingSummary))
+            persist()
+            return
+        }
         if let proposed = IMUNCoachActionInterpreter.propose(
             questionText, sessions: coach.plannedSessions,
             workout: coach.workout, run: coach.runPlan) {
@@ -3306,10 +3319,8 @@ private struct PremiumCoachConversation: View {
             // The service is a language classifier only: it cannot mutate
             // workouts, choose an unvalidated ID, or bypass confirmation.
             if IMUNCoachActionInterpreter.mightNeedModelProposal(questionText) {
-                if let classification = try? await coach.askIMUNCoach(
-                    question: IMUNCoachActionInterpreter.classificationPrompt(for: questionText),
-                    shareRecovery: false,
-                    recentConversation: ""),
+                if let classification = try? await coach.classifyIMUNCoachAction(
+                    request: questionText),
                    let proposal = IMUNCoachActionInterpreter.proposalFromModel(
                     classification, sessions: coach.plannedSessions,
                     workout: coach.workout, run: coach.runPlan) {
