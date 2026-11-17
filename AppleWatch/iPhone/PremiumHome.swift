@@ -68,7 +68,7 @@ struct PremiumHomeView: View {
                 .tabItem { Label("Health", systemImage: "heart.text.square.fill") }
                 .tag("health")
             NavigationStack { PremiumCoachPage() }
-                .tabItem { Label("Coach", systemImage: "bubble.left.and.text.bubble.right") }
+                .tabItem { Label("IsAIah", systemImage: "bubble.left.and.text.bubble.right") }
                 .tag("coach")
             NavigationStack { PremiumSettingsPage() }
                 .tabItem { Label("Settings", systemImage: "gearshape.fill") }
@@ -2835,7 +2835,7 @@ private struct PremiumCoachConversation: View {
 
     private var context: String {
         turns.suffix(6).map { turn in
-            (turn.role == "user" ? "Athlete: " : "Coach: ") + turn.text
+            (turn.role == "user" ? "Athlete: " : "IsAIah: ") + turn.text
         }.joined(separator: "\n")
     }
     private var canSend: Bool {
@@ -2875,7 +2875,7 @@ private struct PremiumCoachConversation: View {
                                 .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
-                        .accessibilityLabel("Start a new coach conversation")
+                        .accessibilityLabel("Start a new IsAIah conversation")
                     }
                 }
 
@@ -2884,7 +2884,7 @@ private struct PremiumCoachConversation: View {
                         Text("Start with an action")
                             .font(.system(size: 15, weight: .semibold))
                             .foregroundStyle(HCDesign.ink)
-                        Text("You can ask naturally. Coach will show you any changes before applying them.")
+                        Text("Ask naturally. IsAIah previews changes before applying them.")
                             .font(.system(size: 12))
                             .foregroundStyle(HCDesign.secondary)
                         suggestion("Edit today's workout")
