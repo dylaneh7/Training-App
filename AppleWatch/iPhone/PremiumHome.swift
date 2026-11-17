@@ -2673,6 +2673,18 @@ private struct PremiumCoachConversation: View {
     @State private var selectedActionWorkoutID = ""
     @State private var actionMoveDate = Date()
     @AppStorage("hcDesignPreset") private var designPreset = "techno"
+    @AppStorage("hcSelectedTab") private var selectedTab = "training"
+    @AppStorage("hcTrainingActivity") private var selectedActivity = "weightlifting"
+    @AppStorage("hcMotivationSource") private var motivationSource = "off"
+    @AppStorage("hcRestOverrideSeconds") private var restSeconds = 0
+    @AppStorage("hcWatchHaptics") private var watchHaptics = true
+    @AppStorage("hcRunVoiceCues") private var runVoiceCues = false
+    @AppStorage("hcRunAutoLaps") private var runAutoLaps = true
+    @State private var actionWorkoutTitle = "Custom Strength Workout"
+    @State private var actionRunMinutes = 40
+    @State private var actionRunHasHR = false
+    @State private var actionRunMinHR = 120
+    @State private var actionRunMaxHR = 150
 
     private var context: String {
         turns.suffix(6).map { turn in
@@ -2736,6 +2748,9 @@ private struct PremiumCoachConversation: View {
                         suggestion("Mark today's run complete")
                         suggestion("Sync today's workout to my Watch")
                         suggestion("Change the theme to Heritage")
+                        suggestion("Create an easy 40-minute run")
+                        suggestion("Open my Health tab")
+                        suggestion("Set rest timer to 90 seconds")
                     }
                     .padding(.vertical, 10)
                 } else {
@@ -2848,6 +2863,35 @@ private struct PremiumCoachConversation: View {
                                            displayedComponents: .date)
                                     .tint(HCDesign.aqua)
                             }
+                            if action.kind == .createStrength ||
+                               action.kind == .renameStrength {
+                                TextField("Workout name", text: $actionWorkoutTitle)
+                                    .textInputAutocapitalization(.words)
+                            }
+                            if action.kind == .createRun {
+                                TextField("Run name", text: $actionWorkoutTitle)
+                                    .textInputAutocapitalization(.words)
+                                Stepper("Duration: \(actionRunMinutes) minutes",
+                                        value: $actionRunMinutes, in: 1...360)
+                                Toggle("Add target BPM range", isOn: $actionRunHasHR)
+                                if actionRunHasHR {
+                                    HStack {
+                                        TextField("Min BPM", value: $actionRunMinHR, format: .number)
+                                            .keyboardType(.numberPad)
+                                        Text("–")
+                                        TextField("Max BPM", value: $actionRunMaxHR, format: .number)
+                                            .keyboardType(.numberPad)
+                                    }
+                                }
+                            }
+                            if let parameter = action.parameter,
+                               action.kind != .createRun &&
+                               action.kind != .createStrength &&
+                               action.kind != .renameStrength {
+                                Text("Selected value: \(parameter)")
+                                    .font(.caption2)
+                                    .foregroundStyle(HCDesign.secondary)
+                            }
                             HStack(spacing: 10) {
                                 Button("Cancel") {
                                     pendingAction = nil
@@ -2859,12 +2903,7 @@ private struct PremiumCoachConversation: View {
                                 }
                                 .buttonStyle(.borderedProminent)
                                 .tint(HCDesign.electric)
-                                .disabled(action.kind == .moveWorkout &&
-                                    (selectedActionWorkoutID.isEmpty ||
-                                     coach.movingWorkoutID != nil ||
-                                     coach.plannedSessions.first(where: {
-                                        $0.id == selectedActionWorkoutID
-                                     })?.date == HCPlanBuilder.dateString(actionMoveDate)))
+                                .disabled(!canConfirmAction(action))
                             }
                             Text("Coach never executes an app change from generated text alone.")
                                 .font(.caption2)
@@ -2954,46 +2993,138 @@ private struct PremiumCoachConversation: View {
         }
     }
 
+    private func canConfirmAction(_ action: IMUNCoachActionProposal) -> Bool {
+        guard coach.signedIn else { return false }
+        switch action.kind {
+        case .moveWorkout:
+            guard let selected = coach.plannedSessions.first(where: {
+                $0.id == selectedActionWorkoutID
+            }) else { return false }
+            return coach.movingWorkoutID == nil &&
+                selected.date != HCPlanBuilder.dateString(actionMoveDate)
+        case .createStrength:
+            return coach.workout == nil &&
+                !actionWorkoutTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        case .createRun:
+            return coach.runPlan == nil &&
+                !actionWorkoutTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
+                (1...360).contains(actionRunMinutes) &&
+                (!actionRunHasHR ||
+                 ((35...230).contains(actionRunMinHR) &&
+                  (35...230).contains(actionRunMaxHR) &&
+                  actionRunMinHR <= actionRunMaxHR))
+        case .renameStrength:
+            return coach.workout != nil &&
+                !actionWorkoutTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        case .completeRun:
+            return coach.runPlan?.id == action.suggestedWorkoutID &&
+                coach.runPlan?.isCompleted == false
+        case .setTheme:
+            return action.themeID.flatMap(IMUNPreset.init(rawValue:)) != nil
+        case .setRestDuration:
+            return action.parameter.flatMap(Int.init).map {
+                [0, 60, 90, 120, 180].contains($0)
+            } ?? false
+        case .setMotivation:
+            return action.parameter.map {
+                ["off", "scripture", "original", "performance", "custom"].contains($0)
+            } ?? false
+        case .setWatchHaptics, .setRunVoiceCues, .setRunAutoLaps:
+            return action.parameter == "on" || action.parameter == "off"
+        case .selectTraining:
+            return action.parameter == "run" || action.parameter == "weightlifting"
+        case .openTab:
+            return action.parameter.map {
+                ["training", "health", "progress", "coach", "settings"].contains($0)
+            } ?? false
+        case .syncWatch:
+            return true
+        }
+    }
+
     private func confirmAction(_ action: IMUNCoachActionProposal) {
-        guard coach.signedIn else {
-            errorMessage = "Sign in to iMun before changing your workouts."
+        guard canConfirmAction(action) else {
+            errorMessage = "The planned change is no longer valid. Refresh the app and review it again."
             return
         }
+        let reply: String
         switch action.kind {
         case .moveWorkout:
             guard let workout = coach.plannedSessions.first(where: {
                 $0.id == selectedActionWorkoutID
-            }), workout.date != HCPlanBuilder.dateString(actionMoveDate) else {
-                errorMessage = "Select an existing session and a different date."
-                return
-            }
+            }) else { return }
             coach.moveWorkout(workout, to: actionMoveDate)
-            turns.append(IMUNCoachTurn(role: "assistant", text:
-                "Requested calendar move for \(workout.title) to \(HCPlanBuilder.dateString(actionMoveDate)). The calendar updates only when the server confirms it."))
+            reply = "Requested the move of \(workout.title) to \(HCPlanBuilder.dateString(actionMoveDate)). iMun will apply it only if the calendar server accepts it."
         case .completeRun:
-            guard let run = coach.runPlan, run.id == action.suggestedWorkoutID,
-                  run.date == HCPlanBuilder.dateString(Date()),
-                  !run.isCompleted else {
-                errorMessage = "The run has changed or is already complete. Refresh Training."
-                return
-            }
             coach.setRunManuallyCompleted(true)
-            turns.append(IMUNCoachTurn(role: "assistant", text:
-                "Recorded your confirmation that today's run was completed. No sensor measurements were added."))
+            reply = "Recorded your confirmation of today's completed run. No sensor measurements were invented."
         case .syncWatch:
             coach.refreshAndSendToWatch()
-            turns.append(IMUNCoachTurn(role: "assistant", text:
-                "Requested a refreshed phone and cloud workout schedule for iMun Watch."))
+            reply = "Requested today's training plan to sync over iMun's phone and cloud connections."
         case .setTheme:
-            guard let theme = action.themeID,
-                  IMUNPreset(rawValue: theme) != nil else {
-                errorMessage = "The requested theme is not available."
+            guard let theme = action.themeID else { return }
+            designPreset = theme
+            coach.publishDesignToCloud()
+            reply = "Changed the visual theme to \(IMUNPreset(rawValue: theme)?.title ?? theme)."
+        case .createStrength:
+            coach.newWorkout(date: Date(), title: actionWorkoutTitle)
+            selectedActivity = "weightlifting"
+            selectedTab = "training"
+            reply = "Created a custom strength workout with no fabricated sets. Open Training to add your exercises."
+        case .createRun:
+            guard coach.createRunToday(
+                title: actionWorkoutTitle, minutes: actionRunMinutes,
+                minimumBPM: actionRunHasHR ? actionRunMinHR : nil,
+                maximumBPM: actionRunHasHR ? actionRunMaxHR : nil)
+            else {
+                errorMessage = coach.status
                 return
             }
-            designPreset = theme
-            turns.append(IMUNCoachTurn(role: "assistant", text:
-                "Changed iMun's appearance preset to \(IMUNPreset(rawValue: theme)!.title)."))
+            selectedActivity = "run"
+            selectedTab = "training"
+            reply = "Created today's \(actionRunMinutes)-minute run with your selected targets and queued it for iMun Watch."
+        case .renameStrength:
+            guard let workout = coach.workout else { return }
+            coach.saveEditedWorkout(HCWorkout(id: workout.id, date: workout.date,
+                sessionKey: workout.sessionKey, title: actionWorkoutTitle,
+                exercises: workout.exercises, isPreview: false))
+            reply = "Saved the requested strength workout name without changing exercises or completed sets."
+        case .selectTraining:
+            guard let activity = action.parameter else { return }
+            selectedActivity = activity
+            selectedTab = "training"
+            reply = "Opened the \(activity == "run" ? "Running" : "Strength") training view."
+        case .openTab:
+            guard let destination = action.parameter else { return }
+            selectedTab = destination
+            reply = "Opened the \(destination.capitalized) tab."
+        case .setMotivation:
+            guard let source = action.parameter else { return }
+            motivationSource = source
+            reply = "Updated motivation to \(source). It remains separate from your visual theme."
+        case .setRestDuration:
+            guard let value = action.parameter.flatMap(Int.init) else { return }
+            restSeconds = value
+            coach.sendToWatch()
+            reply = value == 0 ? "Rest duration now follows your prescribed workout." :
+                "Rest timer changed to \(value) seconds."
+        case .setWatchHaptics:
+            let value = action.parameter == "on"
+            watchHaptics = value
+            coach.sendToWatch()
+            reply = "Watch haptics turned \(value ? "on" : "off")."
+        case .setRunVoiceCues:
+            let value = action.parameter == "on"
+            runVoiceCues = value
+            coach.sendToWatch()
+            reply = "Running voice cues turned \(value ? "on" : "off")."
+        case .setRunAutoLaps:
+            let value = action.parameter == "on"
+            runAutoLaps = value
+            coach.sendToWatch()
+            reply = "Automatic running laps turned \(value ? "on" : "off")."
         }
+        turns.append(IMUNCoachTurn(role: "assistant", text: reply))
         pendingAction = nil
         errorMessage = nil
         persist()
@@ -3003,7 +3134,8 @@ private struct PremiumCoachConversation: View {
         let questionText = question.trimmingCharacters(in: .whitespacesAndNewlines)
         guard canSend else { return }
         if let proposed = IMUNCoachActionInterpreter.propose(
-            questionText, sessions: coach.plannedSessions, run: coach.runPlan) {
+            questionText, sessions: coach.plannedSessions,
+            workout: coach.workout, run: coach.runPlan) {
             question = ""
             composerFocused = false
             errorMessage = nil
@@ -3013,6 +3145,10 @@ private struct PremiumCoachConversation: View {
             pendingAction = proposed
             selectedActionWorkoutID = proposed.suggestedWorkoutID ?? ""
             actionMoveDate = proposed.suggestedDate ?? Date()
+            actionWorkoutTitle = proposed.parameter ??
+                (proposed.kind == .createRun ? "Easy Run" : "Custom Strength Workout")
+            actionRunMinutes = Int(proposed.parameter ?? "") ?? 40
+            actionRunHasHR = false
             persist()
             return
         }
