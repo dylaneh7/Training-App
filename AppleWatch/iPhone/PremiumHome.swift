@@ -2017,7 +2017,7 @@ private struct HCHealthTrendChart: View {
             }
         }
         .chartXAxis(.hidden)
-        .chartYAxis(.automatic(desiredCount: 3))
+        .chartYAxis(.automatic)
         .frame(height: 120)
         .padding(.top, 6)
         .accessibilityLabel("Recent \(reading.label) from \(reading.source)")
