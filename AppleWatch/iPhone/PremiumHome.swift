@@ -124,18 +124,9 @@ struct PremiumHomeView: View {
         .environmentObject(tredictImporter)
         .environmentObject(tredictPlans)
         .overlay(alignment: .bottomTrailing) {
-            Button(action: presentIsaiah) {
-                IMUNIsaiahMark(size: 53)
-                    .padding(3)
-                    .background(HCDesign.electric,
-                                in: RoundedRectangle(cornerRadius: 15))
-                    .shadow(color: .black.opacity(0.22), radius: 9, y: 4)
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Ask IsAIah about this screen")
-            .accessibilityHint("Open your contextual assistant")
-            .padding(.trailing, 18)
-            .padding(.bottom, 70)
+            IMUNIsaiahLauncherButton(glow: HCDesign.electric, action: presentIsaiah)
+                .padding(.trailing, 18)
+                .padding(.bottom, 70)
         }
         .sheet(isPresented: $isIsaiahPresented) {
             NavigationStack {
@@ -3079,19 +3070,16 @@ private struct PremiumCoachConversation: View {
     }
 
     private var isaiahBanner: some View {
-        VStack(spacing: 12) {
-            // Render the approved IsAIah artwork across the entire header.
-            // Unlike the previous SwiftUI text approximation, this is traced
-            // from the chosen design and remains consistent in every theme.
+        VStack(alignment: .leading, spacing: 7) {
+            // Keep the approved logo intact while giving the conversation room.
             IMUNIsaiahArtwork(layout: .full)
-                .frame(height: 112)
+                .frame(height: 61)
                 .frame(maxWidth: .infinity)
-                .padding(.top, 3)
-            HStack {
+            HStack(spacing: 8) {
                 Label(launchContext.components(separatedBy: "\n").first ??
                       "Current iMun screen", systemImage: "rectangle.on.rectangle")
                     .lineLimit(1)
-                Spacer()
+                Spacer(minLength: 8)
                 if !turns.isEmpty {
                     Button {
                         turns.removeAll()
@@ -3105,12 +3093,13 @@ private struct PremiumCoachConversation: View {
                     .accessibilityLabel("New IsAIah conversation")
                 }
             }
-            .font(.system(size: 11, weight: .semibold))
+            .font(.system(size: 10, weight: .medium))
             .foregroundStyle(HCDesign.electric)
         }
         .frame(maxWidth: .infinity)
-        .padding(.horizontal, 20)
-        .padding(.bottom, 19)
+        .padding(.horizontal, 18)
+        .padding(.top, 7)
+        .padding(.bottom, 10)
         .background(IMUNIsaiahBrand.graphite)
     }
 
