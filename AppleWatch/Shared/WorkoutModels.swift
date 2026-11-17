@@ -220,6 +220,8 @@ enum HCPayload {
     static let watchHaptics = "hcWatchHaptics"
     static let completedRun = "completedRun"
     static let loggedSet = "loggedSet"
+    static let workoutUndo = "imunWorkoutUndoV1"
+    static let workoutUndos = "imunWorkoutUndosV1"
     static let kind = "kind"
     static let data = "payload"
 }
