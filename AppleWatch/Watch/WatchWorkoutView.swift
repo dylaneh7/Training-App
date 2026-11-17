@@ -464,11 +464,13 @@ struct WatchWorkoutView: View {
             if store.cloudSignedIn {
                 store.refreshCloudWorkout()
                 store.refreshCloudSets()
+                store.refreshCloudAppearance(force: true)
             }
         }
         .onReceive(progressPulse) { _ in
             if scenePhase == .active && store.cloudSignedIn {
                 store.refreshCloudSets()
+                store.refreshCloudAppearance()
             }
         }
         .onChange(of: scenePhase) { _, phase in
@@ -1057,6 +1059,7 @@ private struct WatchMovementPicker: View {
 }
 
 private struct WatchPreferences: View {
+    @EnvironmentObject private var store: WatchWorkoutStore
     @AppStorage("hcDesignPreset") private var preset = "techno"
     @AppStorage("hcDesignCustomGeometry") private var customGeometry = false
     @AppStorage("hcDesignShape") private var cardShape = "rounded"
@@ -1089,8 +1092,27 @@ private struct WatchPreferences: View {
                         Text(option.title).tag(option.rawValue)
                     }
                 }
-                Toggle("Use iPhone style when sent", isOn: $acceptPhoneLook)
+                Toggle("Use iPhone design from cloud", isOn: $acceptPhoneLook)
                     .tint(WTheme.lime)
+                    .onChange(of: acceptPhoneLook) { _, enabled in
+                        if enabled { store.refreshCloudAppearance(force: true) }
+                    }
+                if acceptPhoneLook {
+                    Button {
+                        store.refreshCloudAppearance(force: true)
+                    } label: {
+                        Label("FETCH IPHONE DESIGN", systemImage: "icloud.and.arrow.down")
+                    }
+                    .disabled(!store.cloudSignedIn)
+                    Text(store.designCloudStatus)
+                        .font(.system(size: 10))
+                        .foregroundStyle(WTheme.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                } else {
+                    Text("Watch colors and layout stay independent.")
+                        .font(.system(size: 10))
+                        .foregroundStyle(WTheme.muted)
+                }
                 Toggle("Custom layout", isOn: $customGeometry)
                     .tint(WTheme.lime)
                 if customGeometry {
