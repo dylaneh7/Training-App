@@ -2624,6 +2624,7 @@ private struct PremiumRecoveryPage: View {
 
 // Chat is the home of Coach. The training calendar and settings sit beneath it.
 private struct PremiumCoachPage: View {
+    let launchContext: String
     @EnvironmentObject private var coach: PhoneWorkoutBridge
     @State private var movingSession: HCPlannedSession?
     @State private var showUpcomingSessions = false
@@ -2648,10 +2649,13 @@ private struct PremiumCoachPage: View {
                                 .font(HCDesign.label(10))
                                 .tracking(1.5)
                                 .foregroundStyle(HCDesign.aqua)
-                            Text("IsAIah")
-                                .font(HCDesign.display(32))
-                                .tracking(-1)
-                                .foregroundStyle(HCDesign.ink)
+                            HStack(spacing: 12) {
+                                IMUNIsaiahMark(size: 44)
+                                IMUNIsaiahWordmark(size: 29)
+                            }
+                            .padding(8)
+                            .background(IMUNIsaiahBrand.graphite,
+                                        in: RoundedRectangle(cornerRadius: 12))
                             Text("Your training. One conversation.")
                                 .font(.system(size: 13))
                                 .foregroundStyle(HCDesign.secondary)
@@ -2662,7 +2666,7 @@ private struct PremiumCoachPage: View {
                         PremiumLogin()
                     }
 
-                    PremiumCoachConversation()
+                    PremiumCoachConversation(launchContext: launchContext)
                         .id("imun-coach-chat")
 
                     DisclosureGroup(isExpanded: $showUpcomingSessions) {
@@ -2871,6 +2875,7 @@ private struct IMUNIsAIahThinking: View {
 // A real conversation surface, not a backend diagnostics panel. Chats remain
 // on the phone. Nothing is transmitted until the athlete chooses Send.
 private struct PremiumCoachConversation: View {
+    let launchContext: String
     @EnvironmentObject private var coach: PhoneWorkoutBridge
     @AppStorage("hcAIShareRecovery") private var shareRecovery = false
     @AppStorage("hcCoachConversationLocalV1") private var storedConversation = Data()
@@ -2928,10 +2933,11 @@ private struct PremiumCoachConversation: View {
                             .font(.system(size: 10, weight: .semibold))
                             .tracking(1.3)
                             .foregroundStyle(HCDesign.secondary)
-                        Text("IsAIah")
-                            .font(.system(size: 20, weight: .semibold))
-                            .tracking(-0.4)
-                            .foregroundStyle(HCDesign.ink)
+                        IMUNIsaiahWordmark(size: 22)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
+                            .background(IMUNIsaiahBrand.graphite,
+                                        in: RoundedRectangle(cornerRadius: 10))
                         Text("Training decisions, made simpler.")
                             .font(.system(size: 12))
                             .foregroundStyle(HCDesign.secondary)
@@ -3427,7 +3433,8 @@ private struct PremiumCoachConversation: View {
         case .openTab:
             guard let destination = action.parameter else { return }
             selectedTab = destination
-            reply = "Opened the \(destination.capitalized) tab."
+            reply = destination == "coach" ?
+                "Opened IsAIah." : "Opened the \(destination.capitalized) tab."
         case .setMotivation:
             guard let source = action.parameter else { return }
             motivationSource = source
@@ -3537,7 +3544,7 @@ private struct PremiumCoachConversation: View {
             if IMUNCoachActionInterpreter.mightNeedModelProposal(questionText) {
                 await MainActor.run { thinkingPhase = "Reviewing your request" }
                 if let classification = try? await coach.classifyIMUNCoachAction(
-                    request: questionText),
+                    request: questionText, screenContext: launchContext),
                    let proposal = IMUNCoachActionInterpreter.proposalFromModel(
                     classification, sessions: coach.plannedSessions,
                     workout: coach.workout, run: coach.runPlan) {
@@ -3552,7 +3559,8 @@ private struct PremiumCoachConversation: View {
                 let reply = try await coach.askIMUNCoach(
                     question: questionText,
                     shareRecovery: shareRecovery,
-                    recentConversation: history)
+                    recentConversation: history,
+                     screenContext: launchContext)
                 await MainActor.run {
                     turns.append(IMUNCoachTurn(role: "assistant", text: reply))
                     isSending = false
