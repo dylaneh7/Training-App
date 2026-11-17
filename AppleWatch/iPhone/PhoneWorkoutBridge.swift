@@ -8,6 +8,8 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
     @Published private(set) var workout: HCWorkout?
     @Published private(set) var runPlan: HCRunPlan?
     @Published private(set) var loggedSets: [HCLoggedSet] = []
+    @Published private(set) var cloudRecordedSets: [HCLoggedSet] = []
+    @Published private(set) var progressSyncStatus = "Progress saved locally"
     @Published private(set) var completedWatchRuns: [HCRunFinished] = []
     @Published private(set) var runHistory: [HCProgressRun] = []
     @Published private(set) var plannedSessions: [HCPlannedSession] = []
@@ -45,6 +47,7 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
     private let decoder = JSONDecoder()
     private var uploadedIDs: Set<UUID> = []
     private var syncingQueue = false
+    private var fetchingProgress = false
     private var pendingEditedWorkout: HCWorkout?
     // A plan is authoritative only after today's Command Center refresh succeeds.
     private var confirmedScheduleDate: String?
@@ -255,6 +258,7 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
                         self.save(archived, name: "imun-source-archive-date.json")
                     }
                     self.performanceHistory = history
+                    self.refreshCloudProgress()
                     self.remoteRunHistory = priorRuns
                     self.mergeRunHistory()
                     self.cloudRecoveryHistory = recovery
@@ -326,6 +330,7 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
                     let manualDelivery = forceWatchDelivery || self.sendAfterCalendarRefresh
                     self.sendAfterCalendarRefresh = false
                     self.sendToWatch(forceQueue: manualDelivery)
+                    self.refreshCloudProgress()
                     if published == nil, let ready = self.workout, ready.date == day {
                         Task { try? await self.cloud.saveWorkout(ready) }
                     }
@@ -825,16 +830,49 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
         try? FileManager.default.removeItem(at: local("iphone-set-start.json"))
     }
 
+    /// All raw device records remain available for corrections and exports,
+    /// but only one dated prescribed set slot counts toward progress.
+    var combinedRecordedSets: [HCLoggedSet] {
+        HCSetReconciliation.allRecords(local: loggedSets, cloud: cloudRecordedSets)
+    }
+
+    func completedSets(for plan: HCWorkout) -> [HCLoggedSet] {
+        HCSetReconciliation.completed(for: plan, records: combinedRecordedSets)
+    }
+
+    func refreshCloudProgress() {
+        guard signedIn, !fetchingProgress,
+              let requested = workout,
+              requested.date == HCPlanBuilder.dateString(Date()) else { return }
+        fetchingProgress = true
+        Task {
+            do {
+                let entries = try await cloud.fetchCompletedSets(for: requested)
+                DispatchQueue.main.async {
+                    self.fetchingProgress = false
+                    guard self.workout?.id == requested.id else { return }
+                    self.cloudRecordedSets = entries
+                    self.progressSyncStatus = "Phone and Watch progress synced"
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    self.fetchingProgress = false
+                    self.progressSyncStatus = "Offline progress retained: " +
+                        error.localizedDescription
+                }
+            }
+        }
+    }
+
     func logFromPhone(exercise: HCExercise, weightLb: Double?, reps: Int, rir: Double?) {
         guard let workout, reps > 0, reps <= 300,
               weightLb == nil || (weightLb! >= 0 && weightLb! <= 3000) else { return }
-        let existing = loggedSets.filter {
-            $0.workoutID == workout.id && $0.exerciseID == exercise.id
-        }.count
+        let next = HCSetReconciliation.nextSetIndex(
+            for: exercise, workout: workout, records: combinedRecordedSets)
         var entry = HCLoggedSet(id:UUID(),workoutID:workout.id,workoutDate:workout.date,
                                 sessionKey:workout.sessionKey,workoutTitle:workout.title,
                                 exerciseID:exercise.id,exerciseName:exercise.name,
-                                exerciseIndex:exercise.exerciseIndex,index:existing+1,
+                                exerciseIndex:exercise.exerciseIndex,index:next,
                                 weightLb:weightLb,reps:reps,rir:rir,completedAt:Date())
         entry.source = "iPhone"
         if phoneSetExerciseID == exercise.id, let started = phoneSetStartedAt {
@@ -893,6 +931,7 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
         updatePendingCount()
         status = "Set saved locally"
         retryPendingCloudSets()
+        refreshCloudProgress()
     }
 
     private func acceptRun(_ entry: HCRunFinished) {
@@ -928,6 +967,7 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
                 self.save(Array(self.uploadedIDs),name:"uploaded-watch-set-ids.json")
                 self.updatePendingCount()
                 self.syncingQueue = false
+                self.refreshCloudProgress()
                 self.status = errorMessage.map {
                     "Saved offline. Sync will retry: \($0)"
                 } ?? "Workout data synced"
