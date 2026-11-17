@@ -4739,6 +4739,39 @@ private struct PremiumCoachConversation: View {
     }
 }
 
+/// Explicit, strictly attributed physiological source for EITAN and the
+/// opt-in IsAIah context. Tredict remains available for training history.
+private struct HCEitanPrimaryWearableSelector: View {
+    @Binding var primaryWearable: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            Text("PRIMARY WEARABLE")
+                .font(HCDesign.label(10))
+                .foregroundStyle(HCDesign.secondary)
+            Picker("Primary wearable", selection: $primaryWearable) {
+                Text("Automatic").tag("Auto")
+                Text("WHOOP").tag("WHOOP")
+                Text("Apple Watch").tag("Apple Watch")
+                Text("Garmin").tag("Garmin")
+            }
+            .pickerStyle(.menu)
+            .tint(HCDesign.electric)
+            Text("EITAN and IsAIah prioritize this wearable's HRV, resting heart rate, sleep and physiological trends. No fallback to another device's readings when a primary is selected.")
+                .font(.system(size: 11))
+                .foregroundStyle(HCDesign.secondary)
+            if primaryWearable == "WHOOP" {
+                Text("WHOOP exports sleep, resting HR and respiratory rate to Apple Health when enabled, but NOT WHOOP HRV (RMSSD). WHOOP HRV needs a separate authorized WHOOP API integration; Apple Watch HRV will not be substituted.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(HCDesign.secondary)
+            }
+            Text("Tredict stays connected for running plans, workouts and historical training. Tredict/Garmin recovery history does not become EITAN's active wearable.")
+                .font(.system(size: 11))
+                .foregroundStyle(HCDesign.secondary)
+        }
+    }
+}
+
 // All original settings and integrations remain available through the Coach gear.
 private struct PremiumSettingsPage: View {
     @EnvironmentObject private var coach: PhoneWorkoutBridge
@@ -4836,30 +4869,8 @@ private struct PremiumSettingsPage: View {
                         .tint(HCDesign.electric)
                         if eitanEnabled {
                             Divider()
-                            VStack(alignment: .leading, spacing: 7) {
-                                Text("PRIMARY WEARABLE")
-                                    .font(HCDesign.label(10))
-                                    .foregroundStyle(HCDesign.secondary)
-                                Picker("Primary wearable", selection: $primaryWearable) {
-                                    Text("Automatic").tag("Auto")
-                                    Text("WHOOP").tag("WHOOP")
-                                    Text("Apple Watch").tag("Apple Watch")
-                                    Text("Garmin").tag("Garmin")
-                                }
-                                .pickerStyle(.menu)
-                                .tint(HCDesign.electric)
-                                Text("EITAN and IsAIah prioritize this wearable for HRV, resting heart rate, sleep, and other physiological trends. Selecting a device excludes other wearables' biometrics instead of silently falling back.")
-                                    .font(.system(size: 11))
-                                    .foregroundStyle(HCDesign.secondary)
-                                if primaryWearable == "WHOOP" {
-                                    Text("WHOOP → Apple Health can provide sleep, resting HR and respiratory rate. WHOOP HRV (RMSSD) is NOT exported to Apple Health; direct WHOOP OAuth access is needed for that measurement. Apple Watch HRV will not replace it.")
-                                        .font(.system(size: 11))
-                                        .foregroundStyle(HCDesign.secondary)
-                                }
-                                Text("Tredict remains connected for workouts, running plans and training history. Garmin recovery imported through Tredict is not used as your active EITAN wearable.")
-                                    .font(.system(size: 11))
-                                    .foregroundStyle(HCDesign.secondary)
-                            }
+                            HCEitanPrimaryWearableSelector(
+                                primaryWearable: $primaryWearable)
                             Divider()
                             Toggle(isOn: $eitanUseHealth) {
                                 VStack(alignment: .leading, spacing: 3) {
