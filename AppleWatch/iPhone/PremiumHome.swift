@@ -2541,7 +2541,7 @@ private struct PremiumRecoveryPage: View {
                             HCOutlineButton(title: appleHealth.loading ?
                                             "Reading…" : "Refresh",
                                             icon: "arrow.clockwise") {
-                                appleHealth.refreshIfAuthorized()
+                                appleHealth.refreshIfAuthorized(force: true)
                             }
                         }
                         if appleHealth.loading {
@@ -2632,12 +2632,13 @@ private struct PremiumRecoveryPage: View {
         }
         .onAppear {
             rebuildSignalCache()
+            // Reopening Health should not trigger another 35-day HealthKit
+            // scan if the existing source snapshot is still fresh.
             appleHealth.refreshIfAuthorized()
         }
-        .onReceive(appleHealth.$metrics) { _ in
-            DispatchQueue.main.async { rebuildSignalCache() }
-        }
         .onReceive(appleHealth.$metricHistory) { _ in
+            // HealthKit publishes the entire batch once, with metrics already
+            // updated. Rebuilding on both arrays duplicates expensive work.
             DispatchQueue.main.async { rebuildSignalCache() }
         }
         .onReceive(coach.$recoveryHistory) { _ in
