@@ -1470,6 +1470,8 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
               !combinedUndoRecords.contains(where: { $0.applies(to: entry) })
         else { return }
         appendUndo(HCWorkoutUndo.set(entry), forwardToWatch: true)
+        // Give the athlete a clean rest state before repeating the set.
+        if phoneSetStartedAt == nil { skipPhoneRest() }
         status = "Set undone. Syncing the correction…"
     }
 
@@ -1561,6 +1563,14 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
                 self.status = errorMessage.map {
                     "Saved offline. Sync will retry: \($0)"
                 } ?? "Workout data synced"
+                // If an undo arrived while an upload was in flight, run
+                // the new correction as soon as the previous batch finished.
+                if errorMessage == nil &&
+                   self.undoRecords.contains(where: {
+                       !self.uploadedUndoIDs.contains($0.id)
+                   }) {
+                    self.retryPendingCloudSets()
+                }
             }
         }
     }
