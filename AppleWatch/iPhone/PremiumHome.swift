@@ -895,6 +895,7 @@ private struct PremiumRunPage: View {
     @EnvironmentObject private var importer: HCRunHealthImporter
     private var date: Date { Date() }
     @State private var movingSession: HCPlannedSession?
+    @State private var showingStructuredRun = false
 
     private var actual: HCProgressRun? {
         coach.runHistory.first { $0.date == HCPlanBuilder.dateString(date) }
@@ -946,10 +947,12 @@ private struct PremiumRunPage: View {
                             HCMetricBlock(label: "Session",
                                           value: coach.runPlan?.isCompleted == true ? "DONE" : "READY")
                         }
-                        HCFilledButton(title: "SEND RUN TO WATCH", icon: "applewatch",
+                        HCFilledButton(title: "BUILD & SEND INTERVAL RUN", icon: "applewatch",
                                        tint: HCDesign.aqua, disabled: coach.runPlan == nil) {
-                            coach.sendToWatch()
+                            showingStructuredRun = true
                         }
+                        Text("Set warm-up, intervals, recovery and heart-rate targets in Apple's Workout app.")
+                            .font(.caption2).foregroundStyle(HCDesign.secondary)
                         if let entry = coach.plannedSessions.first(where: {
                             $0.date == HCPlanBuilder.dateString(date) && $0.kind == "run"
                         }) {
@@ -1665,6 +1668,11 @@ private struct PremiumProgressPage: View {
         .sheet(item: $movingSession) { entry in
             IMUNMoveWorkoutSheet(entry: entry)
                 .environmentObject(coach)
+        }
+        .sheet(isPresented: $showingStructuredRun) {
+            if let plan = coach.runPlan {
+                IMUNStructuredRunEditor(plan: plan)
+            }
         }
     }
 }
