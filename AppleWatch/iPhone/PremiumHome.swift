@@ -906,6 +906,7 @@ private struct PremiumRunPage: View {
     private var date: Date { Date() }
     @State private var movingSession: HCPlannedSession?
     @State private var showingStructuredRun = false
+    @State private var showingCreateRun = false
 
     private var actual: HCProgressRun? {
         coach.runHistory.first { $0.date == HCPlanBuilder.dateString(date) }
@@ -960,6 +961,12 @@ private struct PremiumRunPage: View {
                         HCFilledButton(title: "BUILD & SEND INTERVAL RUN", icon: "applewatch",
                                        tint: HCDesign.aqua, disabled: coach.runPlan == nil) {
                             showingStructuredRun = true
+                        }
+                        if coach.runPlan == nil {
+                            HCFilledButton(title: "CREATE TODAY'S RUN", icon: "plus.circle",
+                                           tint: HCDesign.aqua) {
+                                showingCreateRun = true
+                            }
                         }
                         Text("Set warm-up, intervals, recovery and heart-rate targets for Apple's Workout app.")
                             .font(.caption2).foregroundStyle(HCDesign.secondary)
@@ -1149,6 +1156,75 @@ private struct PremiumRunPage: View {
         .sheet(isPresented: $showingStructuredRun) {
             if let plan = coach.runPlan {
                 IMUNStructuredRunEditor(plan: plan)
+            }
+        }
+        .sheet(isPresented: $showingCreateRun) {
+            IMUNCreateRunSheet()
+                .environmentObject(coach)
+        }
+    }
+}
+
+
+/// Prescribe a run without inventing workout measurements or modifying an
+/// external Tredict/Garmin calendar. The new run also publishes to iMun Watch.
+private struct IMUNCreateRunSheet: View {
+    @EnvironmentObject private var coach: PhoneWorkoutBridge
+    @Environment(\.dismiss) private var dismiss
+    @State private var title = "Easy Run"
+    @State private var minutes = 40
+    @State private var targetHR = false
+    @State private var minBPM = 120
+    @State private var maxBPM = 150
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Today's run") {
+                    TextField("Workout title", text: $title)
+                    HStack {
+                        Text("Duration (minutes)")
+                        Spacer()
+                        TextField("Minutes", value: $minutes, format: .number)
+                            .keyboardType(.numberPad)
+                            .multilineTextAlignment(.trailing)
+                    }
+                    Toggle("Target heart-rate range", isOn: $targetHR)
+                    if targetHR {
+                        HStack {
+                            TextField("Minimum BPM", value: $minBPM, format: .number)
+                                .keyboardType(.numberPad)
+                            Text("to")
+                            TextField("Maximum BPM", value: $maxBPM, format: .number)
+                                .keyboardType(.numberPad)
+                        }
+                    }
+                    Text("Creates a prescribed running session in iMun and syncs it to iMun Watch. You can then send it to Apple Workout from the Running screen.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                Section {
+                    Button("Create run") {
+                        if coach.createRunToday(
+                            title: title, minutes: minutes,
+                            minimumBPM: targetHR ? minBPM : nil,
+                            maximumBPM: targetHR ? maxBPM : nil) {
+                            dismiss()
+                        }
+                    }
+                    .disabled(title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
+                              !(1...360).contains(minutes) ||
+                              (targetHR && (!(35...230).contains(minBPM) ||
+                                            !(35...230).contains(maxBPM) ||
+                                            minBPM > maxBPM)))
+                    Text(coach.status).font(.caption).foregroundStyle(.secondary)
+                }
+            }
+            .navigationTitle("Create Run")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
             }
         }
     }
