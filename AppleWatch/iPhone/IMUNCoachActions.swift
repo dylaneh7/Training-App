@@ -671,6 +671,85 @@ enum IMUNCoachActionInterpreter {
 }
 
 
+/// Typed editor behind Coach's confirmation. It edits the prescribed plan
+/// through PhoneWorkoutBridge, never bypassing workout validation or cloud sync.
+struct IMUNCoachWorkoutEditForm: View {
+    @EnvironmentObject private var coach: PhoneWorkoutBridge
+    @Binding var operation: IMUNCoachExerciseOperation
+    @Binding var selectedExerciseID: String
+    @Binding var exerciseName: String
+    @Binding var instructions: String
+    @Binding var sets: Int
+    @Binding var repMin: Int
+    @Binding var repMax: Int
+    @Binding var restSeconds: Int
+    @Binding var weightText: String
+    let onSelectExercise: (String) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 13) {
+            Picker("Edit type", selection: $operation) {
+                ForEach(IMUNCoachExerciseOperation.allCases) { choice in
+                    Text(choice.title).tag(choice)
+                }
+            }
+            .tint(HCDesign.electric)
+
+            if operation != .add {
+                Picker("Exercise", selection: $selectedExerciseID) {
+                    Text("Choose exercise").tag("")
+                    ForEach(coach.workout?.exercises ?? []) { exercise in
+                        Text(exercise.name).tag(exercise.id)
+                    }
+                }
+                .tint(HCDesign.electric)
+                .onChange(of: selectedExerciseID) { _, value in
+                    onSelectExercise(value)
+                }
+            }
+
+            if operation == .add || operation == .replace {
+                TextField("Exercise name", text: $exerciseName)
+                    .textInputAutocapitalization(.words)
+                    .padding(10)
+                    .background(HCDesign.raised,
+                        in: RoundedRectangle(cornerRadius: 9))
+                TextField("Instructions (optional)", text: $instructions, axis: .vertical)
+                    .lineLimit(2...4)
+                    .padding(10)
+                    .background(HCDesign.raised,
+                        in: RoundedRectangle(cornerRadius: 9))
+            }
+
+            if operation == .update || operation == .add ||
+               operation == .replace {
+                Stepper("Working sets: \(sets)", value: $sets, in: 1...12)
+                Stepper("Minimum reps: \(repMin)", value: $repMin, in: 1...30)
+                Stepper("Maximum reps: \(repMax)", value: $repMax, in: 1...40)
+                Stepper("Rest: \(restSeconds) seconds", value: $restSeconds,
+                        in: 15...360, step: 15)
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text("Suggested load (lb)")
+                        .font(.system(size: 13, weight: .medium))
+                    Spacer()
+                    TextField("Optional", text: $weightText)
+                        .keyboardType(.decimalPad)
+                        .multilineTextAlignment(.trailing)
+                        .frame(width: 100)
+                }
+                Text("Suggested load is not a record of weight lifted. Clear it to leave the target unspecified.")
+                    .font(.caption2).foregroundStyle(HCDesign.secondary)
+            } else if operation == .remove || operation == .replace {
+                Text("iMun will not remove or replace an exercise with completed or active sets.")
+                    .font(.caption).foregroundStyle(HCDesign.secondary)
+            } else {
+                Text("Reordering keeps exercise identities and recorded workout history intact.")
+                    .font(.caption).foregroundStyle(HCDesign.secondary)
+            }
+        }
+    }
+}
+
 /// Dedicated review UI keeps the conversation lightweight and gives every
 /// persistent app change the same approval/cancel controls.
 struct IMUNCoachActionReviewCard: View {
@@ -684,6 +763,16 @@ struct IMUNCoachActionReviewCard: View {
     @Binding var runHasHR: Bool
     @Binding var runMinBPM: Int
     @Binding var runMaxBPM: Int
+    @Binding var editOperation: IMUNCoachExerciseOperation
+    @Binding var selectedEditExerciseID: String
+    @Binding var editExerciseName: String
+    @Binding var editInstructions: String
+    @Binding var editSets: Int
+    @Binding var editRepMin: Int
+    @Binding var editRepMax: Int
+    @Binding var editRestSeconds: Int
+    @Binding var editWeightText: String
+    let onSelectEditExercise: (String) -> Void
     let canConfirm: Bool
     let onCancel: () -> Void
     let onConfirm: () -> Void
@@ -726,6 +815,19 @@ struct IMUNCoachActionReviewCard: View {
                     }
                     .tint(HCDesign.aqua)
                 }
+                if action.kind == .editStrength {
+                    IMUNCoachWorkoutEditForm(
+                        operation: $editOperation,
+                        selectedExerciseID: $selectedEditExerciseID,
+                        exerciseName: $editExerciseName,
+                        instructions: $editInstructions,
+                        sets: $editSets,
+                        repMin: $editRepMin,
+                        repMax: $editRepMax,
+                        restSeconds: $editRestSeconds,
+                        weightText: $editWeightText,
+                        onSelectExercise: onSelectEditExercise)
+                }
                 if action.kind == .createStrength ||
                    action.kind == .renameStrength {
                     TextField("Workout name", text: $workoutTitle)
@@ -750,7 +852,8 @@ struct IMUNCoachActionReviewCard: View {
                 if let parameter = action.parameter,
                    action.kind != .createRun &&
                    action.kind != .createStrength &&
-                   action.kind != .renameStrength {
+                   action.kind != .renameStrength &&
+                   action.kind != .editStrength {
                     Text("Selected value: \(parameter)")
                         .font(.caption2)
                         .foregroundStyle(HCDesign.secondary)
