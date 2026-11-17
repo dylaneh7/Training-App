@@ -25,13 +25,13 @@ enum IMUNWidgetPublisher {
         } ?? "—"
         let running = run?.title ?? ""
         let values = health.metrics
-        func best(_ term: String) -> HCHealthMetric? {
-            values.filter {
-                $0.name.localizedCaseInsensitiveContains(term)
+        func best(_ terms: [String]) -> HCHealthMetric? {
+            values.filter { metric in
+                terms.contains { metric.name.localizedCaseInsensitiveContains($0) }
             }.sorted { $0.date > $1.date }.first
         }
-        let sleep = allowHealth ? best("Sleep") : nil
-        let hrv = allowHealth ? best("HRV") : nil
+        let sleep = allowHealth ? best(["Total asleep"]) : nil
+        let hrv = allowHealth ? best(["HRV", "Heart rate variability"]) : nil
         let source = (sleep ?? hrv).map { $0.source + " · " + $0.date }
 
         // Check for an identical payload before telling WidgetKit to refresh.
