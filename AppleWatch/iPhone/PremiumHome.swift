@@ -131,14 +131,7 @@ struct PremiumHomeView: View {
         .sheet(isPresented: $isIsaiahPresented) {
             NavigationStack {
                 PremiumCoachConversation(launchContext: isaiahLaunchContext)
-                    .toolbar {
-                        ToolbarItem(placement: .topBarTrailing) {
-                            Button("Close", systemImage: "xmark") {
-                                isIsaiahPresented = false
-                            }
-                            .labelStyle(.iconOnly)
-                        }
-                    }
+                    .toolbar(.hidden, for: .navigationBar)
             }
             .environmentObject(coach)
             .environmentObject(appleHealth)
@@ -2883,6 +2876,7 @@ private struct IMUNIsAIahThinking: View {
 // on the phone. Nothing is transmitted until the athlete chooses Send.
 private struct PremiumCoachConversation: View {
     let launchContext: String
+    @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var coach: PhoneWorkoutBridge
     @EnvironmentObject private var appleHealth: HCAppleHealthReader
     @AppStorage("hcSelectedHealthCategory") private var selectedHealthCategory = "Overview"
@@ -3069,38 +3063,62 @@ private struct PremiumCoachConversation: View {
         }
     }
 
+    // One slim assistant toolbar replaces both the oversized artwork banner
+    // and the extra iOS navigation bar, maximizing the conversation viewport.
     private var isaiahBanner: some View {
-        VStack(alignment: .leading, spacing: 7) {
-            // Keep the approved logo intact while giving the conversation room.
+        HStack(spacing: 10) {
             IMUNIsaiahArtwork(layout: .full)
-                .frame(height: 61)
-                .frame(maxWidth: .infinity)
-            HStack(spacing: 8) {
-                Label(launchContext.components(separatedBy: "\n").first ??
-                      "Current iMun screen", systemImage: "rectangle.on.rectangle")
+                .frame(width: 121, height: 26)
+                .accessibilityLabel("IsAIah")
+            Spacer(minLength: 2)
+            HStack(spacing: 4) {
+                Circle()
+                    .fill(HCDesign.electric)
+                    .frame(width: 4, height: 4)
+                Text((launchContext.components(separatedBy: "\n").first ??
+                      "iMun").replacingOccurrences(of: "Screen: ", with: ""))
                     .lineLimit(1)
-                Spacer(minLength: 8)
-                if !turns.isEmpty {
-                    Button {
-                        turns.removeAll()
-                        storedConversation = Data()
-                        pendingAction = nil
-                        errorMessage = nil
-                        composerFocused = true
-                    } label: {
-                        Image(systemName: "square.and.pencil")
-                    }
-                    .accessibilityLabel("New IsAIah conversation")
-                }
+                    .truncationMode(.tail)
             }
             .font(.system(size: 10, weight: .medium))
-            .foregroundStyle(HCDesign.electric)
+            .foregroundStyle(HCDesign.secondary)
+            .accessibilityLabel("Current screen: " +
+                (launchContext.components(separatedBy: "\n").first ?? "iMun"))
+            if !turns.isEmpty {
+                Button {
+                    turns.removeAll()
+                    storedConversation = Data()
+                    pendingAction = nil
+                    errorMessage = nil
+                    composerFocused = true
+                } label: {
+                    Image(systemName: "square.and.pencil")
+                        .frame(width: 25, height: 28)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("New IsAIah conversation")
+            }
+            Button {
+                dismiss()
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 12, weight: .semibold))
+                    .frame(width: 27, height: 28)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Close IsAIah")
         }
         .frame(maxWidth: .infinity)
-        .padding(.horizontal, 18)
-        .padding(.top, 7)
-        .padding(.bottom, 10)
+        .padding(.horizontal, 15)
+        .padding(.vertical, 8)
+        .foregroundStyle(HCDesign.secondary)
         .background(IMUNIsaiahBrand.graphite)
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(HCDesign.electric.opacity(0.2))
+                .frame(height: 0.5)
+        }
     }
 
     private var composer: some View {
