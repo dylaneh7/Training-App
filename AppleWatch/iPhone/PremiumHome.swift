@@ -508,7 +508,7 @@ struct PremiumHomeView: View {
     @AppStorage("hcEitanUseHealth") private var eitanUseHealth = true
     @AppStorage("hcEitanCoachingEnabled") private var eitanCoachingEnabled = true
     @AppStorage("hcEitanCoachStyle") private var eitanCoachStyle = "driven"
-    @AppStorage("hcPreferredHealthSource") private var eitanSource = "Auto"
+    @AppStorage("hcEitanPrimaryWearable") private var eitanSource = "Auto"
     @Environment(\.scenePhase) private var scenePhase
     private let scheduleRefresh = Timer.publish(every: 60, on: .main, in: .common).autoconnect()
     // Network polling should never be a 15-second render interruption on Health/Progress.
@@ -685,7 +685,10 @@ struct PremiumHomeView: View {
         .onChange(of: eitanCoachingEnabled) { _, _ in
             coach.sendEitanToWatch(forceQueue: true)
         }
-        .onChange(of: eitanSource) { _, _ in updateEitan() }
+        .onChange(of: eitanSource) { _, _ in
+            updateEitan()
+            coach.sendEitanToWatch()
+        }
         )
     }
 
@@ -4616,7 +4619,10 @@ private struct PremiumCoachConversation: View {
         let observations = snapshot.factors.map {
             "\($0.title): \($0.value)/100 (\($0.detail))"
         }.joined(separator: "; ")
-        return "\nEITAN observational body-wellness score: " +
+        let primary = UserDefaults.standard.string(forKey: "hcEitanPrimaryWearable") ?? "Auto"
+        return "\nPRIMARY WEARABLE FOR EITAN: " + primary +
+            ". Use only this wearable for physiological trends when selected; do not substitute Apple Watch HRV for WHOOP or historical Garmin/Tredict recovery. WHOOP HRV is unavailable through Apple Health unless a direct WHOOP API integration is authorized. " +
+            "\nEITAN observational body-wellness score: " +
             (snapshot.value.map(String.init) ?? "insufficient data") +
             "/100. Consecutive lower-score days: \(snapshot.consecutiveLowDays). " +
             "Coverage: \(snapshot.coverage). Factors: \(observations). " +
@@ -4695,7 +4701,9 @@ private struct PremiumCoachConversation: View {
                         (appleHealth.isaiahHealthSnapshot(
                             selectedCategory: selectedHealthCategory,
                             selectedMetric: selectedHealthMetric,
-                            question: questionText) +
+                            question: questionText,
+                            primaryWearable: UserDefaults.standard.string(
+                                forKey: "hcEitanPrimaryWearable") ?? "Auto") +
                          eitanSharedCoachContext) : "")
                 await MainActor.run {
                     turns.append(IMUNCoachTurn(role: "assistant", text: reply))
@@ -4725,6 +4733,7 @@ private struct PremiumSettingsPage: View {
     @AppStorage("hcEitanUseHealth") private var eitanUseHealth = true
     @AppStorage("hcEitanCoachingEnabled") private var eitanCoachingEnabled = true
     @AppStorage("hcEitanCoachStyle") private var eitanCoachStyle = "driven"
+    @AppStorage("hcEitanPrimaryWearable") private var primaryWearable = "Auto"
     @EnvironmentObject private var tredict: HCTredictImporter
     @State private var tredictToken = ""
     @AppStorage("hcAggressiveProgression") private var aggressive = true
@@ -4813,6 +4822,31 @@ private struct PremiumSettingsPage: View {
                         }
                         .tint(HCDesign.electric)
                         if eitanEnabled {
+                            Divider()
+                            VStack(alignment: .leading, spacing: 7) {
+                                Text("PRIMARY WEARABLE")
+                                    .font(HCDesign.label(10))
+                                    .foregroundStyle(HCDesign.secondary)
+                                Picker("Primary wearable", selection: $primaryWearable) {
+                                    Text("Automatic").tag("Auto")
+                                    Text("WHOOP").tag("WHOOP")
+                                    Text("Apple Watch").tag("Apple Watch")
+                                    Text("Garmin").tag("Garmin")
+                                }
+                                .pickerStyle(.menu)
+                                .tint(HCDesign.electric)
+                                Text("EITAN and IsAIah prioritize this wearable for HRV, resting heart rate, sleep, and other physiological trends. Selecting a device excludes other wearables' biometrics instead of silently falling back.")
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(HCDesign.secondary)
+                                if primaryWearable == "WHOOP" {
+                                    Text("WHOOP → Apple Health can provide sleep, resting HR and respiratory rate. WHOOP HRV (RMSSD) is NOT exported to Apple Health; direct WHOOP OAuth access is needed for that measurement. Apple Watch HRV will not replace it.")
+                                        .font(.system(size: 11))
+                                        .foregroundStyle(HCDesign.secondary)
+                                }
+                                Text("Tredict remains connected for workouts, running plans and training history. Garmin recovery imported through Tredict is not used as your active EITAN wearable.")
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(HCDesign.secondary)
+                            }
                             Divider()
                             Toggle(isOn: $eitanUseHealth) {
                                 VStack(alignment: .leading, spacing: 3) {
