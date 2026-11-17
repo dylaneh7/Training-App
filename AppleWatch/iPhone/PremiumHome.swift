@@ -3145,8 +3145,9 @@ private struct PremiumCoachConversation: View {
             pendingAction = proposed
             selectedActionWorkoutID = proposed.suggestedWorkoutID ?? ""
             actionMoveDate = proposed.suggestedDate ?? Date()
-            actionWorkoutTitle = proposed.parameter ??
-                (proposed.kind == .createRun ? "Easy Run" : "Custom Strength Workout")
+            actionWorkoutTitle = (proposed.kind == .createRun
+                ? "Easy Run"
+                : (proposed.parameter ?? "Custom Strength Workout"))
             actionRunMinutes = Int(proposed.parameter ?? "") ?? 40
             actionRunHasHR = false
             persist()
