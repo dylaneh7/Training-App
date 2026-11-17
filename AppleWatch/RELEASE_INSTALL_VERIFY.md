@@ -1,3 +1,25 @@
+# iMun Build 30 — Companion pairing and cloud schedule release
+
+## Why Watch refresh logged “WCSession iOS app not installed” (7018)
+
+The watch app was running as a separately installable app (`WKRunsIndependentlyOfCompanionApp=YES`), so launching only the `HealthCoachWatch` Xcode scheme could install watchOS without installing the corresponding iPhone app. WatchConnectivity correctly rejected the interactive request. Apple's TN3157 documents this installation behavior.
+
+Build 30 sets `WKRunsIndependentlyOfCompanionApp=NO` so the iOS companion is part of the required install workflow. **That setting does not require the iPhone to be live/reachable for a signed-in Watch to download a workout from the cloud.** The existing watch cloud downloader remains enabled.
+
+### Install without erasing existing workouts
+
+1. Update the existing Git checkout: `git pull --ff-only origin main`.
+2. In Xcode, select `HealthCoach` and your physical iPhone; **Run (⌘R)**. This upgrades the iPhone app and embeds the signed matching watch app.
+3. Select `HealthCoachWatch` and the **same paired physical Apple Watch**; **Run (⌘R)**. Both displays must report `imun 2.3 · build 30`.
+4. Launch the iPhone app while signed into Command Center so it publishes today's complete workout schedule to the private cloud.
+5. On watch, sign in to the same iMun cloud account if needed; tap “Load workout from cloud.” A cloud download doesn't require a live WatchConnectivity ping.
+
+If the watch still says its companion isn't installed, an actual iPhone build with the expected `com.dylaneh7.HealthCoachNative` bundle ID has not been installed/recognized by the paired watchOS installation. Running a watch-only scheme is not a substitute. Preserve existing offline logs; **do not uninstall either app as a routine troubleshooting step**.
+
+The cloud source is `health_coach_watch_schedules` (complete run + strength), falling back to `health_coach_native_plans` for legacy strength-only data. A missing current-day row cannot be fixed by repeatedly tapping Watch refresh: the new iPhone build must publish it first. The Supabase schema and RLS were verified, but live iPhone/watch delivery still requires device verification.
+
+---
+
 # imun Native Install Verification — 2.3 (21)
 
 Both the native iPhone HealthCoach target and Watch HealthCoachWatch target use **CFBundleShortVersionString 2.3** and **CFBundleVersion 21** in this release. Earlier source releases left both targets at 1.0 (1), making it difficult to tell if Xcode installed the latest binary.
