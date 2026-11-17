@@ -962,6 +962,7 @@ private struct PremiumRunPage: View {
                         }
                     }
                 }
+                IMUNTredictWorkoutCard()
                 if let actual {
                     if let distance = actual.distanceMeters,
                        let target = coach.runPlan?.targetDistanceMiles,
