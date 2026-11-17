@@ -1358,10 +1358,15 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
         if let history = try? encoder.encode(summaries), history.count < 40_000 {
             context[HCPayload.runHistory] = history
         }
-        if let recent = recoveryHistory.first,
-           let snapshot = try? encoder.encode(recent), snapshot.count < 16_000 {
-            context["hcRecoverySnapshot"] = snapshot
+        let primary = prefs.string(forKey: "hcEitanPrimaryWearable") ?? "Auto"
+        let recent = recoveryHistory.first {
+            HCEitanWearableSource.accepts($0.source, preferred: primary)
         }
+        // Empty payload clears stale Garmin/Tredict-derived Watch recovery
+        // after the user selects WHOOP or another primary wearable.
+        let recoveryBytes = recent.flatMap { try? encoder.encode($0) }
+        context["hcRecoverySnapshot"] = (recoveryBytes?.count ?? 0) < 16_000 ?
+            (recoveryBytes ?? Data()) : Data()
         return context
     }
 
