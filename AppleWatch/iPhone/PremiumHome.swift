@@ -139,14 +139,18 @@ struct PremiumHomeView: View {
         }
         .sheet(isPresented: $isIsaiahPresented) {
             NavigationStack {
-                PremiumCoachPage(launchContext: isaiahLaunchContext)
+                PremiumCoachConversation(launchContext: isaiahLaunchContext)
                     .toolbar {
                         ToolbarItem(placement: .topBarTrailing) {
-                            Button("Done") { isIsaiahPresented = false }
+                            Button("Close", systemImage: "xmark") {
+                                isIsaiahPresented = false
+                            }
+                            .labelStyle(.iconOnly)
                         }
                     }
             }
             .environmentObject(coach)
+            .environmentObject(appleHealth)
             .environmentObject(runImporter)
             .environmentObject(tredictImporter)
             .environmentObject(tredictPlans)
@@ -2889,6 +2893,9 @@ private struct IMUNIsAIahThinking: View {
 private struct PremiumCoachConversation: View {
     let launchContext: String
     @EnvironmentObject private var coach: PhoneWorkoutBridge
+    @EnvironmentObject private var appleHealth: HCAppleHealthReader
+    @AppStorage("hcSelectedHealthCategory") private var selectedHealthCategory = "Overview"
+    @AppStorage("hcSelectedHealthMetric") private var selectedHealthMetric = ""
     @AppStorage("hcAIShareRecovery") private var shareRecovery = false
     @AppStorage("hcCoachConversationLocalV1") private var storedConversation = Data()
     @FocusState private var composerFocused: Bool
@@ -3577,7 +3584,12 @@ private struct PremiumCoachConversation: View {
                     question: questionText,
                     shareRecovery: shareRecovery,
                     recentConversation: history,
-                     screenContext: launchContext)
+                    screenContext: launchContext,
+                    healthSnapshot: shareRecovery ?
+                        appleHealth.isaiahHealthSnapshot(
+                            selectedCategory: selectedHealthCategory,
+                            selectedMetric: selectedHealthMetric,
+                            question: questionText) : "")
                 await MainActor.run {
                     turns.append(IMUNCoachTurn(role: "assistant", text: reply))
                     isSending = false
