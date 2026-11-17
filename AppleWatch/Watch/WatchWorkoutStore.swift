@@ -1383,6 +1383,11 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
             DispatchQueue.main.async {
                 self.checkPhoneConnection()
                 self.sendPending()
+                if self.hasScheduledLift && self.workout.date == Self.today() {
+                    self.publishLiftSessionStatus(
+                        startedAt: self.liftClock?.startedAt,
+                        active: self.liftClock?.isActive == true)
+                }
                 let manual = self.pendingManualScheduleRequest
                 self.pendingManualScheduleRequest = false
                 self.requestCurrentSchedule(manual: manual)
@@ -1398,6 +1403,11 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
             guard session.activationState == .activated, session.isReachable else { return }
             // Build 28: retry queued sets/runs and request latest dated plan.
             self.sendPending(forceResend: true)
+            if self.hasScheduledLift && self.workout.date == Self.today() {
+                self.publishLiftSessionStatus(
+                    startedAt: self.liftClock?.startedAt,
+                    active: self.liftClock?.isActive == true)
+            }
             self.requestCurrentSchedule()
         }
     }
