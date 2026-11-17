@@ -276,6 +276,24 @@ actor HCCloudClient {
         }
     }
 
+    /// User-confirmed completion marker on a real planner event. No recorded
+    /// sets, GPS, HR or activity measurements are manufactured by this RPC.
+    func markPlannedWorkoutComplete(id: String) async throws {
+        guard UUID(uuidString: id) != nil else {
+            throw HCCloudError.server("Choose a saved calendar workout. Rotation previews must be scheduled first.")
+        }
+        let authenticated = try await authorizedToken()
+        let body = try await send(path: "/rest/v1/rpc/imun_mark_planned_workout_complete",
+                                  method: "POST",
+                                  json: ["p_item_id": id, "p_completed": true],
+                                  bearer: authenticated.access)
+        let changed = (try? JSONSerialization.jsonObject(
+            with: body, options: .fragmentsAllowed)) as? Bool
+        guard changed == true else {
+            throw HCCloudError.server("The selected workout could not be marked complete. Refresh your calendar.")
+        }
+    }
+
     /// Move an unsaved day in the saved strength rotation. This writes a real
     /// planner event with a preserved original template date, suppressing the
     /// automatic copy on the old day. It never edits historical completed sets.
