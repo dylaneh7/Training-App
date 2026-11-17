@@ -178,20 +178,69 @@ struct HCMetricGauge: View {
     }
 }
 
+/// Small theme-specific section identity used throughout Training, Health,
+/// Progress and Coach. No single racing/technology motif leaks across themes.
 struct HCSectionTitle: View {
     let title: String
     var detail: String? = nil
+    @AppStorage("hcDesignPreset") private var presetName = "techno"
+    private var preset: IMUNPreset { IMUNPreset(rawValue: presetName) ?? .techno }
+
+    @ViewBuilder
+    private var marker: some View {
+        switch preset {
+        case .heritage:
+            Image(systemName: "leaf").font(.system(size: 12, weight: .semibold))
+        case .retro:
+            HStack(spacing: 2) {
+                ForEach(0..<3, id: \.self) { i in
+                    Rectangle().frame(width: i == 1 ? 7 : 4, height: 7)
+                }
+            }
+        case .techno:
+            Image(systemName: "waveform.path.ecg")
+                .font(.system(size: 12, weight: .bold))
+        case .coast:
+            Image(systemName: "water.waves")
+                .font(.system(size: 12, weight: .medium))
+        case .fieldNotes:
+            Image(systemName: "map")
+                .font(.system(size: 12, weight: .medium))
+        case .discipline:
+            Rectangle().frame(width: 3, height: 17)
+        case .atelier:
+            Image(systemName: "textformat")
+                .font(.system(size: 13, weight: .light))
+        case .rally:
+            Image(systemName: "flag.checkered")
+                .font(.system(size: 12, weight: .bold))
+        }
+    }
 
     var body: some View {
-        HStack(alignment: .firstTextBaseline) {
-            Text(title.uppercased())
-                .font(HCDesign.label(11))
-                .tracking(2.2)
-                .foregroundStyle(HCDesign.secondary)
-            Spacer()
-            if let detail {
-                Text(detail).font(.system(size: 12, weight: .medium))
+        VStack(alignment: .leading, spacing: 5) {
+            HStack(alignment: .center, spacing: 9) {
+                marker
+                    .foregroundStyle(HCDesign.aqua)
+                    .frame(width: 17)
+                    .accessibilityHidden(true)
+                Text(title.uppercased())
+                    .font(HCDesign.label(11))
+                    .tracking(preset == .atelier ? 2.6 : 2)
                     .foregroundStyle(HCDesign.secondary)
+                Spacer(minLength: 5)
+                if let detail {
+                    Text(detail).font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(HCDesign.secondary)
+                        .lineLimit(2)
+                        .multilineTextAlignment(.trailing)
+                }
+            }
+            // Editorial sporting and archival identities use fine rules;
+            // technology/retro/field styles keep the more compact heading.
+            if preset == .heritage || preset == .atelier {
+                Rectangle().fill(HCDesign.outline.opacity(0.7))
+                    .frame(height: 1)
             }
         }
         .padding(.horizontal, 2)
