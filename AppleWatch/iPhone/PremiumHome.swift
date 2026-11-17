@@ -179,6 +179,56 @@ private struct IMUNTodayPage: View {
     }
 }
 
+// A single always-available session affordance outside the scrolling tabs.
+// A tap navigates to the existing detailed workout, preserving the same
+// phone/Watch reconciliation and logging paths.
+private struct IMUNActiveWorkoutMiniBar: View {
+    @EnvironmentObject private var coach: PhoneWorkoutBridge
+    @AppStorage("hcSelectedTab") private var selectedTab = "today"
+    @AppStorage("hcTrainingActivity") private var activity = "weightlifting"
+
+    var body: some View {
+        Button {
+            activity = "weightlifting"
+            selectedTab = "training"
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: "dumbbell.fill")
+                    .font(.system(size: 16))
+                    .foregroundStyle(HCDesign.electric)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(coach.workout?.title ?? "Workout in progress")
+                        .font(.system(size: 12, weight: .semibold))
+                        .lineLimit(1)
+                        .foregroundStyle(HCDesign.ink)
+                    Text("Tap to return to your active session")
+                        .font(.system(size: 10))
+                        .foregroundStyle(HCDesign.secondary)
+                }
+                Spacer(minLength: 4)
+                if let started = coach.phoneSessionStartedAt {
+                    TimelineView(.periodic(from: .now, by: 1)) { now in
+                        Text(hcDuration(now.date.timeIntervalSince(started)))
+                            .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                            .foregroundStyle(HCDesign.ink)
+                    }
+                }
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(HCDesign.electric)
+            }
+            .padding(.horizontal, 13)
+            .padding(.vertical, 12)
+            .background(HCDesign.card, in: RoundedRectangle(cornerRadius: 15))
+            .overlay(RoundedRectangle(cornerRadius: 15)
+                        .strokeBorder(HCDesign.electric.opacity(0.45), lineWidth: 1))
+            .shadow(color: .black.opacity(0.15), radius: 10, y: 3)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Resume active strength workout")
+    }
+}
+
 private struct IMUNTodaysHealthStat: View {
     let label: String
     let metric: HCHealthMetric?
@@ -228,7 +278,8 @@ struct PremiumHomeView: View {
     @AppStorage("hcDesignCustomGeometry") private var designCustomGeometry = false
     @Environment(\.scenePhase) private var scenePhase
     private let scheduleRefresh = Timer.publish(every: 60, on: .main, in: .common).autoconnect()
-    private let progressRefresh = Timer.publish(every: 15, on: .main, in: .common).autoconnect()
+    // Network polling should never be a 15-second render interruption on Health/Progress.
+    private let progressRefresh = Timer.publish(every: 75, on: .main, in: .common).autoconnect()
 
     // A single observer covers all styling tokens. Chaining a dozen
     // separate .onChange modifiers exceeded SwiftUI's type-check budget.
@@ -306,10 +357,18 @@ struct PremiumHomeView: View {
         .environmentObject(runImporter)
         .environmentObject(tredictImporter)
         .environmentObject(tredictPlans)
+        .overlay(alignment: .bottom) {
+            if coach.phoneSessionStartedAt != nil {
+                IMUNActiveWorkoutMiniBar()
+                    .padding(.horizontal, 14)
+                    .padding(.bottom, 72)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+        }
         .overlay(alignment: .bottomTrailing) {
             IMUNIsaiahLauncherButton(glow: HCDesign.electric, action: presentIsaiah)
                 .padding(.trailing, 18)
-                .padding(.bottom, 70)
+                .padding(.bottom, coach.phoneSessionStartedAt == nil ? 70 : 147)
         }
         .sheet(isPresented: $isIsaiahPresented) {
             NavigationStack {
@@ -325,6 +384,9 @@ struct PremiumHomeView: View {
             .presentationDragIndicator(.visible)
         }
         .onChange(of: selectedTab) { _, tab in
+            if tab == "progress" && coach.signedIn {
+                coach.refreshCloudProgress()
+            }
             if tab == "coach" {
                 selectedTab = "training"
                 presentIsaiah()
@@ -352,7 +414,8 @@ struct PremiumHomeView: View {
             }
         }
         .onReceive(progressRefresh) { _ in
-            if scenePhase == .active && coach.signedIn {
+            if scenePhase == .active && coach.signedIn &&
+               (selectedTab == "training" || coach.phoneSessionStartedAt != nil) {
                 coach.refreshCloudProgress()
             }
         }
