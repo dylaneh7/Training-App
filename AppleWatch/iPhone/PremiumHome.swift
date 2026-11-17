@@ -2019,6 +2019,145 @@ private struct HCMetricFamily: Identifiable {
     }
 }
 
+/// One understated metric surface, with source-attributed readings inside.
+/// Never presents a blended HRV or "combined" sleep value.
+private struct HCMetricFamilyCard: View {
+    let family: HCMetricFamily
+    @Binding var expandedTrends: Set<String>
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                Text(family.title)
+                    .font(.system(size: 18, weight: .semibold, design: .default))
+                    .foregroundStyle(HCDesign.ink)
+                Spacer(minLength: 8)
+                Text("\(family.sourceCount) SOURCE\(family.sourceCount == 1 ? "" : "S")")
+                    .font(.system(size: 10, weight: .medium, design: .default))
+                    .tracking(0.6)
+                    .foregroundStyle(HCDesign.secondary)
+            }
+            .padding(.bottom, 14)
+
+            ForEach(Array(family.readings.enumerated()), id: \.offset) { index, reading in
+                VStack(alignment: .leading, spacing: 7) {
+                    HStack(alignment: .firstTextBaseline, spacing: 12) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(HCMetricFamily.sourceName(reading.source))
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundStyle(HCDesign.ink)
+                            if family.isHRV {
+                                Text(HCMetricFamily.method(reading))
+                                    .font(.system(size: 11, weight: .medium))
+                                    .foregroundStyle(HCDesign.secondary)
+                            } else if family.id == "sleep" && reading.label != "Sleep" {
+                                Text(reading.label)
+                                    .font(.system(size: 11, weight: .medium))
+                                    .foregroundStyle(HCDesign.secondary)
+                            }
+                        }
+                        Spacer(minLength: 8)
+                        Text(reading.formattedValue)
+                            .font(.system(size: 23, weight: .semibold, design: .default))
+                            .monospacedDigit()
+                            .foregroundStyle(HCDesign.ink)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.8)
+                    }
+                    Text(reading.comparison)
+                        .font(.system(size: 12))
+                        .foregroundStyle(reading.severity > 0 && reading.baseline != nil
+                            ? HCDesign.caution : HCDesign.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    HStack {
+                        Text(reading.date)
+                            .font(.system(size: 11))
+                            .foregroundStyle(HCDesign.secondary)
+                        Spacer()
+                        if reading.points.count > 1 {
+                            Button {
+                                if expandedTrends.contains(reading.id) {
+                                    expandedTrends.remove(reading.id)
+                                } else {
+                                    expandedTrends.insert(reading.id)
+                                }
+                            } label: {
+                                HStack(spacing: 5) {
+                                    Text(expandedTrends.contains(reading.id) ?
+                                         "Hide trend" : "View trend")
+                                    Image(systemName: expandedTrends.contains(reading.id) ?
+                                          "chevron.up" : "chevron.down")
+                                }
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(HCDesign.electric)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    if expandedTrends.contains(reading.id) && reading.points.count > 1 {
+                        Chart(reading.points) { point in
+                            LineMark(x: .value("Date", point.date),
+                                     y: .value("Reading", point.value))
+                                .foregroundStyle(HCDesign.electric)
+                            if let baseline = reading.baseline {
+                                RuleMark(y: .value("Baseline", baseline))
+                                    .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 4]))
+                                    .foregroundStyle(HCDesign.secondary.opacity(0.75))
+                            }
+                        }
+                        .chartXAxis(.hidden)
+                        .chartYAxis(.automatic(desiredCount: 3))
+                        .frame(height: 120)
+                        .padding(.top, 6)
+                        .accessibilityLabel("Recent \(reading.label) from \(reading.source)")
+                    }
+                }
+                .padding(.vertical, 11)
+                if index < family.readings.count - 1 {
+                    Rectangle()
+                        .fill(HCDesign.outline.opacity(0.4))
+                        .frame(height: 1)
+                }
+            }
+
+            if family.isHRV {
+                Text("RMSSD and SDNN are different HRV methods. Each source and method has its own history and baseline.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(HCDesign.secondary)
+                    .padding(.top, 13)
+            }
+        }
+        .padding(18)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(HCDesign.card,
+                    in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .strokeBorder(HCDesign.outline.opacity(0.45), lineWidth: 1)
+        }
+        .accessibilityElement(children: .contain)
+    }
+}
+
+private struct HCHealthSummaryStat: View {
+    let value: String
+    let title: String
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text(value)
+                .font(.system(size: 24, weight: .semibold, design: .default))
+                .monospacedDigit()
+                .foregroundStyle(HCDesign.ink)
+            Text(title.uppercased())
+                .font(.system(size: 10, weight: .medium))
+                .tracking(0.5)
+                .foregroundStyle(HCDesign.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
 private struct PremiumRecoveryPage: View {
     @EnvironmentObject private var coach: PhoneWorkoutBridge
     @ObservedObject var appleHealth: HCAppleHealthReader
