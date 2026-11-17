@@ -2869,6 +2869,7 @@ private struct PremiumRecoveryPage: View {
     @State private var showRawReadings = false
     @AppStorage("hcSelectedHealthCategory") private var selectedHealthCategory = "Overview"
     @AppStorage("hcSelectedHealthMetric") private var selectedHealthMetric = ""
+    @AppStorage("hcPreferredHealthSource") private var preferredSource = "Auto"
     @State private var metricSearch = ""
     @State private var expandedTrends: Set<String> = []
     @State private var expandedHealthGroups: Set<String> = ["Sleep", "Heart & Vitals"]
@@ -2983,8 +2984,26 @@ private struct PremiumRecoveryPage: View {
 
     private func latestReading(for id: String,
                                families: [HCMetricFamily]) -> HCRecoverySignal? {
-        families.first(where: { $0.id == id })?.readings
-            .sorted { $0.date > $1.date }.first
+        let readings = families.first(where: { $0.id == id })?.readings ?? []
+        let filtered = preferredSource == "Auto" ? readings : readings.filter {
+            HCMetricFamily.sourceName($0.source) == preferredSource
+        }
+        return filtered.sorted { $0.date > $1.date }.first
+    }
+
+    @ViewBuilder
+    private func quickMetric(_ name: String, key: String,
+                             families: [HCMetricFamily]) -> some View {
+        if let reading = latestReading(for: key, families: families) {
+            NavigationLink {
+                IMUNHealthMetricDetail(reading: reading)
+            } label: {
+                HCHealthQuickMetric(title: name, reading: reading)
+            }
+            .buttonStyle(.plain)
+        } else {
+            HCHealthQuickMetric(title: name, reading: nil)
+        }
     }
 
     private func category(for family: HCMetricFamily) -> String {
@@ -3122,6 +3141,25 @@ private struct PremiumRecoveryPage: View {
                                         title: "With baselines")
                 }
 
+                HStack(spacing: 8) {
+                    Text("PREFERRED SOURCE")
+                        .font(HCDesign.label(9))
+                        .foregroundStyle(HCDesign.secondary)
+                    Spacer(minLength: 8)
+                    Picker("Health source", selection: $preferredSource) {
+                        Text("Automatic").tag("Auto")
+                        ForEach(Array(Set(allFamilies.flatMap { family in
+                            family.readings.map {
+                                HCMetricFamily.sourceName($0.source)
+                            }
+                        })).sorted(), id: \.self) { source in
+                            Text(source).tag(source)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    .tint(HCDesign.electric)
+                    .accessibilityLabel("Preferred Health reading source")
+                }
                 HCSectionTitle(title: "At a glance", detail: "Latest available readings")
                 if appleHealth.loading && allFamilies.isEmpty {
                     IMUNLoadingPlaceholder(lines: 4, height: 170)
@@ -3130,14 +3168,10 @@ private struct PremiumRecoveryPage: View {
                     LazyVGrid(columns: [GridItem(.flexible(), spacing: 10),
                                         GridItem(.flexible(), spacing: 10)],
                               spacing: 10) {
-                        HCHealthQuickMetric(title: "Sleep",
-                            reading: latestReading(for: "sleep", families: allFamilies))
-                        HCHealthQuickMetric(title: "HRV",
-                            reading: latestReading(for: "hrv", families: allFamilies))
-                        HCHealthQuickMetric(title: "Resting HR",
-                            reading: latestReading(for: "resting-heart-rate", families: allFamilies))
-                        HCHealthQuickMetric(title: "Steps",
-                            reading: latestReading(for: "steps", families: allFamilies))
+                        quickMetric("Sleep", key: "sleep", families: allFamilies)
+                        quickMetric("HRV", key: "hrv", families: allFamilies)
+                        quickMetric("Resting HR", key: "resting-heart-rate", families: allFamilies)
+                        quickMetric("Steps", key: "steps", families: allFamilies)
                     }
                     .transition(.opacity)
                 }
