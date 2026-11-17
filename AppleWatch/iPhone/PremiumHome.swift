@@ -1679,8 +1679,42 @@ private struct PremiumRecoveryPage: View {
     @EnvironmentObject private var coach: PhoneWorkoutBridge
     @ObservedObject var appleHealth: HCAppleHealthReader
     @State private var showHistory = false
+    @State private var showRawReadings = false
     @State private var selectedHealthCategory = "Overview"
     @State private var metricSearch = ""
+    @State private var expandedTrends: Set<String> = []
+
+    private func isSleepSignal(_ signal: HCRecoverySignal) -> Bool {
+        let name = signal.label.lowercased()
+        return name.contains("sleep") || name.contains("asleep")
+    }
+
+    private func sleepSourceName(_ original: String) -> String {
+        let source = original.lowercased()
+        if source.contains("whoop") { return "WHOOP" }
+        if source.contains("apple watch") || source.contains("watch") {
+            return "Apple Watch"
+        }
+        return original
+    }
+
+    /// A sleep value is never averaged across devices. Multiple readings
+    /// from the same provider are displayed as its most recent representative
+    /// reading; all underlying readings remain in their original source.
+    private func uniqueSleepSources(_ values: [HCRecoverySignal]) -> [HCRecoverySignal] {
+        let grouped = Dictionary(grouping: values.filter(isSleepSignal)) {
+            sleepSourceName($0.source)
+        }
+        return grouped.keys.sorted().compactMap { key in
+            grouped[key]?.sorted { left, right in
+                if left.date != right.date { return left.date > right.date }
+                if left.points.count != right.points.count {
+                    return left.points.count > right.points.count
+                }
+                return left.label.localizedCompare(right.label) == .orderedAscending
+            }.first
+        }
+    }
 
     private let categoryOrder = ["Heart & Vitals", "Sleep", "Activity & Energy",
                                  "Running & Cycling", "Mobility",
@@ -1696,18 +1730,21 @@ private struct PremiumRecoveryPage: View {
         return ["Overview", "All"] + whoop + main
     }
 
-    private var visibleSignals: [HCRecoverySignal] {
+    private func filteredSignals(from signals: [HCRecoverySignal]) -> [HCRecoverySignal] {
         let groupFiltered: [HCRecoverySignal]
         switch selectedHealthCategory {
         case "Overview":
             groupFiltered = signals.filter {
                 let name = $0.label.lowercased()
                 return name.contains("hrv") || name.contains("sleep") ||
+                       name.contains("asleep") ||
                        name.contains("resting heart") || name.contains("respiratory") ||
                        name.contains("blood oxygen") || name.contains("daily low hr")
             }
         case "All":
             groupFiltered = signals
+        case "Sleep":
+            groupFiltered = signals.filter(isSleepSignal)
         case "WHOOP":
             groupFiltered = signals.filter {
                 $0.source.localizedCaseInsensitiveContains("whoop")
@@ -1749,10 +1786,13 @@ private struct PremiumRecoveryPage: View {
                 rows: items.compactMap { item in item.dailyLowHR.map { (item.date, $0) } }
             ) { result.append(metric) }
         }
+        // Group samples once rather than scanning the full history for every
+        // metric whenever SwiftUI evaluates the Health screen.
+        let sampleGroups = Dictionary(grouping: appleHealth.metricHistory) {
+            $0.name + "\u{001F}" + $0.source
+        }
         for metric in appleHealth.metrics {
-            let samples = appleHealth.metricHistory.filter {
-                $0.name == metric.name && $0.source == metric.source
-            }
+            let samples = sampleGroups[metric.name + "\u{001F}" + metric.source] ?? []
             if let signal = HCRecoverySignal.build(
                 label: metric.name,
                 symbol: metric.category == "Sleep" ? "moon.zzz.fill" :
@@ -1770,29 +1810,43 @@ private struct PremiumRecoveryPage: View {
         return result.sorted { $0.date > $1.date }
     }
 
-    private var flags: [HCRecoverySignal] {
-        signals.filter { $0.alertEnabled && $0.severity > 0 &&
-                         $0.baseline != nil }
-    }
-
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 19) {
+        // Derive the source-attributed data only once per render, then reuse it
+        // for the hero, search, alerts and chart cards.
+        let allSignals = signals
+        let visible = filteredSignals(from: allSignals)
+        let sleepSources = uniqueSleepSources(visible)
+        let remaining = visible.filter { !isSleepSignal($0) }
+        let sleepWarnings = uniqueSleepSources(allSignals.filter {
+            isSleepSignal($0) && $0.alertEnabled && $0.severity > 0 &&
+            $0.baseline != nil
+        })
+        let otherWarnings = allSignals.filter {
+            !isSleepSignal($0) && $0.alertEnabled && $0.severity > 0 &&
+            $0.baseline != nil
+        }
+        let warningCount = otherWarnings.count + (sleepWarnings.isEmpty ? 0 : 1)
+        let baselineCount = allSignals.filter { $0.baseline != nil }.count
+
+        return ScrollView {
+            // Lazily create the expensive Health cards instead of instantiating
+            // every graph on the first scroll/layout pass.
+            LazyVStack(alignment: .leading, spacing: 19) {
                 HCPremiumHero(eyebrow: "IMUN / HEALTH",
                               title: "See the whole picture.",
                               subtitle: "Your metrics, their sources, and what has changed.",
                               icon: "heart.text.square.fill",
                               tint: HCDesign.aqua) {
                     HStack(alignment: .center, spacing: 15) {
-                        HCProgressRing(progress: signals.isEmpty ? 0 :
-                                       Double(signals.filter { $0.baseline != nil }.count) /
-                                       Double(max(1, signals.count)),
-                                       value: "\(signals.filter { $0.baseline != nil }.count)",
+                        HCProgressRing(progress: allSignals.isEmpty ? 0 :
+                                       Double(baselineCount) /
+                                       Double(max(1, allSignals.count)),
+                                       value: "\(baselineCount)",
                                        subtitle: "Baselines",
                                        tint: HCDesign.aqua, diameter: 92)
                         VStack(alignment: .leading, spacing: 8) {
-                            Text(flags.isEmpty ? "YOUR BASELINE IS THE BENCHMARK" :
-                                 "\(flags.count) METRIC\(flags.count == 1 ? "" : "S") NEED ATTENTION")
+                            Text(warningCount == 0 ? "YOUR BASELINE IS THE BENCHMARK" :
+                                 "\(warningCount) METRIC\(warningCount == 1 ? "" : "S") NEED ATTENTION")
                                 .font(.system(size: 14, weight: .bold, design: .rounded))
                             Text("Ring shows available comparisons, not a made-up recovery score.")
                                 .font(.caption).foregroundStyle(HCDesign.secondary)
@@ -1820,7 +1874,7 @@ private struct PremiumRecoveryPage: View {
                         Text("The visual tracks prescribed sets completed today across iPhone and Watch—not a recovery score.")
                             .font(.caption2)
                             .foregroundStyle(HCDesign.secondary)
-                        if let latest = signals.first {
+                        if let latest = allSignals.first {
                             HStack(alignment: .firstTextBaseline, spacing: 8) {
                                 Text("RECENT RECOVERY SIGNAL")
                                     .font(HCDesign.label(9))
@@ -1842,17 +1896,25 @@ private struct PremiumRecoveryPage: View {
                     }
                 }
 
-                if !flags.isEmpty {
+                if warningCount > 0 {
                     HCSectionTitle(title: "Outside your recent pattern",
                                    detail: "Personal comparisons")
-                    ForEach(flags) { metric in
+                    if !sleepWarnings.isEmpty {
+                        HCStatusLine(
+                            text: "Sleep · " + sleepWarnings.map {
+                                sleepSourceName($0.source) + ": " + $0.comparison
+                            }.joined(separator: "  |  "),
+                            symbol: "moon.zzz.fill",
+                            tint: HCDesign.danger)
+                    }
+                    ForEach(otherWarnings) { metric in
                         HCStatusLine(text: metric.label + " · " + metric.comparison,
                                      symbol: "exclamationmark.triangle.fill",
                                      tint: metric.color)
                     }
                     Text("These are training signals, not a medical diagnosis. Individual readings can be affected by device, illness, measurement time and sleep.")
                         .font(.caption2).foregroundStyle(HCDesign.secondary)
-                } else if !signals.isEmpty {
+                } else if !allSignals.isEmpty {
                     HCStatusLine(text: "No large unfavorable changes detected in metrics with sufficient same-source history.",
                                  symbol: "checkmark.circle.fill", tint: HCDesign.good)
                 }
@@ -1891,7 +1953,7 @@ private struct PremiumRecoveryPage: View {
                 HCSectionTitle(title: selectedHealthCategory == "Overview" ?
                                "Key health signals" : selectedHealthCategory,
                                detail: "7 / 28-day comparisons")
-                if signals.isEmpty {
+                if allSignals.isEmpty {
                     HCCard {
                         VStack(alignment: .leading, spacing: 12) {
                             Text("Build your baseline")
@@ -1901,7 +1963,55 @@ private struct PremiumRecoveryPage: View {
                         }
                     }
                 }
-                ForEach(visibleSignals) { metric in
+                // One Sleep card, multiple clearly attributed device readings.
+                // Comparisons always use each source's own baseline.
+                if !sleepSources.isEmpty {
+                    HCCard(accent: HCDesign.aqua) {
+                        VStack(alignment: .leading, spacing: 13) {
+                            HStack(spacing: 9) {
+                                Image(systemName: "moon.zzz.fill")
+                                    .foregroundStyle(HCDesign.aqua)
+                                Text("SLEEP")
+                                    .font(HCDesign.label(12))
+                                    .tracking(1.4)
+                                    .foregroundStyle(HCDesign.ink)
+                                Spacer()
+                                Text("\(sleepSources.count) SOURCE\(sleepSources.count == 1 ? "" : "S")")
+                                    .font(HCDesign.label(10))
+                                    .foregroundStyle(HCDesign.secondary)
+                            }
+                            Text("Each device keeps its own reading and baseline.")
+                                .font(.caption)
+                                .foregroundStyle(HCDesign.secondary)
+                            ForEach(sleepSources) { reading in
+                                HStack(alignment: .top, spacing: 12) {
+                                    VStack(alignment: .leading, spacing: 6) {
+                                        Text(sleepSourceName(reading.source))
+                                            .font(.system(size: 13, weight: .bold))
+                                            .foregroundStyle(HCDesign.ink)
+                                        Text(reading.comparison)
+                                            .font(.system(size: 12))
+                                            .foregroundStyle(reading.color)
+                                            .fixedSize(horizontal: false, vertical: true)
+                                        Text("Last reading " + reading.date)
+                                            .font(.caption2)
+                                            .foregroundStyle(HCDesign.secondary)
+                                    }
+                                    Spacer(minLength: 5)
+                                    Text(reading.formattedValue)
+                                        .font(HCDesign.metric(21))
+                                        .minimumScaleFactor(0.75)
+                                        .lineLimit(1)
+                                        .foregroundStyle(HCDesign.ink)
+                                }
+                                .padding(.vertical, 7)
+                                Divider().overlay(HCDesign.outline)
+                            }
+                        }
+                    }
+                }
+
+                ForEach(remaining) { metric in
                     HCCard(accent: metric.color) {
                         VStack(alignment: .leading, spacing: 13) {
                             HCMetricGauge(title: metric.label,
@@ -1922,7 +2032,22 @@ private struct PremiumRecoveryPage: View {
                                     .lineLimit(1)
                             }
                             if metric.points.count >= 2 {
-                                Chart(metric.points) { point in
+                                Button {
+                                    if expandedTrends.contains(metric.id) {
+                                        expandedTrends.remove(metric.id)
+                                    } else {
+                                        expandedTrends.insert(metric.id)
+                                    }
+                                } label: {
+                                    Label(expandedTrends.contains(metric.id) ?
+                                          "Hide 28-day trend" : "Show 28-day trend",
+                                          systemImage: "chart.xyaxis.line")
+                                        .font(.caption.weight(.semibold))
+                                        .foregroundStyle(HCDesign.aqua)
+                                }
+                                .buttonStyle(.plain)
+                                if expandedTrends.contains(metric.id) {
+                                    Chart(metric.points) { point in
                                     LineMark(x: .value("Date", point.date),
                                              y: .value("Reading", point.value))
                                         .interpolationMethod(.catmullRom)
@@ -1936,10 +2061,11 @@ private struct PremiumRecoveryPage: View {
                                             .foregroundStyle(HCDesign.secondary.opacity(0.5))
                                     }
                                 }
-                                .chartYAxis(.hidden)
-                                .chartXAxis(.hidden)
-                                .frame(height: 64)
-                                .accessibilityLabel("Recent trend of \(metric.label)")
+                                    .chartYAxis(.hidden)
+                                    .chartXAxis(.hidden)
+                                    .frame(height: 82)
+                                    .accessibilityLabel("Recent trend of \(metric.label)")
+                                }
                             }
                             Text("Last reading \(metric.date) · \(metric.baselineLabel) comparison when available")
                                 .font(.caption2).foregroundStyle(HCDesign.secondary)
@@ -1972,6 +2098,7 @@ private struct PremiumRecoveryPage: View {
                         if appleHealth.loading { ProgressView().tint(HCDesign.aqua) }
                         Text("HealthKit lists only readings you have authorized and actually recorded. Apple Watch and WHOOP exports remain labeled by source.")
                             .font(.caption2).foregroundStyle(HCDesign.secondary)
+                        DisclosureGroup(isExpanded: $showRawReadings) {
                         ForEach(appleHealth.metrics.filter {
                             selectedHealthCategory == "All" ||
                             (selectedHealthCategory == "WHOOP" &&
@@ -1999,6 +2126,12 @@ private struct PremiumRecoveryPage: View {
                             }
                             Divider().overlay(HCDesign.outline)
                         }
+                        } label: {
+                            Label("View individual Apple Health readings",
+                                  systemImage: "list.bullet.rectangle")
+                                .font(.system(size: 13, weight: .semibold))
+                        }
+                        .tint(HCDesign.aqua)
                         Text(appleHealth.status)
                             .font(.caption2).foregroundStyle(HCDesign.secondary)
                     }
@@ -2038,13 +2171,15 @@ private struct PremiumRecoveryPage: View {
                 Text("Comparisons use readings from the same named source and never mix SDNN with RMSSD. A personal baseline requires five earlier daily observations or a provider baseline. Trends and flags are informational, not diagnostic.")
                     .font(.caption2)
                     .foregroundStyle(HCDesign.secondary)
-                    .padding(.bottom, 28)
+                    .padding(.bottom, 100)
             }
             .padding(18)
         }
         .scrollIndicators(.hidden)
         .hcPage()
         .navigationBarTitleDisplayMode(.inline)
+        .toolbarBackground(HCDesign.canvas, for: .navigationBar)
+        .toolbarBackground(.visible, for: .navigationBar)
         .onAppear { appleHealth.refreshIfAuthorized() }
     }
 }
