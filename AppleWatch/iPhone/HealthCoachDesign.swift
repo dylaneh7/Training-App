@@ -24,7 +24,7 @@ enum HCDesign {
                 design: IMUNStyle.headingDesign).monospacedDigit()
     }
     static func label(_ size: CGFloat = 11) -> Font {
-        .system(size: size, weight: .medium, design: IMUNStyle.headingDesign)
+        .system(size: size, weight: .medium, design: .default)
     }
 }
 
@@ -35,6 +35,8 @@ struct HCAppBackground: View {
 }
 
 struct HCCard<Content: View>: View {
+    // Accent remains a source/API parameter for existing callers, but a card
+    // should not be brightly bordered merely because it contains a statistic.
     var accent: Color? = nil
     let content: Content
 
@@ -48,22 +50,20 @@ struct HCCard<Content: View>: View {
             .padding(IMUNStyle.padding)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background {
-                IMUNPanelShape()
-                    .fill(LinearGradient(
-                        colors: [HCDesign.raised, HCDesign.card],
-                        startPoint: .topLeading, endPoint: .bottomTrailing))
+                IMUNPanelShape(corner: min(IMUNStyle.radius, 14))
+                    .fill(HCDesign.card)
             }
             .overlay {
-                IMUNPanelShape()
-                    .stroke((accent ?? HCDesign.outline).opacity(accent == nil ? 0.7 : 0.6),
-                            lineWidth: 1)
+                IMUNPanelShape(corner: min(IMUNStyle.radius, 14))
+                    .stroke(HCDesign.outline.opacity(0.43), lineWidth: 1)
             }
     }
 }
 
-
 // Premium editorial hero with atmospheric gradient, fine-line geometry and
 // genuinely live content. One component governs every major destination.
+// Editorial page introduction. No decorative concentric circles, fake
+// telemetry or colored background gradients compete with measured data.
 struct HCPremiumHero<Content: View>: View {
     let eyebrow: String
     let title: String
@@ -84,48 +84,33 @@ struct HCPremiumHero<Content: View>: View {
     }
 
     var body: some View {
-        ZStack(alignment: .topTrailing) {
-            IMUNPanelShape()
-                .fill(LinearGradient(colors: [
-                    tint.opacity(0.24), HCDesign.raised, HCDesign.card
-                ], startPoint: .topLeading, endPoint: .bottomTrailing))
-            Circle()
-                .strokeBorder(tint.opacity(0.16), lineWidth: 1)
-                .frame(width: 200, height: 200)
-                .offset(x: 80, y: -110)
-            Circle()
-                .strokeBorder(tint.opacity(0.10), lineWidth: 17)
-                .frame(width: 138, height: 138)
-                .offset(x: 65, y: -85)
-            VStack(alignment: .leading, spacing: 14) {
-                HStack(spacing: 9) {
-                    Image(systemName: icon)
-                        .font(.system(size: 13, weight: .semibold))
-                    Text(eyebrow.uppercased())
-                        .tracking(2.0)
-                    Spacer()
-                    Image(systemName: "circle.hexagongrid.fill")
-                        .foregroundStyle(HCDesign.ink.opacity(0.32))
-                }
+        VStack(alignment: .leading, spacing: 14) {
+            Text(eyebrow.uppercased())
                 .font(HCDesign.label(10))
-                .foregroundStyle(tint)
-                Text(title)
-                    .font(HCDesign.display(31))
-                    .tracking(-1.1)
-                    .foregroundStyle(HCDesign.ink)
-                    .fixedSize(horizontal: false, vertical: true)
-                Text(subtitle)
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(HCDesign.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                content
-            }
-            .padding(21)
-            .frame(maxWidth: .infinity, alignment: .leading)
+                .tracking(1.7)
+                .foregroundStyle(HCDesign.secondary)
+            Text(title)
+                .font(HCDesign.display(32))
+                .tracking(-0.9)
+                .foregroundStyle(HCDesign.ink)
+                .fixedSize(horizontal: false, vertical: true)
+            Text(subtitle)
+                .font(.system(size: 14))
+                .foregroundStyle(HCDesign.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Rectangle()
+                .fill(HCDesign.outline.opacity(0.5))
+                .frame(height: 1)
+            content
         }
-        .fixedSize(horizontal: false, vertical: true)
-        .clipShape(IMUNPanelShape())
-        .overlay(IMUNPanelShape().stroke(tint.opacity(0.32), lineWidth: 1))
+        .padding(21)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(HCDesign.card,
+                    in: IMUNPanelShape(corner: min(IMUNStyle.radius, 14)))
+        .overlay {
+            IMUNPanelShape(corner: min(IMUNStyle.radius, 14))
+                .stroke(HCDesign.outline.opacity(0.4), lineWidth: 1)
+        }
     }
 }
 
@@ -180,72 +165,44 @@ struct HCMetricGauge: View {
 
 /// Small theme-specific section identity used throughout Training, Health,
 /// Progress and Coach. No single racing/technology motif leaks across themes.
+/// Calm hierarchy throughout the app. Theme differences live in the
+/// palette, editorial type and dedicated motif surfaces—not repeated icons
+/// before every heading.
 struct HCSectionTitle: View {
     let title: String
     var detail: String? = nil
     @AppStorage("hcDesignPreset") private var presetName = "techno"
-    private var preset: IMUNPreset { IMUNPreset(rawValue: presetName) ?? .techno }
 
-    @ViewBuilder
-    private var marker: some View {
-        switch preset {
-        case .heritage:
-            Image(systemName: "leaf").font(.system(size: 12, weight: .semibold))
-        case .retro:
-            HStack(spacing: 2) {
-                ForEach(0..<3, id: \.self) { i in
-                    Rectangle().frame(width: i == 1 ? 7 : 4, height: 7)
-                }
-            }
-        case .techno:
-            Image(systemName: "waveform.path.ecg")
-                .font(.system(size: 12, weight: .bold))
-        case .coast:
-            Image(systemName: "water.waves")
-                .font(.system(size: 12, weight: .medium))
-        case .fieldNotes:
-            Image(systemName: "map")
-                .font(.system(size: 12, weight: .medium))
-        case .discipline:
-            Rectangle().frame(width: 3, height: 17)
-        case .atelier:
-            Image(systemName: "textformat")
-                .font(.system(size: 13, weight: .light))
-        case .rally:
-            Image(systemName: "flag.checkered")
-                .font(.system(size: 12, weight: .bold))
-        }
+    private var isEditorial: Bool {
+        presetName == "heritage" || presetName == "atelier"
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 5) {
-            HStack(alignment: .center, spacing: 9) {
-                marker
-                    .foregroundStyle(HCDesign.aqua)
-                    .frame(width: 17)
-                    .accessibilityHidden(true)
-                Text(title.uppercased())
-                    .font(HCDesign.label(11))
-                    .tracking(preset == .atelier ? 2.6 : 2)
-                    .foregroundStyle(HCDesign.secondary)
-                Spacer(minLength: 5)
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .firstTextBaseline, spacing: 12) {
+                Text(title)
+                    .font(.system(size: 18, weight: .semibold,
+                                  design: isEditorial ? .serif : .default))
+                    .foregroundStyle(HCDesign.ink)
+                    .tracking(-0.3)
+                Spacer(minLength: 6)
                 if let detail {
-                    Text(detail).font(.system(size: 12, weight: .medium))
+                    Text(detail)
+                        .font(.system(size: 11, weight: .medium))
                         .foregroundStyle(HCDesign.secondary)
-                        .lineLimit(2)
                         .multilineTextAlignment(.trailing)
+                        .lineLimit(2)
                 }
             }
-            // Editorial sporting and archival identities use fine rules;
-            // technology/retro/field styles keep the more compact heading.
-            if preset == .heritage || preset == .atelier {
-                Rectangle().fill(HCDesign.outline.opacity(0.7))
+            if isEditorial {
+                Rectangle()
+                    .fill(HCDesign.outline.opacity(0.42))
                     .frame(height: 1)
             }
         }
-        .padding(.horizontal, 2)
     }
 }
+
 
 struct HCAccentTag: View {
     let title: String
@@ -356,25 +313,25 @@ struct HCFilledButton: View {
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 9) {
+            HStack(spacing: 10) {
                 Image(systemName: icon)
-                    .font(.system(size: 15, weight: .bold))
+                    .font(.system(size: 14, weight: .semibold))
                 Text(title)
-                    .font(.system(size: 16, weight: .bold, design: IMUNStyle.headingDesign))
+                    .font(.system(size: 14, weight: .semibold))
+                    .lineLimit(2)
+                    .multilineTextAlignment(.leading)
                 Spacer(minLength: 0)
-                Image(systemName: "arrow.up.right")
-                    .font(.system(size: 11, weight: .bold))
-                    .opacity(0.56)
             }
-            .foregroundStyle(tint == HCDesign.electric ? HCDesign.onAccent : HCDesign.canvas)
-            .padding(.horizontal, 18)
-            .frame(height: 55)
+            .foregroundStyle(tint == HCDesign.electric ?
+                             HCDesign.onAccent : HCDesign.canvas)
+            .padding(.horizontal, 16)
+            .frame(minHeight: 48)
             .background(tint, in: IMUNPanelShape(
-                shape: IMUNStyle.buttonShape, corner: 16))
+                shape: IMUNStyle.buttonShape, corner: 12))
         }
         .buttonStyle(.plain)
         .disabled(disabled)
-        .opacity(disabled ? 0.35 : 1)
+        .opacity(disabled ? 0.42 : 1)
         .accessibilityLabel(title)
     }
 }
@@ -383,21 +340,26 @@ struct HCOutlineButton: View {
     let title: String
     let icon: String
     var action: () -> Void
+
     var body: some View {
         Button(action: action) {
             Label(title, systemImage: icon)
-                .font(.system(size: 14, weight: .semibold, design: .rounded))
+                .font(.system(size: 13, weight: .medium))
                 .foregroundStyle(HCDesign.ink)
                 .frame(maxWidth: .infinity)
-                .frame(height: 44)
-                .background(HCDesign.raised, in: IMUNPanelShape(
-                    shape: IMUNStyle.buttonShape, corner: 14))
-                .overlay(IMUNPanelShape(shape: IMUNStyle.buttonShape, corner: 14)
-                    .stroke(HCDesign.outline.opacity(0.75)))
+                .frame(minHeight: 43)
+                .padding(.horizontal, 9)
+                .background(HCDesign.card, in: IMUNPanelShape(
+                    shape: IMUNStyle.buttonShape, corner: 11))
+                .overlay {
+                    IMUNPanelShape(shape: IMUNStyle.buttonShape, corner: 11)
+                        .stroke(HCDesign.outline.opacity(0.6), lineWidth: 1)
+                }
         }
         .buttonStyle(.plain)
     }
 }
+
 
 struct HCNumberControl: View {
     let label: String
