@@ -472,38 +472,21 @@ struct WatchWorkoutView: View {
         NavigationStack {
             List {
                 Section {
-                    HStack(alignment: .center, spacing: 13) {
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("I M U N")
-                                .font(WTheme.label(10))
-                                .tracking(3)
-                                .foregroundStyle(WTheme.aqua)
-                            Text("Make it\ncount.")
-                                .font(.system(size: 22, weight: .heavy,
-                                              design: IMUNStyle.headingDesign))
-                                .tracking(-0.6)
-                                .foregroundStyle(IMUNStyle.palette.ink)
-                            Text(Date().formatted(.dateTime.weekday(.abbreviated).day()))
-                                .font(WTheme.label(10)).foregroundStyle(WTheme.muted)
-                        }
-                        Spacer(minLength: 0)
-                        IMUNThemeProgressView(
-                            completed: store.guidedCompletedSets,
-                            planned: store.hasScheduledLift ?
-                                store.workout.prescribedSetCount : 0,
-                            compact: true)
+                    NavigationLink {
+                        IMUNVyrmunExplanation()
+                    } label: {
+                        IMUNVyrmunHomeTile()
                     }
-                    .padding(.vertical, 9)
+                    .buttonStyle(.plain)
+                    .listRowInsets(EdgeInsets(top: 5, leading: 8,
+                                              bottom: 7, trailing: 8))
                     .listRowBackground(
-                        RoundedRectangle(cornerRadius: 18)
-                            .fill(LinearGradient(colors:
-                                [WTheme.lime.opacity(0.27), WTheme.panel],
-                                startPoint: .topLeading, endPoint: .bottomTrailing))
+                        RoundedRectangle(cornerRadius: 17, style: .continuous)
+                            .fill(LinearGradient(
+                                colors: [WTheme.lime.opacity(0.13), WTheme.panel],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing))
                     )
-
-                    IMUNThemeEmblem(area: "training", compact: true)
-                        .padding(.vertical, 4)
-                        .listRowBackground(WTheme.panel)
 
                     // This control is visible without scrolling through
                     // iPhone-link diagnostics. One cloud sign-in lets users
