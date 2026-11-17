@@ -2863,6 +2863,18 @@ private struct PremiumCoachConversation: View {
                                            displayedComponents: .date)
                                     .tint(HCDesign.aqua)
                             }
+                            if action.kind == .completeScheduledWorkout {
+                                Picker("Calendar workout", selection: $selectedActionWorkoutID) {
+                                    Text("Choose an unfinished workout").tag("")
+                                    ForEach(coach.plannedSessions.filter {
+                                        !$0.completed && UUID(uuidString: $0.id) != nil
+                                    }) { item in
+                                        Text("\(item.date) · \(item.title)")
+                                            .tag(item.id)
+                                    }
+                                }
+                                .tint(HCDesign.aqua)
+                            }
                             if action.kind == .createStrength ||
                                action.kind == .renameStrength {
                                 TextField("Workout name", text: $actionWorkoutTitle)
@@ -3019,6 +3031,12 @@ private struct PremiumCoachConversation: View {
         case .completeRun:
             return coach.runPlan?.id == action.suggestedWorkoutID &&
                 coach.runPlan?.isCompleted == false
+        case .completeScheduledWorkout:
+            return coach.completingWorkoutID == nil &&
+                coach.plannedSessions.contains(where: {
+                    $0.id == selectedActionWorkoutID && !$0.completed &&
+                    UUID(uuidString: $0.id) != nil
+                })
         case .setTheme:
             return action.themeID.flatMap(IMUNPreset.init(rawValue:)) != nil
         case .setRestDuration:
@@ -3058,6 +3076,12 @@ private struct PremiumCoachConversation: View {
         case .completeRun:
             coach.setRunManuallyCompleted(true)
             reply = "Recorded your confirmation of today's completed run. No sensor measurements were invented."
+        case .completeScheduledWorkout:
+            guard let selected = coach.plannedSessions.first(where: {
+                $0.id == selectedActionWorkoutID && !$0.completed
+            }) else { return }
+            coach.completePlannedWorkout(selected)
+            reply = "Requested a manual calendar completion for \(selected.title). The change is recorded only if the server confirms it; no performance data will be created."
         case .syncWatch:
             coach.refreshAndSendToWatch()
             reply = "Requested today's training plan to sync over iMun's phone and cloud connections."
