@@ -1653,33 +1653,46 @@ private struct PremiumProgressPage: View {
     @EnvironmentObject private var coach: PhoneWorkoutBridge
     @State private var selectedExercise = ""
     @State private var movingSession: HCPlannedSession?
+    // Chart points are rebuilt only when source histories/selection change,
+    // never repeatedly while a user scrolls through the training cards.
+    @State private var cachedExerciseNames: [String] = []
+    @State private var cachedStrengthPoints: [HCPlotMark] = []
+    @State private var cachedRunPoints: [HCPlotMark] = []
 
     private var upcoming: [HCPlannedSession] {
         let today = HCPlanBuilder.dateString(Date())
         return Array(coach.plannedSessions.filter { $0.date >= today }.prefix(45))
     }
 
-    private var names: [String] { Array(Set(coach.performanceHistory.map(\.exercise))).sorted() }
-    private var current: String { selectedExercise.isEmpty ? (names.first ?? "") : selectedExercise }
-    private var strengthPoints: [HCPlotMark] {
-        coach.performanceHistory.filter { $0.exercise == current }
+    private var names: [String] { cachedExerciseNames }
+    private var strengthPoints: [HCPlotMark] { cachedStrengthPoints }
+    private var runPoints: [HCPlotMark] { cachedRunPoints }
+
+    private func rebuildStrengthChart() {
+        let available = Array(Set(coach.performanceHistory.map(\.exercise))).sorted()
+        cachedExerciseNames = available
+        let selected = selectedExercise.isEmpty ? (available.first ?? "") : selectedExercise
+        cachedStrengthPoints = coach.performanceHistory.filter { $0.exercise == selected }
             .compactMap { row in
                 HCPlanBuilder.startOfDate(row.date).map {
                     HCPlotMark(date: $0, value: row.weightLb)
                 }
             }.sorted { $0.date < $1.date }
     }
-    private var runPoints: [HCPlotMark] {
-        coach.runHistory.compactMap { row in
-            guard let distance = row.distanceMeters, let date = HCPlanBuilder.startOfDate(row.date)
-            else { return nil }
+
+    private func rebuildRunChart() {
+        cachedRunPoints = coach.runHistory.compactMap { row in
+            guard let distance = row.distanceMeters,
+                  let date = HCPlanBuilder.startOfDate(row.date) else { return nil }
             return HCPlotMark(date: date, value: distance / 1609.344)
         }.sorted { $0.date < $1.date }
     }
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 19) {
+            // A long training history should not create dozens of heavy cards
+            // and chart surfaces before the first visible scroll frame.
+            LazyVStack(alignment: .leading, spacing: 19) {
                 HCPremiumHero(eyebrow: "PERFORMANCE / THE LONG GAME",
                               title: "Every session counts.",
                               subtitle: "Your history, your momentum, and the next milestone.",
@@ -1884,6 +1897,19 @@ private struct PremiumProgressPage: View {
         .sheet(item: $movingSession) { entry in
             IMUNMoveWorkoutSheet(entry: entry)
                 .environmentObject(coach)
+        }
+        .onAppear {
+            rebuildStrengthChart()
+            rebuildRunChart()
+        }
+        .onChange(of: selectedExercise) { _, _ in rebuildStrengthChart() }
+        .onReceive(coach.$performanceHistory) { _ in
+            // @Published emits immediately before storage changes; use the next
+            // main-queue turn so the snapshot sees the published history.
+            DispatchQueue.main.async { rebuildStrengthChart() }
+        }
+        .onReceive(coach.$runHistory) { _ in
+            DispatchQueue.main.async { rebuildRunChart() }
         }
     }
 }
@@ -2515,7 +2541,7 @@ private struct PremiumRecoveryPage: View {
                             HCOutlineButton(title: appleHealth.loading ?
                                             "Reading…" : "Refresh",
                                             icon: "arrow.clockwise") {
-                                appleHealth.refreshIfAuthorized()
+                                appleHealth.refreshIfAuthorized(force: true)
                             }
                         }
                         if appleHealth.loading {
@@ -2606,12 +2632,13 @@ private struct PremiumRecoveryPage: View {
         }
         .onAppear {
             rebuildSignalCache()
+            // Reopening Health should not trigger another 35-day HealthKit
+            // scan if the existing source snapshot is still fresh.
             appleHealth.refreshIfAuthorized()
         }
-        .onReceive(appleHealth.$metrics) { _ in
-            DispatchQueue.main.async { rebuildSignalCache() }
-        }
         .onReceive(appleHealth.$metricHistory) { _ in
+            // HealthKit publishes the entire batch once, with metrics already
+            // updated. Rebuilding on both arrays duplicates expensive work.
             DispatchQueue.main.async { rebuildSignalCache() }
         }
         .onReceive(coach.$recoveryHistory) { _ in
