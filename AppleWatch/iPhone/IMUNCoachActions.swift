@@ -72,6 +72,7 @@ enum IMUNCoachActionKind: String, CaseIterable {
     case setWatchHaptics
     case setRunVoiceCues
     case setRunAutoLaps
+    case setAppPreference
 }
 
 struct IMUNCoachActionProposal: Identifiable {
@@ -84,6 +85,82 @@ struct IMUNCoachActionProposal: Identifiable {
     let themeID: String?
     var parameter: String? = nil
     var workoutEdit: IMUNCoachWorkoutEditHint? = nil
+    var settingKey: String? = nil
+}
+
+/// Explicitly editable app preferences. No arbitrary UserDefaults keys,
+/// account secrets or health-sharing flags can be reached through this path.
+struct IMUNCoachPreference: Identifiable {
+    enum ValueType { case bool, string, integer, decimal }
+    let id: String
+    let title: String
+    let choices: [String]
+    let type: ValueType
+    let category: String
+
+    static let all: [IMUNCoachPreference] = [
+        .init(id: "hcDesignMode", title: "Appearance mode",
+              choices: ["light", "dark", "system"], type: .string,
+              category: "Appearance"),
+        .init(id: "hcDesignDensity", title: "Layout spacing",
+              choices: ["compact", "balanced", "airy"], type: .string,
+              category: "Appearance"),
+        .init(id: "hcDesignFont", title: "Typography",
+              choices: ["standard", "rounded", "serif", "monospaced"],
+              type: .string, category: "Appearance"),
+        .init(id: "hcDesignReduceMotion", title: "Reduce animation",
+              choices: ["on", "off"], type: .bool, category: "Appearance"),
+        .init(id: "hcDesignWatchSyncEnabled", title: "Sync design to Watch",
+              choices: ["on", "off"], type: .bool, category: "Appearance"),
+        .init(id: "hcMotivationTone", title: "Motivation tone",
+              choices: ["quiet", "direct", "rigorous"], type: .string,
+              category: "Motivation"),
+        .init(id: "hcMotivationTranslation", title: "Scripture reference translation",
+              choices: ["ESV", "LSB"], type: .string, category: "Motivation"),
+        .init(id: "hcMotivationShowTraining", title: "Show motivation in Training",
+              choices: ["on", "off"], type: .bool, category: "Motivation"),
+        .init(id: "hcAggressiveProgression", title: "Aggressive strength progression",
+              choices: ["on", "off"], type: .bool, category: "Training"),
+        .init(id: "hcWeightIncrement", title: "Weight adjustment increment",
+              choices: ["2.5", "5", "10"], type: .decimal, category: "Training"),
+        .init(id: "hcRunCueMinutes", title: "Running cue interval",
+              choices: ["1", "3", "5", "10", "15"], type: .integer,
+              category: "Running"),
+        .init(id: "hcRunIntervals", title: "Show running intervals",
+              choices: ["on", "off"], type: .bool, category: "Running")
+    ]
+
+    static func byID(_ id: String) -> IMUNCoachPreference? {
+        all.first(where: { $0.id == id })
+    }
+
+    /// Returns a verified local result or nil; no unrestricted dictionary
+    /// manipulation, sensitive permissions or implicit server access.
+    @discardableResult
+    static func apply(id: String, value: String) -> String? {
+        guard let setting = byID(id), setting.choices.contains(value) else {
+            return nil
+        }
+        let prefs = UserDefaults.standard
+        switch setting.type {
+        case .bool:
+            prefs.set(value == "on", forKey: id)
+        case .string:
+            prefs.set(value, forKey: id)
+        case .integer:
+            guard let number = Int(value) else { return nil }
+            prefs.set(number, forKey: id)
+        case .decimal:
+            guard let number = Double(value), number.isFinite else { return nil }
+            prefs.set(number, forKey: id)
+        }
+        if id == "hcDesignDensity" || id == "hcDesignFont" {
+            // These override per-theme defaults only when custom geometry
+            // is enabled; activate it so the selected setting actually works.
+            prefs.set(true, forKey: "hcDesignCustomGeometry")
+        }
+        return setting.title + " changed to " + value + "."
+    }
 }
 
 /// One source of truth for which app operations Coach can offer.
@@ -129,6 +206,9 @@ enum IMUNCoachActionCatalog {
               summary: "Enable or disable speech cues.", access: "Review and confirm"),
         .init(kind: .setRunAutoLaps, domain: "Running", title: "Automatic laps",
               summary: "Enable or disable automatic lap cues.", access: "Review and confirm"),
+        .init(kind: .setAppPreference, domain: "Settings", title: "Adjust app preferences",
+              summary: "Set supported appearance, motivation, progression and running preferences.",
+              access: "Review and confirm"),
         .init(kind: .selectTraining, domain: "Navigation", title: "Change sport",
               summary: "Switch between Strength and Running.", access: "Review and confirm"),
         .init(kind: .openTab, domain: "Navigation", title: "Navigate app",
@@ -642,12 +722,14 @@ enum IMUNCoachActionInterpreter {
                                  workoutID: String? = nil, date: Date? = nil,
                                  theme: String? = nil,
                                  parameter: String? = nil,
-                                 workoutEdit: IMUNCoachWorkoutEditHint? = nil)
+                                 workoutEdit: IMUNCoachWorkoutEditHint? = nil,
+                                 settingKey: String? = nil)
         -> IMUNCoachActionProposal {
         IMUNCoachActionProposal(kind: kind, title: title, explanation: explanation,
                                 suggestedWorkoutID: workoutID,
                                 suggestedDate: date, themeID: theme,
-                                parameter: parameter, workoutEdit: workoutEdit)
+                                parameter: parameter, workoutEdit: workoutEdit,
+                                settingKey: settingKey)
     }
 
     private static func namedWorkout(_ input: String) -> String? {
