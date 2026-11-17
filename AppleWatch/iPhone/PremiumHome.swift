@@ -1784,8 +1784,15 @@ private struct PremiumProgressPage: View {
                         .frame(height: 210)
                     }
                 }
-                HStack(alignment: .firstTextBaseline) {
-                    HCSectionTitle(title: "Upcoming workouts", detail: "Tap to reschedule")
+                HStack(alignment: .center, spacing: 8) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Upcoming workouts")
+                            .font(.system(size: 18, weight: .semibold))
+                            .foregroundStyle(HCDesign.ink)
+                        Text("Tap to reschedule")
+                            .font(.system(size: 11))
+                            .foregroundStyle(HCDesign.secondary)
+                    }
                     Spacer(minLength: 8)
                     if upcoming.count > 3 {
                         Button(showAllUpcomingSessions ? "Show less" : "See all \(upcoming.count)") {
@@ -2487,7 +2494,7 @@ private struct PremiumRecoveryPage: View {
     }
 
     private func categorized(_ families: [HCMetricFamily]) -> [HCHealthCategoryGroup] {
-        let grouped = Dictionary(grouping: families, by: category(for:))
+        let grouped = Dictionary(grouping: families) { category(for: $0) }
         let priority = categoryOrder + ["Recovery & Other"]
         return grouped.keys.sorted {
             let lhs = priority.firstIndex(of: $0) ?? priority.count
@@ -2607,17 +2614,23 @@ private struct PremiumRecoveryPage: View {
                 }
 
                 HCSectionTitle(title: "At a glance", detail: "Latest available readings")
-                LazyVGrid(columns: [GridItem(.flexible(), spacing: 10),
-                                    GridItem(.flexible(), spacing: 10)],
-                          spacing: 10) {
-                    HCHealthQuickMetric(title: "Sleep",
-                        reading: latestReading(for: "sleep", families: allFamilies))
-                    HCHealthQuickMetric(title: "HRV",
-                        reading: latestReading(for: "hrv", families: allFamilies))
-                    HCHealthQuickMetric(title: "Resting HR",
-                        reading: latestReading(for: "resting-heart-rate", families: allFamilies))
-                    HCHealthQuickMetric(title: "Steps",
-                        reading: latestReading(for: "steps", families: allFamilies))
+                if appleHealth.loading && allFamilies.isEmpty {
+                    IMUNLoadingPlaceholder(lines: 4, height: 170)
+                        .transition(.opacity)
+                } else {
+                    LazyVGrid(columns: [GridItem(.flexible(), spacing: 10),
+                                        GridItem(.flexible(), spacing: 10)],
+                              spacing: 10) {
+                        HCHealthQuickMetric(title: "Sleep",
+                            reading: latestReading(for: "sleep", families: allFamilies))
+                        HCHealthQuickMetric(title: "HRV",
+                            reading: latestReading(for: "hrv", families: allFamilies))
+                        HCHealthQuickMetric(title: "Resting HR",
+                            reading: latestReading(for: "resting-heart-rate", families: allFamilies))
+                        HCHealthQuickMetric(title: "Steps",
+                            reading: latestReading(for: "steps", families: allFamilies))
+                    }
+                    .transition(.opacity)
                 }
                 if changed > 0 {
                     HStack(alignment: .top, spacing: 10) {
@@ -2788,6 +2801,8 @@ private struct PremiumRecoveryPage: View {
         .scrollIndicators(.hidden)
         .hcPage()
         .safeAreaInset(edge: .top, spacing: 0) { stickyMetricFilters }
+        .animation(IMUNStyle.animationsEnabled ? .easeOut(duration: 0.18) : nil,
+                   value: appleHealth.loading)
         .navigationTitle("Health")
         .navigationBarTitleDisplayMode(.inline)
         .toolbarBackground(HCDesign.canvas, for: .navigationBar)
@@ -3860,7 +3875,8 @@ private struct PremiumSettingsPage: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 19) {
+            // Settings sections render on demand, matching Progress/Health.
+            LazyVStack(alignment: .leading, spacing: 19) {
                 PremiumHeader(eyebrow: "IMUN / SETTINGS",
                               title: "Your preferences.",
                               subtitle: "Fine-tune your coaching, appearance and connections.")
