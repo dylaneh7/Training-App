@@ -2839,89 +2839,19 @@ private struct PremiumCoachConversation: View {
                 }
 
                 if let action = pendingAction {
-                    HCCard(accent: HCDesign.electric) {
-                        VStack(alignment: .leading, spacing: 12) {
-                            Label("REVIEW APP CHANGE", systemImage: "checkmark.shield")
-                                .font(HCDesign.label(11))
-                                .foregroundStyle(HCDesign.electric)
-                            Text(action.title)
-                                .font(HCDesign.display(20))
-                                .foregroundStyle(HCDesign.ink)
-                            Text(action.explanation)
-                                .font(.caption)
-                                .foregroundStyle(HCDesign.secondary)
-                            if action.kind == .moveWorkout {
-                                Picker("Workout to move", selection: $selectedActionWorkoutID) {
-                                    Text("Choose a workout").tag("")
-                                    ForEach(coach.plannedSessions) { item in
-                                        Text("\(item.date) · \(item.title)")
-                                            .tag(item.id)
-                                    }
-                                }
-                                .tint(HCDesign.aqua)
-                                DatePicker("Move to", selection: $actionMoveDate,
-                                           displayedComponents: .date)
-                                    .tint(HCDesign.aqua)
-                            }
-                            if action.kind == .completeScheduledWorkout {
-                                Picker("Calendar workout", selection: $selectedActionWorkoutID) {
-                                    Text("Choose an unfinished workout").tag("")
-                                    ForEach(coach.plannedSessions.filter {
-                                        !$0.completed && UUID(uuidString: $0.id) != nil
-                                    }) { item in
-                                        Text("\(item.date) · \(item.title)")
-                                            .tag(item.id)
-                                    }
-                                }
-                                .tint(HCDesign.aqua)
-                            }
-                            if action.kind == .createStrength ||
-                               action.kind == .renameStrength {
-                                TextField("Workout name", text: $actionWorkoutTitle)
-                                    .textInputAutocapitalization(.words)
-                            }
-                            if action.kind == .createRun {
-                                TextField("Run name", text: $actionWorkoutTitle)
-                                    .textInputAutocapitalization(.words)
-                                Stepper("Duration: \(actionRunMinutes) minutes",
-                                        value: $actionRunMinutes, in: 1...360)
-                                Toggle("Add target BPM range", isOn: $actionRunHasHR)
-                                if actionRunHasHR {
-                                    HStack {
-                                        TextField("Min BPM", value: $actionRunMinHR, format: .number)
-                                            .keyboardType(.numberPad)
-                                        Text("–")
-                                        TextField("Max BPM", value: $actionRunMaxHR, format: .number)
-                                            .keyboardType(.numberPad)
-                                    }
-                                }
-                            }
-                            if let parameter = action.parameter,
-                               action.kind != .createRun &&
-                               action.kind != .createStrength &&
-                               action.kind != .renameStrength {
-                                Text("Selected value: \(parameter)")
-                                    .font(.caption2)
-                                    .foregroundStyle(HCDesign.secondary)
-                            }
-                            HStack(spacing: 10) {
-                                Button("Cancel") {
-                                    pendingAction = nil
-                                }
-                                .buttonStyle(.bordered)
-                                .tint(HCDesign.secondary)
-                                Button("Confirm action") {
-                                    confirmAction(action)
-                                }
-                                .buttonStyle(.borderedProminent)
-                                .tint(HCDesign.electric)
-                                .disabled(!canConfirmAction(action))
-                            }
-                            Text("Coach never executes an app change from generated text alone.")
-                                .font(.caption2)
-                                .foregroundStyle(HCDesign.secondary)
-                        }
-                    }
+                    IMUNCoachActionReviewCard(
+                        action: action,
+                        selectedWorkoutID: $selectedActionWorkoutID,
+                        moveDate: $actionMoveDate,
+                        workoutTitle: $actionWorkoutTitle,
+                        runMinutes: $actionRunMinutes,
+                        runHasHR: $actionRunHasHR,
+                        runMinBPM: $actionRunMinHR,
+                        runMaxBPM: $actionRunMaxHR,
+                        canConfirm: canConfirmAction(action),
+                        onCancel: { pendingAction = nil },
+                        onConfirm: { confirmAction(action) }
+                    )
                 }
 
                 if composerFocused {
