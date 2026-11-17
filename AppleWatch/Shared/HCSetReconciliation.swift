@@ -1,15 +1,55 @@
 import Foundation
 
+/// A signed-in athlete's correction to a locally recorded set or an active
+/// workout window. Immutable IDs make offline retries idempotent.
+struct HCWorkoutUndo: Codable, Identifiable, Hashable {
+    let id: UUID
+    let kind: String
+    let setID: UUID?
+    let workoutDate: String
+    let sessionKey: String
+    let startedAt: Date?
+    let endedAt: Date?
+    let createdAt: Date
+
+    static func set(_ set: HCLoggedSet) -> HCWorkoutUndo {
+        HCWorkoutUndo(id: UUID(), kind: "set", setID: set.id,
+                      workoutDate: set.workoutDate,
+                      sessionKey: set.sessionKey,
+                      startedAt: nil, endedAt: nil, createdAt: Date())
+    }
+
+    static func workout(_ workout: HCWorkout, startedAt: Date,
+                        endedAt: Date = Date()) -> HCWorkoutUndo {
+        HCWorkoutUndo(id: UUID(), kind: "workout", setID: nil,
+                      workoutDate: workout.date, sessionKey: workout.sessionKey,
+                      startedAt: startedAt, endedAt: endedAt,
+                      createdAt: Date())
+    }
+
+    func applies(to set: HCLoggedSet) -> Bool {
+        guard set.workoutDate == workoutDate,
+              set.sessionKey == sessionKey else { return false }
+        if kind == "set" { return set.id == setID }
+        guard kind == "workout", let startedAt, let endedAt else { return false }
+        return set.completedAt >= startedAt && set.completedAt <= endedAt
+    }
+}
+
+
 /// The source of truth for progress is a dated exercise/set slot, NOT the
 /// device on which a recording started. Every raw record retains its UUID,
 /// source, and timestamps for history/export; only the progress presentation
 /// is reconciled. Extra sets remain in history but do not inflate the plan.
 enum HCSetReconciliation {
-    static func allRecords(local: [HCLoggedSet], cloud: [HCLoggedSet]) -> [HCLoggedSet] {
+    static func allRecords(local: [HCLoggedSet], cloud: [HCLoggedSet],
+                           undos: [HCWorkoutUndo] = []) -> [HCLoggedSet] {
         var byID = Dictionary(uniqueKeysWithValues: cloud.map { ($0.id, $0) })
         // Locally edited or pending entries win until confirmed to the cloud.
         for entry in local { byID[entry.id] = entry }
-        return byID.values.sorted {
+        return byID.values.filter { entry in
+            !undos.contains(where: { $0.applies(to: entry) })
+        }.sorted {
             if $0.completedAt != $1.completedAt { return $0.completedAt < $1.completedAt }
             return $0.id.uuidString < $1.id.uuidString
         }
