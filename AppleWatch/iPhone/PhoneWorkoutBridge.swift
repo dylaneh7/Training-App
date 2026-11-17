@@ -7,6 +7,7 @@ import WatchConnectivity
 final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
     @Published private(set) var workout: HCWorkout?
     @Published private(set) var runPlan: HCRunPlan?
+    @Published private(set) var preferredTredictRunID: String?
     @Published private(set) var loggedSets: [HCLoggedSet] = []
     @Published private(set) var cloudRecordedSets: [HCLoggedSet] = []
     @Published private(set) var progressSyncStatus = "Progress saved locally"
@@ -23,6 +24,7 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
     private var importedHealthRuns: [HCProgressRun] = []
     private var remoteRunHistory: [HCProgressRun] = []
     private var tredictScheduledRuns: [HCTredictPlannedRun] = []
+    private var preferredTredictRuns: [String: String] = [:]
     private var manuallyCompletedRunKeys = Set<String>()
     @Published private(set) var recoveryHistory: [HCRecoveryDatum] = []
     @Published private(set) var performanceHistory: [HCPerformanceSet] = []
@@ -124,6 +126,8 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
         importedHealthRuns = read("apple-health-imported-runs.json") ?? []
         runHistory = importedHealthRuns
         completedWatchRuns = read("health-coach-native-runs.json") ?? []
+        preferredTredictRuns = read("imun-selected-tredict-plans.json") ?? [:]
+        preferredTredictRunID = preferredTredictRuns[HCPlanBuilder.dateString(Date())]
         manuallyCompletedRunKeys = Set(read("imun-manually-completed-runs.json") ?? [String]())
         uploadedIDs = Set(read("uploaded-watch-set-ids.json") ?? [])
         pendingEditedWorkout = read("pending-edited-workout.json")
@@ -475,9 +479,25 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
     /// Don't guess which workout to use if multiple Tredict programs overlap.
     func updateTredictScheduledRuns(_ runs: [HCTredictPlannedRun]) {
         tredictScheduledRuns = runs
+        preferredTredictRunID = preferredTredictRuns[HCPlanBuilder.dateString(Date())]
         runPlan = enrichedRunPlan(runPlan)
         mergeRunHistory()
         if confirmedScheduleDate == HCPlanBuilder.dateString(Date()) { sendToWatch() }
+    }
+
+    /// The selected Tredict run is the single prescribed workout for both
+    /// iMun Training and iMun Watch. Apple Workout remains a separate recorder.
+    func useTredictRunAsToday(_ selected: HCTredictPlannedRun) {
+        guard selected.date == HCPlanBuilder.dateString(Date()),
+              selected.unsupportedReason == nil, !selected.steps.isEmpty else { return }
+        preferredTredictRuns[selected.date] = selected.id
+        preferredTredictRunID = selected.id
+        save(preferredTredictRuns, name: "imun-selected-tredict-plans.json")
+        runPlan = enrichedRunPlan(runPlan)
+        mergeRunHistory()
+        // Only an already confirmed calendar may be delivered as ready;
+        // if a calendar refresh is running, it will send this choice afterward.
+        if confirmedScheduleDate == selected.date { sendToWatch(forceQueue: true) }
     }
 
     private func relevantWords(_ title: String) -> Set<String> {
@@ -499,8 +519,16 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
         let candidates = tredictScheduledRuns.filter {
             $0.date == today && $0.unsupportedReason == nil && !$0.steps.isEmpty
         }
+        // Explicit user selection wins over a different/overlapping planner.
+        // The selected run must still be one of today's fetched Tredict plans.
+        let preferred = preferredTredictRuns[today]
+        let selectedRun = preferred.flatMap { id in
+            candidates.first(where: { $0.id == id })
+        }
         let run: HCTredictPlannedRun?
-        if let original {
+        if let selectedRun {
+            run = selectedRun
+        } else if let original {
             let words = relevantWords(original.title)
             let matching = candidates.filter {
                 let other = relevantWords($0.title)
@@ -532,7 +560,10 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
                              minBPM: item.heartRate?.lowerBound,
                              maxBPM: item.heartRate?.upperBound)
         }
-        if var original {
+        // Preserve Command Center's own ID and completion when it genuinely
+        // matches. A deliberately selected Tredict workout gets a stable
+        // Tredict ID/title so phone and Watch cannot show different plans.
+        if selectedRun == nil, var original {
             original.structuredSteps = steps
             return original
         }
