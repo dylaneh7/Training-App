@@ -35,6 +35,9 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
     @Published private(set) var eitanWatchSyncStatus = "EITAN has not synced with Watch yet"
     @Published private(set) var eitanWatchAcknowledgedAt: Date?
     private var lastEitanPacketStamp: TimeInterval = 0
+    // A delayed acknowledgment or failed old send cannot replace a newer
+    // score/opt-out with a previously sent wellness snapshot.
+    private var latestEitanDedicatedStamp: TimeInterval = 0
     @Published private(set) var performanceHistory: [HCPerformanceSet] = []
     @Published private(set) var status = "Preparing Health Coach…"
     @Published private(set) var watchSyncStatus = "Waiting for Watch connection"
@@ -1155,7 +1158,9 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
 
     private func queueEitanPacket(_ packet: [String: Any]) {
         let connection = WCSession.default
-        guard connection.activationState == .activated else { return }
+        guard connection.activationState == .activated,
+              let stamp = packet[HCPayload.eitanStamp] as? Double,
+              stamp >= latestEitanDedicatedStamp else { return }
         // Only the newest score or opt-out needs reliable queued delivery.
         // Explicitly cancel older pending snapshots so an old score does
         // not appear again after the athlete disables EITAN Health access.
@@ -1184,6 +1189,7 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
         }
         let packet = currentEitanPacket()
         let stamp = packet[HCPayload.eitanStamp] as? Double ?? 0
+        latestEitanDedicatedStamp = stamp
         if forceQueue || !connection.isReachable {
             queueEitanPacket(packet)
         }
@@ -1195,7 +1201,8 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
                 let receivedStamp = reply[HCPayload.eitanStamp] as? Double ?? -1
                 if reply["eitanReceived"] as? Bool == true &&
                    abs(receivedStamp - stamp) < 0.01 {
-                    if stamp >= (self.eitanWatchAcknowledgedAt?.timeIntervalSince1970 ?? 0) {
+                    if stamp >= self.latestEitanDedicatedStamp &&
+                       stamp >= (self.eitanWatchAcknowledgedAt?.timeIntervalSince1970 ?? 0) {
                         self.eitanWatchAcknowledgedAt = Date(timeIntervalSince1970: stamp)
                         self.eitanWatchSyncStatus = "EITAN confirmed on Watch · " +
                             Date().formatted(date: .omitted, time: .shortened)
@@ -1935,7 +1942,8 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
         if userInfo[HCPayload.kind] as? String == HCPayload.eitanReceipt {
             DispatchQueue.main.async {
                 guard let stamp = userInfo[HCPayload.eitanStamp] as? Double else { return }
-                if stamp >= (self.eitanWatchAcknowledgedAt?.timeIntervalSince1970 ?? 0) {
+                if stamp >= self.latestEitanDedicatedStamp &&
+                   stamp >= (self.eitanWatchAcknowledgedAt?.timeIntervalSince1970 ?? 0) {
                     self.eitanWatchAcknowledgedAt = Date(timeIntervalSince1970: stamp)
                     self.eitanWatchSyncStatus = "EITAN confirmed on Watch · " +
                         Date().formatted(date: .omitted, time: .shortened)
