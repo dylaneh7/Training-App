@@ -247,6 +247,10 @@ struct WatchWorkoutView: View {
                                 startPoint: .topLeading, endPoint: .bottomTrailing))
                     )
 
+                    IMUNThemeEmblem(area: "training", compact: true)
+                        .padding(.vertical, 4)
+                        .listRowBackground(WTheme.panel)
+
                     // This control is visible without scrolling through
                     // iPhone-link diagnostics. One cloud sign-in lets users
                     // recover today's published workout without pairing sync.
@@ -839,7 +843,7 @@ private struct WatchGuidedSession: View {
                 }
                 if !active {
                     Button(action: onFinish) {
-                        Label("FINISH WORKOUT", systemImage: "flag.checkered")
+                        Label("FINISH WORKOUT", systemImage: "checkmark.seal.fill")
                             .font(WTheme.label(11))
                             .foregroundStyle(WTheme.muted)
                             .frame(maxWidth: .infinity, minHeight: 43)
@@ -934,9 +938,10 @@ private struct WatchGuidedSession: View {
 
     private func restPanel(seconds: TimeInterval) -> some View {
         VStack(alignment: .center, spacing: 6) {
-            Text("RECOVERY · NEXT SET AUTO-STARTS")
-                .font(WTheme.label(10))
-                .foregroundStyle(WTheme.aqua)
+            IMUNThemeRestHeader()
+            Text("NEXT SET AUTO-STARTS")
+                .font(WTheme.label(9))
+                .foregroundStyle(WTheme.muted)
             Text(wClock(seconds))
                 .font(WTheme.metric(52))
                 .foregroundStyle(WTheme.lime)
@@ -968,7 +973,7 @@ private struct WatchGuidedSession: View {
             Text("\(store.guidedCompletedSets) working sets logged")
                 .font(.system(size: 12))
                 .foregroundStyle(WTheme.muted)
-            WPrimary(title: "FINISH WORKOUT", symbol: "flag.checkered",
+            WPrimary(title: "FINISH WORKOUT", symbol: "checkmark.seal.fill",
                      action: onFinish)
         }
     }
@@ -1013,7 +1018,7 @@ private struct WatchSessionOptions: View {
                 }
                 .disabled(store.liftClock?.setStartedAt != nil)
             }
-            WPrimary(title: "FINISH WORKOUT", symbol: "flag.checkered",
+            WPrimary(title: "FINISH WORKOUT", symbol: "checkmark.seal.fill",
                      color: WTheme.amber) {
                 dismiss()
                 onFinish()
@@ -1395,7 +1400,7 @@ private struct WatchRunScreen: View {
                         store.addRunSplit(currentDistanceMeters: health.distanceMeters)
                         wHaptic(.click)
                     }
-                    WPrimary(title: "FINISH RUN", symbol: "flag.checkered",
+                    WPrimary(title: "FINISH RUN", symbol: "checkmark.seal.fill",
                              color: WTheme.amber) { confirmFinish = true }
                 } else if store.liftClock?.isActive == true {
                     Text("Finish your strength session before starting a run.")
