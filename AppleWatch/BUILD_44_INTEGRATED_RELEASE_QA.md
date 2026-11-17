@@ -11,8 +11,13 @@ both iPhone and watchOS CI checks are successful and the branch is merged to mai
   planned run routes to existing Training controls (doesn't fabricate a run).
 - Persistent active-workout mini-bar spans app tabs and exposes a real
   elapsed-session clock, rest-end countdown and pending cloud uploads.
+- Watch now forwards a dated start/finish/undo clock status to the iPhone.
+  The persistent mini-bar recognizes Watch-origin sessions, labels their source,
+  and offers Continue from Watch without silently fabricating a second start.
+  Queued and live status messages are ordered by their reported timestamp.
 - Cloud progress polling is de-emphasized while browsing Health/Progress;
-  existing Watch set reconciliation, offline records, and undo remain intact.
+  an active Watch/iPhone workout remains eligible for reconciliation.
+  Existing set records, offline corrections, and undo remain intact.
 
 ## Phase 42 — Progress and Health detail
 - Progress has 7/30/90-day filters, actual logged lifting volume, running
@@ -55,6 +60,10 @@ both iPhone and watchOS CI checks are successful and the branch is merged to mai
 - [ ] Today opens with actual plan/recovery or honest empty states
 - [ ] Start/resume workout, rest countdown, finish and undo still work
 - [ ] Watch completed sets merge without double-counting or deleting unsynced sets
+- [ ] Start strength on Watch while iPhone is on Today: status bar shows Watch session
+- [ ] Continue from Watch in iPhone Training adopts same start timestamp; no duplicate clock
+- [ ] Finish/undo on Watch removes stale iPhone banner after live/queued status receipt
+- [ ] Reconnecting Watch replays current status; stale yesterday's session never appears active
 - [ ] Progress charts, exercise personal records and 7/30/90 filters agree
 - [ ] Health preferred source switch never labels WHOOP as Apple Watch
 - [ ] IsAIah explains month-over-month running pace from actual records
