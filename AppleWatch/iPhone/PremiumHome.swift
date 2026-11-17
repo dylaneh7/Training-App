@@ -2731,6 +2731,16 @@ private struct PremiumCoachConversation: View {
     @State private var actionRunHasHR = false
     @State private var actionRunMinHR = 120
     @State private var actionRunMaxHR = 150
+    @State private var actionEditOperation: IMUNCoachExerciseOperation = .update
+    @State private var selectedEditExerciseID = ""
+    @State private var actionEditExerciseName = ""
+    @State private var actionEditInstructions = ""
+    @State private var actionEditSets = 3
+    @State private var actionEditRepMin = 8
+    @State private var actionEditRepMax = 12
+    @State private var actionEditRestSeconds = 120
+    @State private var actionEditWeightText = ""
+    @State private var actionWorkoutSignature = ""
 
     private var context: String {
         turns.suffix(6).map { turn in
@@ -2894,6 +2904,18 @@ private struct PremiumCoachConversation: View {
                         runHasHR: $actionRunHasHR,
                         runMinBPM: $actionRunMinHR,
                         runMaxBPM: $actionRunMaxHR,
+                        editOperation: $actionEditOperation,
+                        selectedEditExerciseID: $selectedEditExerciseID,
+                        editExerciseName: $actionEditExerciseName,
+                        editInstructions: $actionEditInstructions,
+                        editSets: $actionEditSets,
+                        editRepMin: $actionEditRepMin,
+                        editRepMax: $actionEditRepMax,
+                        editRestSeconds: $actionEditRestSeconds,
+                        editWeightText: $actionEditWeightText,
+                        onSelectEditExercise: { id in
+                            populateEditFields(for: id, hint: nil)
+                        },
                         canConfirm: canConfirmAction(action),
                         onCancel: { pendingAction = nil },
                         onConfirm: { confirmAction(action) }
@@ -2981,6 +3003,61 @@ private struct PremiumCoachConversation: View {
         }
     }
 
+    private func populateEditFields(for exerciseID: String,
+                                    hint: IMUNCoachWorkoutEditHint?) {
+        guard let exercise = coach.workout?.exercises.first(where: {
+            $0.id == exerciseID
+        }) else { return }
+        actionEditSets = hint?.sets ?? exercise.prescribedSets
+        actionEditRepMin = hint?.repMin ?? exercise.repMin
+        actionEditRepMax = max(actionEditRepMin, hint?.repMax ?? exercise.repMax)
+        actionEditRestSeconds = hint?.restSeconds ?? exercise.restSeconds
+        actionEditWeightText = (hint?.weightLb ?? exercise.suggestedWeightLb)
+            .map { String($0) } ?? ""
+        if hint == nil {
+            actionEditInstructions = exercise.instructions ?? ""
+        }
+    }
+
+    private func prepareEditFields(_ proposed: IMUNCoachActionProposal) {
+        actionWorkoutSignature = coach.workout?.coachEditSignature ?? ""
+        let hint = proposed.workoutEdit
+        actionEditOperation = hint?.operation ?? .update
+        actionEditExerciseName = ""
+        actionEditInstructions = ""
+        actionEditSets = hint?.sets ?? 3
+        actionEditRepMin = hint?.repMin ?? 8
+        actionEditRepMax = max(actionEditRepMin, hint?.repMax ?? 12)
+        actionEditRestSeconds = hint?.restSeconds ?? 120
+        actionEditWeightText = hint?.weightLb.map { String($0) } ?? ""
+        let matches = coach.workout?.exercises.filter {
+            guard let name = hint?.exerciseName?.lowercased() else { return false }
+            return $0.name.lowercased() == name ||
+                $0.name.localizedCaseInsensitiveContains(name)
+        } ?? []
+        selectedEditExerciseID = matches.count == 1 ? (matches.first?.id ?? "") : ""
+        if actionEditOperation == .add || actionEditOperation == .replace {
+            actionEditExerciseName = hint?.exerciseName ?? ""
+        }
+        if !selectedEditExerciseID.isEmpty &&
+           actionEditOperation != .add {
+            populateEditFields(for: selectedEditExerciseID, hint: hint)
+        }
+    }
+
+    private var validExerciseEditInputs: Bool {
+        guard (1...12).contains(actionEditSets),
+              (1...30).contains(actionEditRepMin),
+              (actionEditRepMin...40).contains(actionEditRepMax),
+              (15...360).contains(actionEditRestSeconds),
+              actionEditRestSeconds.isMultiple(of: 15) else { return false }
+        let raw = actionEditWeightText.trimmingCharacters(
+            in: .whitespacesAndNewlines)
+        return raw.isEmpty || Double(raw).map {
+            $0.isFinite && (0...1500).contains($0)
+        } == true
+    }
+
     private func canConfirmAction(_ action: IMUNCoachActionProposal) -> Bool {
         guard coach.signedIn else { return false }
         switch action.kind {
@@ -3004,6 +3081,37 @@ private struct PremiumCoachConversation: View {
         case .renameStrength:
             return coach.workout != nil &&
                 !actionWorkoutTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        case .editStrength:
+            guard let plan = coach.workout,
+                  plan.id == action.suggestedWorkoutID,
+                  plan.date == HCPlanBuilder.dateString(Date()),
+                  !actionWorkoutSignature.isEmpty,
+                  plan.coachEditSignature == actionWorkoutSignature,
+                  validExerciseEditInputs else { return false }
+            if actionEditOperation == .add {
+                let name = actionEditExerciseName.trimmingCharacters(
+                    in: .whitespacesAndNewlines)
+                return !name.isEmpty && plan.exercises.count < 35 &&
+                    !plan.exercises.contains(where: {
+                        $0.name.localizedCaseInsensitiveCompare(name) == .orderedSame
+                    })
+            }
+            guard let selected = plan.exercises.first(where: {
+                $0.id == selectedEditExerciseID
+            }) else { return false }
+            if actionEditOperation == .replace {
+                return !actionEditExerciseName.trimmingCharacters(
+                    in: .whitespacesAndNewlines).isEmpty &&
+                    !coach.completedSets(for: plan).contains(where: {
+                        $0.exerciseID == selected.id
+                    })
+            }
+            if actionEditOperation == .remove {
+                return !coach.completedSets(for: plan).contains(where: {
+                    $0.exerciseID == selected.id
+                })
+            }
+            return true
         case .completeRun:
             return coach.runPlan?.id == action.suggestedWorkoutID &&
                 coach.runPlan?.isCompleted == false
@@ -3089,6 +3197,29 @@ private struct PremiumCoachConversation: View {
                 sessionKey: workout.sessionKey, title: actionWorkoutTitle,
                 exercises: workout.exercises, isPreview: false))
             reply = "Saved the requested strength workout name without changing exercises or completed sets."
+        case .editStrength:
+            guard let workout = coach.workout else { return }
+            let rawWeight = actionEditWeightText.trimmingCharacters(
+                in: .whitespacesAndNewlines)
+            let edit = IMUNCoachWorkoutEdit(
+                workoutID: workout.id,
+                expectedSignature: actionWorkoutSignature,
+                operation: actionEditOperation,
+                exerciseID: actionEditOperation == .add ? nil : selectedEditExerciseID,
+                newName: actionEditExerciseName,
+                newInstructions: actionEditInstructions.trimmingCharacters(
+                    in: .whitespacesAndNewlines).isEmpty ?
+                    nil : actionEditInstructions,
+                sets: actionEditSets,
+                repMin: actionEditRepMin,
+                repMax: actionEditRepMax,
+                restSeconds: actionEditRestSeconds,
+                suggestedWeightLb: rawWeight.isEmpty ? nil : Double(rawWeight))
+            guard let result = coach.applyCoachWorkoutEdit(edit) else {
+                errorMessage = coach.status
+                return
+            }
+            reply = result
         case .selectTraining:
             guard let activity = action.parameter else { return }
             selectedActivity = activity
@@ -3146,6 +3277,7 @@ private struct PremiumCoachConversation: View {
             (proposed.parameter ?? "Custom Strength Workout")
         actionRunMinutes = Int(proposed.parameter ?? "") ?? 40
         actionRunHasHR = false
+        prepareEditFields(proposed)
         isSending = false
         errorMessage = nil
         persist()
