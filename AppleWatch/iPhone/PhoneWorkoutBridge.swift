@@ -26,6 +26,7 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
     private var tredictScheduledRuns: [HCTredictPlannedRun] = []
     private var preferredTredictRuns: [String: String] = [:]
     private var manuallyCompletedRunKeys = Set<String>()
+    private var locallyCreatedRun: HCRunPlan?
     @Published private(set) var recoveryHistory: [HCRecoveryDatum] = []
     @Published private(set) var performanceHistory: [HCPerformanceSet] = []
     @Published private(set) var status = "Preparing Health Coach…"
@@ -133,6 +134,7 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
         preferredTredictRuns = read("imun-selected-tredict-plans.json") ?? [:]
         preferredTredictRunID = preferredTredictRuns[HCPlanBuilder.dateString(Date())]
         manuallyCompletedRunKeys = Set(read("imun-manually-completed-runs.json") ?? [String]())
+        locallyCreatedRun = read("imun-local-running-plan.json")
         uploadedIDs = Set(read("uploaded-watch-set-ids.json") ?? [])
         pendingEditedWorkout = read("pending-edited-workout.json")
         phoneSessionStartedAt = read("iphone-session-start.json")
@@ -257,7 +259,7 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
                     }
                     self.confirmedScheduleDate = dateText
                     self.workout = active
-                    self.runPlan = self.enrichedRunPlan(run)
+                    self.runPlan = self.enrichedRunPlan(self.preferredLocalRun(over: run))
                     self.plannedSessions = HCPlanBuilder.upcomingWithRotation(from: snapshot.planner)
                     self.cloudTrainingActivities = activities
                     self.mergeHistoricalSources()
@@ -335,7 +337,7 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
                         : baseline.map { self.smartTargets($0,
                                                 history: self.performanceHistory,
                                                 preserveExisting: published != nil) }
-                    self.runPlan = self.enrichedRunPlan(HCPlanBuilder.run(for: Date(), planner: snapshot.planner))
+                    self.runPlan = self.enrichedRunPlan(self.preferredLocalRun(over: HCPlanBuilder.run(for: Date(), planner: snapshot.planner)))
                     self.plannedSessions = HCPlanBuilder.upcomingWithRotation(from: snapshot.planner)
                     self.save(self.plannedSessions, name: "imun-planned-workouts.json")
                     self.confirmedScheduleDate = day
@@ -477,6 +479,53 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
                 }
             }
         }
+    }
+
+    /// Create an opt-in prescribed run on an otherwise unscheduled day.
+    /// This is a local training instruction, not a fabricated HealthKit record.
+    @discardableResult
+    func createRunToday(title: String, minutes: Int,
+                        minimumBPM: Int? = nil, maximumBPM: Int? = nil) -> Bool {
+        let day = HCPlanBuilder.dateString(Date())
+        let sanitized = String(title.trimmingCharacters(in: .whitespacesAndNewlines).prefix(80))
+        guard signedIn, runPlan == nil, !sanitized.isEmpty,
+              (1...360).contains(minutes) else {
+            status = "To create a run, select an empty running day and enter 1–360 minutes."
+            return false
+        }
+        if minimumBPM != nil || maximumBPM != nil {
+            guard let minimumBPM, let maximumBPM,
+                  (35...230).contains(minimumBPM),
+                  (35...230).contains(maximumBPM),
+                  minimumBPM <= maximumBPM else {
+                status = "Enter a valid heart-rate range, or leave both targets off."
+                return false
+            }
+        }
+        let step = HCRunStep(title: "Run", phase: "work",
+                             seconds: Double(minutes) * 60,
+                             distanceMeters: nil, minBPM: minimumBPM,
+                             maxBPM: maximumBPM)
+        let created = HCRunPlan(
+            id: "imun-local-" + UUID().uuidString,
+            date: day, title: sanitized, notes: "Created in iMun on iPhone",
+            targetDistanceMiles: nil, isCompleted: false,
+            structuredSteps: [step])
+        locallyCreatedRun = created
+        save(created, name: "imun-local-running-plan.json")
+        runPlan = created
+        mergeRunHistory()
+        status = "Created \(minutes)-minute \(sanitized)."
+        // The same plan is sent over both working Build 30 delivery routes.
+        confirmedScheduleDate = day
+        sendToWatch(forceQueue: true)
+        return true
+    }
+
+    private func preferredLocalRun(over calendar: HCRunPlan?) -> HCRunPlan? {
+        guard calendar == nil, let local = locallyCreatedRun,
+              local.date == HCPlanBuilder.dateString(Date()) else { return calendar }
+        return local
     }
 
     /// The iPhone's current running plan is the same plan sent to iMun Watch.
