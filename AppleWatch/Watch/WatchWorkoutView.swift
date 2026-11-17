@@ -230,7 +230,7 @@ private struct IMUNEitanScore {
         return "Every step builds momentum"
     }
 
-    static func calculate(_ store: WatchWorkoutStore) -> IMUNEitanScore {
+    static func calculate(_ store: WatchWorkoutStore, includeSleep: Bool = false) -> IMUNEitanScore {
         let today = WatchWorkoutStore.today()
         let calendar = Calendar.current
         let formatter = DateFormatter()
@@ -279,7 +279,7 @@ private struct IMUNEitanScore {
             score: Int((consistency * 100).rounded()), weight: 0.35,
             explanation: "\(active.count) distinct logged training day(s) in the past seven days, against a four-day reference."))
 
-        if let recovery = store.recoverySummary,
+        if includeSleep, let recovery = store.recoverySummary,
            recovery.date >= formatter.string(from: calendar.date(byAdding: .day,
                                            value: -2, to: Date()) ?? Date()),
            recovery.date <= today,
