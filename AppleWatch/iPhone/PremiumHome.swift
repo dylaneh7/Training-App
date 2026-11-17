@@ -1843,13 +1843,6 @@ private struct HCRecoverySignal: Identifiable {
         severity == 2 ? "OUTSIDE RECENT PATTERN" :
         severity == 1 ? "WORTH WATCHING" : "NEAR YOUR BASELINE"
     }
-    // A baseline-normalized display ring, NOT an invented recovery score.
-    var ringProgress: Double {
-        guard let baseline, baseline > 0 else { return 0 }
-        let ratio = lowerIsWorse ? current / baseline : baseline / max(0.01, current)
-        return min(1, max(0, ratio))
-    }
-
     static func build(label: String, symbol: String, source: String,
                       unit: String, lowerIsWorse: Bool,
                       rows: [(String, Double)], suppliedBaseline: Double? = nil,
@@ -2081,10 +2074,12 @@ private struct HCMetricFamilyCard: View {
                         }
                     }
                     if expandedTrends.contains(reading.id) && reading.points.count > 1 {
-                        Chart(reading.points) { point in
-                            LineMark(x: .value("Date", point.date),
-                                     y: .value("Reading", point.value))
-                                .foregroundStyle(HCDesign.electric)
+                        Chart {
+                            ForEach(reading.points) { point in
+                                LineMark(x: .value("Date", point.date),
+                                         y: .value("Reading", point.value))
+                                    .foregroundStyle(HCDesign.electric)
+                            }
                             if let baseline = reading.baseline {
                                 RuleMark(y: .value("Baseline", baseline))
                                     .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 4]))
@@ -2199,7 +2194,11 @@ private struct PremiumRecoveryPage: View {
         let searched = metricSearch.trimmingCharacters(in: .whitespacesAndNewlines)
         return (searched.isEmpty ? groupFiltered : groupFiltered.filter {
             $0.label.localizedCaseInsensitiveContains(searched) ||
-            $0.source.localizedCaseInsensitiveContains(searched)
+            $0.source.localizedCaseInsensitiveContains(searched) ||
+            (searched.lowercased() == "hrv" &&
+             HCMetricFamily.familyID($0) == "hrv") ||
+            (searched.lowercased() == "blood oxygen" &&
+             HCMetricFamily.familyID($0) == "blood-oxygen")
         }).sorted { $0.date > $1.date }
     }
 
