@@ -532,6 +532,10 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
     /// Rest uses wall-clock time so the next set can start after wrist-down
     /// or an app re-launch. A timer drives this while the screen is visible.
     func advanceAfterRestIfReady() {
+        // Existing default remains automatic so installed Watch behavior
+        // does not change. An athlete may choose manual start in Preferences.
+        guard UserDefaults.standard.object(forKey: "hcAutoStartNextSet") as? Bool ?? true
+        else { return }
         guard let clock = liftClock, clock.isActive, !clock.isPaused,
               clock.setStartedAt == nil, !guidedAllFinished,
               (clock.restEndsAt == nil || clock.restEndsAt! <= Date()) else { return }
