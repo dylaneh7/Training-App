@@ -1266,6 +1266,19 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
         return true
     }
 
+    private func acknowledgeEitanIfReachable(_ stamp: Double) {
+        let connection = WCSession.default
+        guard stamp > 0, connection.activationState == .activated,
+              connection.isReachable else { return }
+        connection.sendMessage([
+            HCPayload.kind: HCPayload.eitanReceipt,
+            HCPayload.eitanStamp: stamp
+        ], replyHandler: { _ in }, errorHandler: { _ in
+            // The Watch already has the latest snapshot; live acknowledgement
+            // failure is not a failure to display the received wellness data.
+        })
+    }
+
     private func queueEitanRequest(_ session: WCSession) {
         // A wellness score is replaceable state, NOT a background event.
         // Do not create transferUserInfo jobs that may repeatedly time out.
@@ -1297,7 +1310,10 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
             replyHandler: { [weak self] response in
                 DispatchQueue.main.async {
                     guard let self else { return }
-                    if !self.applyEitanPacket(response) {
+                    if self.applyEitanPacket(response) {
+                        self.acknowledgeEitanIfReachable(
+                            response[HCPayload.eitanStamp] as? Double ?? 0)
+                    } else {
                         self.eitanSyncStatus = "EITAN response invalid · try again"
                     }
                 }
@@ -1541,7 +1557,12 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
     }
 
     func session(_ session: WCSession, didReceiveApplicationContext context: [String: Any]) {
-        applyContext(context)
+        DispatchQueue.main.async {
+            self.applyContext(context)
+            if let stamp = context[HCPayload.eitanStamp] as? Double {
+                self.acknowledgeEitanIfReachable(stamp)
+            }
+        }
     }
 
     /// Only acknowledge a schedule after it decodes and has been applied.
