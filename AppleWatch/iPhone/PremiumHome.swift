@@ -1655,6 +1655,7 @@ private struct IMUNActivityDetails: View {
 
 private struct PremiumProgressPage: View {
     @EnvironmentObject private var coach: PhoneWorkoutBridge
+    @AppStorage("hcDesignPreset") private var progressPreset = "techno"
     @State private var selectedExercise = ""
     @State private var movingSession: HCPlannedSession?
     @State private var showAllUpcomingSessions = false
@@ -1789,7 +1790,10 @@ private struct PremiumProgressPage: View {
                 HStack(alignment: .center, spacing: 8) {
                     VStack(alignment: .leading, spacing: 3) {
                         Text("Upcoming workouts")
-                            .font(.system(size: 18, weight: .semibold))
+                            .font(.system(size: 18, weight: .semibold,
+                                          design: progressPreset == "heritage" ||
+                                                  progressPreset == "atelier" ?
+                                                  .serif : .default))
                             .foregroundStyle(HCDesign.ink)
                         Text("Tap to reschedule")
                             .font(.system(size: 11))
