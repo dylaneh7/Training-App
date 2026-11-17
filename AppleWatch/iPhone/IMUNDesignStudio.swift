@@ -37,7 +37,10 @@ struct IMUNDesignStudioPage: View {
                         .foregroundStyle(HCDesign.secondary)
                 }
 
-                HCSectionTitle(title: "Live previews", detail: "iPhone & Watch")
+                HCSectionTitle(title: "Live previews", detail: "Unique to each theme")
+                Text("Preview graphics are examples; your actual completed-set counts come from training history.")
+                    .font(.caption2)
+                    .foregroundStyle(HCDesign.secondary)
                 previews
 
                 HCSectionTitle(title: "Choose an identity", detail: "Tap a preset")
@@ -243,24 +246,22 @@ struct IMUNDesignStudioPage: View {
             .background(HCDesign.card, in: IMUNPanelShape())
             .overlay(IMUNPanelShape().stroke(HCDesign.outline, lineWidth: 1))
 
-            VStack(alignment: .leading, spacing: 9) {
-                Text("WATCH / TODAY")
+            VStack(alignment: .center, spacing: 8) {
+                Text("WATCH / PREVIEW")
                     .font(HCDesign.label(9)).tracking(1)
                     .foregroundStyle(HCDesign.electric)
-                Text("8")
-                    .font(HCDesign.metric(38))
+                IMUNThemeProgressView(completed: 3, planned: 5, compact: true)
+                Text(IMUNStyle.preset.title.uppercased())
+                    .font(HCDesign.label(10))
                     .foregroundStyle(HCDesign.ink)
-                Text("MOVEMENTS")
-                    .font(HCDesign.label(9)).foregroundStyle(HCDesign.secondary)
-                Image(systemName: IMUNStyle.preset.symbol)
-                    .font(.system(size: 24, weight: .medium))
-                    .foregroundStyle(HCDesign.electric)
-                Text("READY")
-                    .font(HCDesign.label(11))
-                    .foregroundStyle(HCDesign.ink)
+                    .minimumScaleFactor(0.8)
+                    .lineLimit(1)
+                Text("Example 3/5 sets")
+                    .font(.system(size: 9))
+                    .foregroundStyle(HCDesign.secondary)
             }
-            .padding(15)
-            .frame(width: 127, height: 208, alignment: .topLeading)
+            .padding(12)
+            .frame(width: 127, height: 208)
             .background(HCDesign.canvas,
                         in: RoundedRectangle(cornerRadius: 35))
             .overlay(RoundedRectangle(cornerRadius: 35)
