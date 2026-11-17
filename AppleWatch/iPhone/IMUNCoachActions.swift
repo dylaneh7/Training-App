@@ -63,7 +63,7 @@ enum IMUNCoachActionInterpreter {
            !containsAny(value, ["remind", "recorded"]) {
             return proposal(.createRun, "Create today's running workout",
                 "Create a timed run on an empty day, with optional BPM targets. No workout will be marked complete.",
-                parameter: suggestedMinutes(value).map(String.init))
+                parameter: suggestedMinutes(value).map { String($0) })
         }
 
         if containsAny(value, ["create", "add", "make", "plan", "schedule"]) &&
