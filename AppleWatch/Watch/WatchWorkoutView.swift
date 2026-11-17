@@ -636,6 +636,7 @@ private struct WatchGuidedSession: View {
     @EnvironmentObject private var store: WatchWorkoutStore
     @EnvironmentObject private var health: WatchHealthSession
     @AppStorage("hcWeightIncrement") private var increment = 5.0
+    @AppStorage("hcAutoStartNextSet") private var autoStartNextSet = true
     @State private var weight = 0.0
     @State private var hasWeight = false
     @State private var reps = 8
@@ -870,11 +871,13 @@ private struct WatchGuidedSession: View {
         .onReceive(restPulse) { _ in
             guard let until = store.liftClock?.restEndsAt,
                   until <= Date(), store.liftClock?.isPaused == false else { return }
-            store.advanceAfterRestIfReady()
-            if store.liftClock?.setStartedAt != nil && !readyHapticSent {
+            // Both modes alert once when rest ends. Only the opted-in
+            // auto mode begins the next active set without a button press.
+            if !readyHapticSent {
                 readyHapticSent = true
                 wHaptic(.notification)
             }
+            store.advanceAfterRestIfReady()
         }
         .onAppear {
             store.advanceAfterRestIfReady()
@@ -947,7 +950,8 @@ private struct WatchGuidedSession: View {
     private func restPanel(seconds: TimeInterval) -> some View {
         VStack(alignment: .center, spacing: 6) {
             IMUNThemeRestHeader()
-            Text("NEXT SET AUTO-STARTS")
+            Text(autoStartNextSet ? "NEXT SET AUTO-STARTS" :
+                                      "NEXT SET STARTS WHEN YOU TAP")
                 .font(WTheme.label(9))
                 .foregroundStyle(WTheme.muted)
             IMUNThemeTimerFace(seconds: seconds, countsDown: true, compact: true)
@@ -1075,6 +1079,7 @@ private struct WatchPreferences: View {
     @AppStorage("hcMotivationTranslation") private var translation = "ESV"
     @AppStorage("hcWeightIncrement") private var increment = 5.0
     @AppStorage("hcRestOverrideSeconds") private var restOverride = 0
+    @AppStorage("hcAutoStartNextSet") private var autoStartNextSet = true
     @AppStorage("hcWatchHaptics") private var haptics = true
 
     var body: some View {
@@ -1175,6 +1180,13 @@ private struct WatchPreferences: View {
                     Text("2 minutes").tag(120)
                     Text("3 minutes").tag(180)
                 }
+                Toggle("Start next set automatically after rest",
+                       isOn: $autoStartNextSet)
+                    .tint(WTheme.lime)
+                Text(autoStartNextSet
+                    ? "The Watch will start the next set when rest finishes. The first set starts with Start Workout."
+                    : "Rest still counts down and alerts you. Tap Start Set when you are ready; no next set begins on its own.")
+                    .font(.caption2).foregroundStyle(WTheme.muted)
                 Toggle("Haptic feedback", isOn: $haptics).tint(WTheme.lime)
                 Text("Running voice cues and automatic miles remain in the Run screen.")
                     .font(.caption2).foregroundStyle(WTheme.muted)

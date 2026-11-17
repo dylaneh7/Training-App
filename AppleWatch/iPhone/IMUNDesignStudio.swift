@@ -351,6 +351,15 @@ struct IMUNDesignStudioPage: View {
     }
 }
 
+/// Local-only records. No journals, saved notes or user-authored text are
+/// uploaded to the theme cloud table or sent in workout sync payloads.
+private struct IMUNMindsetEntry: Codable, Identifiable, Equatable {
+    let id: UUID
+    let text: String
+    let savedAt: Date
+    let kind: String // "saved" daily line or "journal" athlete-authored writing
+}
+
 /// Motivation is opt-in, user-authored content is entirely local, and ESV/LSB
 /// references are shown instead of embedding copyrighted translation text.
 struct IMUNMotivationPage: View {
@@ -358,7 +367,63 @@ struct IMUNMotivationPage: View {
     @AppStorage("hcMotivationTranslation") private var translation = "ESV"
     @AppStorage("hcMotivationTone") private var tone = "quiet"
     @AppStorage("hcMotivationCustom") private var custom = ""
-    @AppStorage("hcMotivationFavorite") private var favorite = ""
+    @AppStorage("hcMotivationFavorite") private var favorite = "" // Legacy single favorite
+    @AppStorage("hcMotivationEntriesV1") private var archive = ""
+    @AppStorage("hcMotivationShowTraining") private var showOnTraining = false
+    @State private var journalDraft = ""
+
+    private var entries: [IMUNMindsetEntry] {
+        guard let data = archive.data(using: .utf8),
+              let decoded = try? JSONDecoder().decode([IMUNMindsetEntry].self, from: data)
+        else { return [] }
+        return decoded.sorted { $0.savedAt > $1.savedAt }
+    }
+
+    private var currentIsSaved: Bool {
+        guard let line = IMUNMotivation.line else { return false }
+        return entries.contains { $0.kind == "saved" && $0.text == line }
+    }
+
+    @discardableResult
+    private func updateEntries(_ updated: [IMUNMindsetEntry]) -> Bool {
+        let limited = Array(updated.sorted { $0.savedAt > $1.savedAt }.prefix(120))
+        guard let data = try? JSONEncoder().encode(limited),
+              let text = String(data: data, encoding: .utf8) else { return false }
+        archive = text
+        return archive == text
+    }
+
+    private func saveCurrentNote() {
+        guard let line = IMUNMotivation.line, !currentIsSaved else { return }
+        updateEntries(entries + [IMUNMindsetEntry(
+            id: UUID(), text: String(line.prefix(1000)),
+            savedAt: Date(), kind: "saved")])
+    }
+
+    private func saveJournalEntry() {
+        let content = journalDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !content.isEmpty else { return }
+        if updateEntries(entries + [IMUNMindsetEntry(
+            id: UUID(), text: String(content.prefix(1000)),
+            savedAt: Date(), kind: "journal")]) {
+            journalDraft = ""
+        }
+    }
+
+    private func removeEntry(_ id: UUID) {
+        updateEntries(entries.filter { $0.id != id })
+    }
+
+    private func importLegacyFavorite() {
+        let old = favorite.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !old.isEmpty else { return }
+        if !entries.contains(where: { $0.kind == "saved" && $0.text == old }) {
+            guard updateEntries(entries + [IMUNMindsetEntry(
+                id: UUID(), text: old, savedAt: Date(), kind: "saved")])
+            else { return }
+        }
+        favorite = ""
+    }
 
     var body: some View {
         ScrollView {
@@ -385,11 +450,11 @@ struct IMUNMotivationPage: View {
                                     .font(.caption)
                                     .foregroundStyle(HCDesign.secondary)
                             }
-                            Button {
-                                favorite = line
-                            } label: {
-                                Label("Save this note", systemImage: "bookmark")
+                            Button(action: saveCurrentNote) {
+                                Label(currentIsSaved ? "Saved to your collection" : "Save this note",
+                                      systemImage: currentIsSaved ? "bookmark.fill" : "bookmark")
                             }
+                            .disabled(currentIsSaved)
                             .font(.caption.weight(.semibold))
                             .foregroundStyle(HCDesign.electric)
                         } else {
@@ -399,6 +464,76 @@ struct IMUNMotivationPage: View {
                             Text("Your training screens stay focused without additional quotes or prompts.")
                                 .font(.caption)
                                 .foregroundStyle(HCDesign.secondary)
+                        }
+                    }
+                }
+                HCSectionTitle(title: "In your training day")
+                HCCard {
+                    Toggle("Show today's note on Training", isOn: $showOnTraining)
+                        .tint(HCDesign.electric)
+                    Text("Off by default. Notes appear only when you've selected a content source. This does not change your theme or your workout.")
+                        .font(.caption2)
+                        .foregroundStyle(HCDesign.secondary)
+                }
+                HCSectionTitle(title: "Personal training journal")
+                HCCard {
+                    VStack(alignment: .leading, spacing: 11) {
+                        Text("Keep a private thought, lesson, or intention from today's training.")
+                            .font(.caption)
+                            .foregroundStyle(HCDesign.secondary)
+                        TextField("What mattered in today's work?",
+                                  text: $journalDraft, axis: .vertical)
+                            .lineLimit(3...6)
+                            .textFieldStyle(.roundedBorder)
+                        HStack {
+                            Text("\(journalDraft.count)/1000")
+                                .font(.caption2)
+                                .foregroundStyle(HCDesign.secondary)
+                            Spacer()
+                            Button {
+                                saveJournalEntry()
+                            } label: {
+                                Label("Save journal entry", systemImage: "square.and.pencil")
+                            }
+                            .disabled(journalDraft.trimmingCharacters(
+                                in: .whitespacesAndNewlines).isEmpty ||
+                                journalDraft.count > 1000)
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(HCDesign.electric)
+                        }
+                    }
+                }
+                if !entries.isEmpty {
+                    HCSectionTitle(title: "Saved notes & journal",
+                                   detail: "\(entries.count) private entries")
+                    ForEach(entries) { entry in
+                        HCCard {
+                            VStack(alignment: .leading, spacing: 9) {
+                                HStack {
+                                    Label(entry.kind == "journal" ? "JOURNAL" : "SAVED NOTE",
+                                          systemImage: entry.kind == "journal" ?
+                                            "square.and.pencil" : "bookmark.fill")
+                                        .font(HCDesign.label(10))
+                                        .foregroundStyle(HCDesign.aqua)
+                                    Spacer()
+                                    Text(entry.savedAt.formatted(
+                                        date: .abbreviated, time: .omitted))
+                                        .font(.caption2)
+                                        .foregroundStyle(HCDesign.secondary)
+                                }
+                                Text(entry.text)
+                                    .font(.system(size: 14, weight: .medium,
+                                                  design: IMUNStyle.headingDesign))
+                                    .foregroundStyle(HCDesign.ink)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                Button(role: .destructive) {
+                                    removeEntry(entry.id)
+                                } label: {
+                                    Label("Remove entry", systemImage: "trash")
+                                        .font(.caption)
+                                }
+                                .buttonStyle(.plain)
+                            }
                         }
                     }
                 }
@@ -437,19 +572,12 @@ struct IMUNMotivationPage: View {
                     Text("Tone will shape future prompts. Your current daily note remains the selected source's original text.")
                         .font(.caption2).foregroundStyle(HCDesign.secondary)
                 }
-                if !favorite.isEmpty {
-                    HCSectionTitle(title: "Saved note")
-                    HCCard {
-                        Text(favorite).foregroundStyle(HCDesign.ink)
-                        Button("Clear saved note") { favorite = "" }
-                            .foregroundStyle(HCDesign.electric)
-                            .font(.caption.weight(.semibold))
-                    }
-                }
+ 
             }
             .padding(18)
         }
         .hcPage()
         .navigationTitle("Motivation")
+        .onAppear(perform: importLegacyFavorite)
     }
 }

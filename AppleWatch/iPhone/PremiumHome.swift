@@ -356,6 +356,42 @@ private struct PremiumLogin: View {
     }
 }
 
+/// Content is independent from the selected theme. The athlete explicitly
+/// opts in in Settings → Motivation; otherwise training remains distraction-free.
+private struct IMUNTrainingMindsetCard: View {
+    @AppStorage("hcMotivationShowTraining") private var show = false
+    @AppStorage("hcMotivationSource") private var source = "off"
+    @AppStorage("hcMotivationCustom") private var custom = ""
+    @AppStorage("hcMotivationTranslation") private var translation = "ESV"
+
+    var body: some View {
+        if show, source != "off", let line = IMUNMotivation.line {
+            HCCard {
+                VStack(alignment: .leading, spacing: 9) {
+                    HStack(spacing: 8) {
+                        Image(systemName: source == "scripture" ? "book.closed" : "bookmark")
+                            .foregroundStyle(HCDesign.aqua)
+                        Text("WORDS TO TRAIN BY")
+                            .font(HCDesign.label(10))
+                            .tracking(1.2)
+                            .foregroundStyle(HCDesign.secondary)
+                    }
+                    Text(line)
+                        .font(.system(size: 16, weight: .medium,
+                                      design: IMUNStyle.headingDesign))
+                        .foregroundStyle(HCDesign.ink)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if source == "scripture" {
+                        Text("Reference only · read the passage in your chosen Bible.")
+                            .font(.caption2)
+                            .foregroundStyle(HCDesign.secondary)
+                    }
+                }
+            }
+        }
+    }
+}
+
 private struct PremiumStrengthPage: View {
     @Binding var headerCollapsed: Bool
     @EnvironmentObject private var coach: PhoneWorkoutBridge
@@ -380,6 +416,7 @@ private struct PremiumStrengthPage: View {
             IMUNTrainingScrollProbe()
             VStack(alignment: .leading, spacing: 19) {
                 HCSectionTitle(title: "Weightlifting", detail: aggressive ? "Coached session" : "Today's plan")
+                IMUNTrainingMindsetCard()
                 HCSyncStatus(pending: coach.cloudPendingCount,
                              saving: coach.savingPlan, connected: coach.signedIn)
 
@@ -889,6 +926,7 @@ private struct PremiumRunPage: View {
             IMUNTrainingScrollProbe()
             VStack(alignment: .leading, spacing: 19) {
                 HCSectionTitle(title: "Running", detail: "Today's plan")
+                IMUNTrainingMindsetCard()
                 if !coach.signedIn { PremiumLogin() }
                 HCCard(accent: HCDesign.aqua) {
                     VStack(alignment: .leading, spacing: 17) {
