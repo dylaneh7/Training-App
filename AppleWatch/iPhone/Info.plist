@@ -15,7 +15,5 @@
   <key>UILaunchScreen</key><dict/>
   <key>UIRequiredDeviceCapabilities</key><array><string>arm64</string></array>
   <key>NSHealthShareUsageDescription</key><string>Health Coach reads source-labeled sleep, heart rate, and HRV data you permit from Apple Health, including WHOOP data if synced there.</string>
-  <key>NSBluetoothAlwaysUsageDescription</key>
-  <string>iMun uses Bluetooth only when you scan for a compatible heart-rate sensor, and displays live BPM locally.</string>
 </dict>
 </plist>
