@@ -467,7 +467,7 @@ struct PremiumHomeView: View {
         }
         .onReceive(progressRefresh) { _ in
             if scenePhase == .active && coach.signedIn &&
-               (selectedTab == "training" || coach.phoneSessionStartedAt != nil) {
+               (selectedTab == "training" || coach.isWorkoutActive) {
                 coach.refreshCloudProgress()
             }
         }
