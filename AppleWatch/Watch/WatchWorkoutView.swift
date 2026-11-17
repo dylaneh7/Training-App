@@ -233,10 +233,11 @@ struct WatchWorkoutView: View {
                                 .font(WTheme.label(10)).foregroundStyle(WTheme.muted)
                         }
                         Spacer(minLength: 0)
-                        WProgressHalo(
+                        IMUNThemeProgressView(
                             completed: store.guidedCompletedSets,
                             planned: store.hasScheduledLift ?
-                                store.workout.prescribedSetCount : 0)
+                                store.workout.prescribedSetCount : 0,
+                            compact: true)
                     }
                     .padding(.vertical, 9)
                     .listRowBackground(
