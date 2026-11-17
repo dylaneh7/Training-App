@@ -12,6 +12,12 @@
   <key>CFBundleShortVersionString</key><string>$(MARKETING_VERSION)</string>
   <key>CFBundleVersion</key><string>$(CURRENT_PROJECT_VERSION)</string>
   <key>LSRequiresIPhoneOS</key><true/>
+  <key>NSSupportsLiveActivities</key><true/>
+  <key>CFBundleURLTypes</key>
+  <array><dict>
+    <key>CFBundleURLName</key><string>com.dylaneh7.HealthCoachNative</string>
+    <key>CFBundleURLSchemes</key><array><string>imun</string></array>
+  </dict></array>
   <key>UILaunchScreen</key><dict/>
   <key>UIRequiredDeviceCapabilities</key><array><string>arm64</string></array>
   <key>NSHealthShareUsageDescription</key><string>Health Coach reads source-labeled sleep, heart rate, and HRV data you permit from Apple Health, including WHOOP data if synced there.</string>
