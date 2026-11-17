@@ -969,6 +969,27 @@ private struct HCHealthCatalogItem {
     }
 }
 
+// Collect query results off the main thread and publish ONE coherent snapshot
+// instead of invalidating the entire Health screen after every source sample.
+private final class HCHealthReadBatch {
+    private let lock = NSLock()
+    private var loadedMetrics: [HCHealthMetric] = []
+    private var loadedHistory: [HCHealthTrendSample] = []
+
+    func append(metric: HCHealthMetric, points: [HCHealthTrendSample]) {
+        lock.lock()
+        defer { lock.unlock() }
+        loadedMetrics.append(metric)
+        loadedHistory.append(contentsOf: points)
+    }
+
+    func snapshot() -> (metrics: [HCHealthMetric], history: [HCHealthTrendSample]) {
+        lock.lock()
+        defer { lock.unlock() }
+        return (loadedMetrics, loadedHistory)
+    }
+}
+
 final class HCAppleHealthReader: ObservableObject {
     @Published private(set) var metrics: [HCHealthMetric] = []
     @Published private(set) var metricHistory: [HCHealthTrendSample] = []
@@ -977,6 +998,8 @@ final class HCAppleHealthReader: ObservableObject {
     @Published private(set) var loading = false
     private let store = HKHealthStore()
     private var generation = 0
+    private var lastRefreshStartedAt: Date?
+    private let automaticRefreshInterval: TimeInterval = 5 * 60
 
     // Broad data catalog. Metrics are only displayed when samples actually exist;
     // no empty data is replaced with a guess or artificial zero.
@@ -1137,10 +1160,14 @@ final class HCAppleHealthReader: ObservableObject {
         }
     }
 
-    func refreshIfAuthorized() {
-        if UserDefaults.standard.bool(forKey: "hcHealthCatalogEnabled") {
-            refresh()
+    func refreshIfAuthorized(force: Bool = false) {
+        guard UserDefaults.standard.bool(forKey: "hcHealthCatalogEnabled") else { return }
+        guard !loading else { return }
+        if !force, let last = lastRefreshStartedAt,
+           Date().timeIntervalSince(last) < automaticRefreshInterval {
+            return
         }
+        refresh()
     }
 
     /// A scroll-independent snapshot of every currently loaded Health metric.
@@ -1198,14 +1225,16 @@ final class HCAppleHealthReader: ObservableObject {
     }
 
     func refresh() {
-        guard HKHealthStore.isHealthDataAvailable() else { return }
+        guard HKHealthStore.isHealthDataAvailable(), !loading else { return }
         generation += 1
         let activeGeneration = generation
-        metrics = []
-        metricHistory = []
+        lastRefreshStartedAt = Date()
+        // Keep the last authorized readings visible while the refresh runs.
+        // HealthKit results are accumulated outside SwiftUI's render loop.
         loading = true
-        status = "Reading authorized data from Apple Health…"
+        status = "Updating authorized Apple Health measurements…"
         let group = DispatchGroup()
+        let batch = HCHealthReadBatch()
         for item in catalog {
             guard let type = item.type else { continue }
             group.enter()
@@ -1256,33 +1285,31 @@ final class HCAppleHealthReader: ObservableObject {
                         unit: item.suffix, numericValue: latest.value,
                         higherIsWorse: item.higherIsWorse,
                         lowerIsWorse: item.lowerIsWorse)
-                    DispatchQueue.main.async {
-                        guard self?.generation == activeGeneration else { return }
-                        self?.metrics.append(metric)
-                        self?.metricHistory.append(contentsOf: points)
-                    }
+                    batch.append(metric: metric, points: points)
                 }
             }
             store.execute(query)
         }
         group.enter()
-        readSleep(group: group, generation: activeGeneration)
+        readSleep(group: group, batch: batch)
         group.enter()
-        readWorkouts(group: group, generation: activeGeneration)
+        readWorkouts(group: group, batch: batch)
         group.notify(queue: .main) { [weak self] in
             guard let self, self.generation == activeGeneration else { return }
-            self.loading = false
-            self.metrics.sort {
+            let result = batch.snapshot()
+            self.metrics = result.metrics.sorted {
                 if $0.category == $1.category { return $0.name < $1.name }
                 return $0.category < $1.category
             }
+            self.metricHistory = result.history
+            self.loading = false
             self.status = self.metrics.isEmpty ?
                 "No readable samples found. Review Health permissions and device sync." :
                 "\(self.metrics.count) source-specific measurements loaded."
         }
     }
 
-    private func readSleep(group: DispatchGroup, generation: Int) {
+    private func readSleep(group: DispatchGroup, batch: HCHealthReadBatch) {
         guard let type = HKObjectType.categoryType(forIdentifier: .sleepAnalysis) else {
             group.leave()
             return
@@ -1333,18 +1360,14 @@ final class HCAppleHealthReader: ObservableObject {
                         source: source, date: latest.date,
                         category: "Sleep", unit: "h",
                         numericValue: latest.value, lowerIsWorse: code == -1)
-                    DispatchQueue.main.async {
-                        guard self?.generation == generation else { return }
-                        self?.metrics.append(metric)
-                        self?.metricHistory.append(contentsOf: points)
-                    }
+                    batch.append(metric: metric, points: points)
                 }
             }
         }
         store.execute(query)
     }
 
-    private func readWorkouts(group: DispatchGroup, generation: Int) {
+    private func readWorkouts(group: DispatchGroup, batch: HCHealthReadBatch) {
         let type = HKObjectType.workoutType()
         let start = Calendar.current.date(byAdding: .day, value: -35, to: Date())
         let predicate = HKQuery.predicateForSamples(withStart: start, end: Date())
@@ -1371,11 +1394,7 @@ final class HCAppleHealthReader: ObservableObject {
                                             source: source, date: latest.date,
                                             category: "Workouts",unit:"sessions",
                                             numericValue: latest.value)
-                DispatchQueue.main.async {
-                    guard self?.generation == generation else { return }
-                    self?.metrics.append(metric)
-                    self?.metricHistory.append(contentsOf: countPoints)
-                }
+                batch.append(metric: metric, points: countPoints)
             }
         }
         store.execute(query)
