@@ -384,11 +384,13 @@ struct IMUNMotivationPage: View {
         return entries.contains { $0.kind == "saved" && $0.text == line }
     }
 
-    private func updateEntries(_ updated: [IMUNMindsetEntry]) {
+    @discardableResult
+    private func updateEntries(_ updated: [IMUNMindsetEntry]) -> Bool {
         let limited = Array(updated.sorted { $0.savedAt > $1.savedAt }.prefix(120))
         guard let data = try? JSONEncoder().encode(limited),
-              let text = String(data: data, encoding: .utf8) else { return }
+              let text = String(data: data, encoding: .utf8) else { return false }
         archive = text
+        return archive == text
     }
 
     private func saveCurrentNote() {
@@ -401,10 +403,11 @@ struct IMUNMotivationPage: View {
     private func saveJournalEntry() {
         let content = journalDraft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !content.isEmpty else { return }
-        updateEntries(entries + [IMUNMindsetEntry(
+        if updateEntries(entries + [IMUNMindsetEntry(
             id: UUID(), text: String(content.prefix(1000)),
-            savedAt: Date(), kind: "journal")])
-        journalDraft = ""
+            savedAt: Date(), kind: "journal")]) {
+            journalDraft = ""
+        }
     }
 
     private func removeEntry(_ id: UUID) {
@@ -415,8 +418,9 @@ struct IMUNMotivationPage: View {
         let old = favorite.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !old.isEmpty else { return }
         if !entries.contains(where: { $0.kind == "saved" && $0.text == old }) {
-            updateEntries(entries + [IMUNMindsetEntry(
+            guard updateEntries(entries + [IMUNMindsetEntry(
                 id: UUID(), text: old, savedAt: Date(), kind: "saved")])
+            else { return }
         }
         favorite = ""
     }
