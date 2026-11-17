@@ -2941,6 +2941,11 @@ private struct PremiumCoachConversation: View {
                         Text("Training decisions, made simpler.")
                             .font(.system(size: 12))
                             .foregroundStyle(HCDesign.secondary)
+                        Label(launchContext.components(separatedBy: "\n").first ?? "Current screen",
+                              systemImage: "rectangle.on.rectangle")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(HCDesign.electric)
+                            .lineLimit(1)
                     }
                     Spacer(minLength: 5)
                     if !turns.isEmpty {
@@ -3141,7 +3146,7 @@ private struct PremiumCoachConversation: View {
                             .textSelection(.enabled)
                     }
                 }
-                Text("Your question and a short training summary are shared only when you send. Recovery measurements are shared only if you enable the option.")
+                Text("Your question, current screen context and a short training summary are shared only when you send. Recovery measurements are shared only if you enable the option.")
                     .font(.system(size: 10))
                     .foregroundStyle(HCDesign.secondary)
             }
