@@ -30,6 +30,7 @@ struct PremiumHomeView: View {
     @StateObject private var appleHealth = HCAppleHealthReader()
     @StateObject private var runImporter = HCRunHealthImporter()
     @StateObject private var tredictImporter = HCTredictImporter()
+    @StateObject private var tredictPlans = HCTredictWatchPlanSync()
     @AppStorage("hcAccentStyle") private var accentStyle = "crimson"
     @AppStorage("hcDesignPreset") private var designPreset = "techno"
     @AppStorage("hcDesignMode") private var designMode = "dark"
@@ -71,6 +72,8 @@ struct PremiumHomeView: View {
         .preferredColorScheme(IMUNStyle.preferredScheme)
         .environmentObject(runImporter)
         .environmentObject(tredictImporter)
+        .environmentObject(tredictPlans)
+        .onReceive(tredictPlans.$runs) { coach.updateTredictScheduledRuns($0) }
         .onReceive(tredictImporter.$snapshot) { snapshot in
             if snapshot.lastSync != nil {
                 coach.updateTredictSnapshot(snapshot)
@@ -82,6 +85,7 @@ struct PremiumHomeView: View {
         .onChange(of: scenePhase) { _, phase in
             if phase == .active {
                 runImporter.startIfAuthorized()
+                if tredictPlans.connected { tredictPlans.refresh() }
                 if coach.signedIn { coach.refresh(date: Date()) }
             }
         }
@@ -106,6 +110,7 @@ struct PremiumHomeView: View {
             if coach.signedIn && coach.workout == nil { coach.refresh(date: Date()) }
             if coach.signedIn { coach.refreshCloudProgress() }
             configureTabAppearance()
+            if tredictPlans.connected { tredictPlans.refresh() }
         }
     }
 
@@ -953,6 +958,32 @@ private struct PremiumRunPage: View {
                         }
                         Text("Set warm-up, intervals, recovery and heart-rate targets for Apple's Workout app.")
                             .font(.caption2).foregroundStyle(HCDesign.secondary)
+                        if let steps = coach.runPlan?.structuredSteps, !steps.isEmpty {
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text("PRESCRIBED INTERVALS")
+                                    .font(HCDesign.label(11)).foregroundStyle(HCDesign.aqua)
+                                ForEach(Array(steps.enumerated()), id: \.offset) { _, step in
+                                    let goal = step.seconds.map { "\(Int($0 / 60)) min" }
+                                        ?? step.distanceMeters.map {
+                                            String(format: "%.2f mi", $0 / 1609.344)
+                                        } ?? "Open"
+                                    let bpm = step.minBPM.flatMap { minimum in
+                                        step.maxBPM.map { maximum in
+                                            " · \(minimum)–\(maximum) bpm"
+                                        }
+                                    } ?? ""
+                                    Text("\(step.title) · \(goal)\(bpm)")
+                                        .font(.caption).foregroundStyle(HCDesign.secondary)
+                                }
+                            }
+                        }
+                        if coach.runPlan?.isCompleted == false {
+                            HCOutlineButton(title: "I COMPLETED THIS RUN", icon: "checkmark.circle") {
+                                coach.setRunManuallyCompleted(true)
+                            }
+                            Text("Use this if the run is missing from Apple Health. No distance, pace or heart-rate data will be invented.")
+                                .font(.caption2).foregroundStyle(HCDesign.secondary)
+                        }
                         if let entry = coach.plannedSessions.first(where: {
                             $0.date == HCPlanBuilder.dateString(date) && $0.kind == "run"
                         }) {
