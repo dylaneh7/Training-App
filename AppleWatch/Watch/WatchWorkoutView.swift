@@ -201,11 +201,11 @@ private struct WProgressHalo: View {
     }
 }
 
-// MARK: - VYRMUN (an iMun-native training-momentum metric)
+// MARK: - EITAN (Biblical Hebrew: enduring / steadfast; iMun training momentum)
 //
 // This is NOT a recovery, medical-readiness or physiological prediction.
 // Only recorded activity is used. Missing measurements never become zeroes.
-private struct IMUNVyrmunComponent: Identifiable {
+private struct IMUNEitanComponent: Identifiable {
     let id: String
     let title: String
     let score: Int
@@ -213,9 +213,9 @@ private struct IMUNVyrmunComponent: Identifiable {
     let explanation: String
 }
 
-private struct IMUNVyrmunScore {
+private struct IMUNEitanScore {
     let value: Int?
-    let parts: [IMUNVyrmunComponent]
+    let parts: [IMUNEitanComponent]
     let activeDays: Int
 
     func score(for id: String) -> String {
@@ -230,7 +230,7 @@ private struct IMUNVyrmunScore {
         return "Every step builds momentum"
     }
 
-    static func calculate(_ store: WatchWorkoutStore) -> IMUNVyrmunScore {
+    static func calculate(_ store: WatchWorkoutStore) -> IMUNEitanScore {
         let today = WatchWorkoutStore.today()
         let calendar = Calendar.current
         let formatter = DateFormatter()
@@ -250,7 +250,7 @@ private struct IMUNVyrmunScore {
             formatter.string(from: $0.startedAt) <= today
         }.map { formatter.string(from: $0.startedAt) })
 
-        var components: [IMUNVyrmunComponent] = []
+        var components: [IMUNEitanComponent] = []
         var actions: [Double] = []
         if store.hasScheduledLift && store.workout.date == today,
            store.workout.prescribedSetCount > 0 {
@@ -265,7 +265,7 @@ private struct IMUNVyrmunScore {
         }
         if !actions.isEmpty {
             let ratio = actions.reduce(0, +) / Double(actions.count)
-            components.append(IMUNVyrmunComponent(
+            components.append(IMUNEitanComponent(
                 id: "action", title: "ACTION",
                 score: Int((ratio * 100).rounded()), weight: 0.45,
                 explanation: "Today's prescribed strength sets and any scheduled run completion. Rest days are not counted as missed workouts."))
@@ -274,7 +274,7 @@ private struct IMUNVyrmunScore {
         // Four active days is an adjustable future reference, not a clinical
         // threshold. Count distinct days of real strength/run records.
         let consistency = min(1, Double(active.count) / 4)
-        components.append(IMUNVyrmunComponent(
+        components.append(IMUNEitanComponent(
             id: "rhythm", title: "RHYTHM",
             score: Int((consistency * 100).rounded()), weight: 0.35,
             explanation: "\(active.count) distinct logged training day(s) in the past seven days, against a four-day reference."))
@@ -288,7 +288,7 @@ private struct IMUNVyrmunScore {
             // Sleep duration is a simple 7.5-hour reference, NOT a sleep
             // quality, medical risk, recovery or training-readiness score.
             let sleep = min(1, seconds / (7.5 * 3600))
-            components.append(IMUNVyrmunComponent(
+            components.append(IMUNEitanComponent(
                 id: "sleep", title: "SLEEP",
                 score: Int((sleep * 100).rounded()), weight: 0.20,
                 explanation: String(format: "%.1f h of recorded sleep from %@ on %@, compared with a 7.5 h display reference.",
@@ -308,27 +308,27 @@ private struct IMUNVyrmunScore {
         } else {
             total = nil
         }
-        return IMUNVyrmunScore(value: total, parts: components,
+        return IMUNEitanScore(value: total, parts: components,
                                activeDays: active.count)
     }
 }
 
-private struct IMUNVyrmunHomeTile: View {
+private struct IMUNEitanHomeTile: View {
     @EnvironmentObject private var store: WatchWorkoutStore
 
     var body: some View {
-        let score = IMUNVyrmunScore.calculate(store)
+        let score = IMUNEitanScore.calculate(store)
         VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .top, spacing: 6) {
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("VYRMUN")
+                    Text("EITAN")
                         .font(.system(size: 14, weight: .bold,
                                       design: IMUNStyle.headingDesign))
                         .tracking(1.4)
                         .foregroundStyle(IMUNStyle.palette.ink)
                         .lineLimit(1)
                         .minimumScaleFactor(0.85)
-                    Text("STEADINESS IN MOTION")
+                    Text("TRAINING MOMENTUM")
                         .font(.system(size: 8, weight: .medium))
                         .tracking(0.35)
                         .foregroundStyle(WTheme.muted)
@@ -392,23 +392,23 @@ private struct IMUNVyrmunHomeTile: View {
         .padding(.vertical, 11)
         .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("Vyrmun training momentum: " +
+        .accessibilityLabel("Eitan training momentum: " +
             (score.value.map { "\($0) out of 100" } ?? "awaiting training records") +
             ". " + score.headline)
     }
 }
 
-private struct IMUNVyrmunExplanation: View {
+private struct IMUNEitanExplanation: View {
     @EnvironmentObject private var store: WatchWorkoutStore
     var body: some View {
-        let score = IMUNVyrmunScore.calculate(store)
+        let score = IMUNEitanScore.calculate(store)
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
-                Text("VYRMUN")
+                Text("EITAN")
                     .font(.system(size: 20, weight: .semibold))
                     .tracking(1)
                     .foregroundStyle(IMUNStyle.palette.ink)
-                Text("Steadiness in motion")
+                Text("Enduring and steadfast")
                     .font(.system(size: 11))
                     .foregroundStyle(WTheme.muted)
                 Text(score.value.map { "\($0) / 100" } ?? "Gathering records")
@@ -433,11 +433,11 @@ private struct IMUNVyrmunExplanation: View {
                     .background(WTheme.panel,
                                 in: RoundedRectangle(cornerRadius: 12))
                 }
-                Text("VYRMUN is an original iMun name inspired by Hebrew imun (training) and emunah (steadfastness and faithfulness). It is not a historical Hebrew word or translation.")
+                Text("EITAN (אֵיתָן) is an authentic Biblical Hebrew word associated with endurance, firmness and strength. iMun uses it as a name for consistent training effort; it is not a literal Hebrew translation of readiness.")
                     .font(.system(size: 10))
                     .foregroundStyle(WTheme.muted)
                     .fixedSize(horizontal: false, vertical: true)
-                Text("Your VYRMUN score combines today's training follow-through (45%), seven-day rhythm (35%) and recent recorded sleep duration (20%). Missing components are omitted and available weights are rescaled. It does not estimate medical readiness, fitness, or recovery quality.")
+                Text("Your EITAN score combines today's training follow-through (45%), seven-day rhythm (35%) and recent recorded sleep duration (20%). Missing components are omitted and available weights are rescaled. It does not estimate medical readiness, fitness, or recovery quality.")
                     .font(.system(size: 10))
                     .foregroundStyle(WTheme.muted)
                     .fixedSize(horizontal: false, vertical: true)
@@ -448,7 +448,7 @@ private struct IMUNVyrmunExplanation: View {
             .padding(12)
         }
         .background(WTheme.bg)
-        .navigationTitle("VYRMUN")
+        .navigationTitle("EITAN")
     }
 }
 
@@ -477,9 +477,9 @@ struct WatchWorkoutView: View {
             List {
                 Section {
                     NavigationLink {
-                        IMUNVyrmunExplanation()
+                        IMUNEitanExplanation()
                     } label: {
-                        IMUNVyrmunHomeTile()
+                        IMUNEitanHomeTile()
                     }
                     .buttonStyle(.plain)
                     .listRowInsets(EdgeInsets(top: 5, leading: 8,
