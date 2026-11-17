@@ -322,6 +322,18 @@ actor HCCloudClient {
         return nil
     }
 
+    /// Read current-day set records from both iPhone and Watch. The
+    /// authenticated user filter plus RLS protect the private history.
+    func fetchCompletedSets(for workout: HCWorkout) async throws -> [HCLoggedSet] {
+        let rows = try await readRows("health_coach_watch_sets",
+            fields: "id,workout_date,session_key,workout_title,exercise_id,exercise_name,exercise_index,set_index,weight_lb,reps,rir,completed_at,started_at,duration_seconds,source",
+            otherQuery: [
+                URLQueryItem(name: "workout_date", value: "eq." + workout.date),
+                URLQueryItem(name: "session_key", value: "eq." + workout.sessionKey)
+            ], limit: 500)
+        return HCSetReconciliation.decodeCloudRows(rows, workout: workout)
+    }
+
     func fetchWatchPerformance(before: String) async throws -> [HCPerformanceSet] {
         let rows = try await readRows("health_coach_watch_sets",
             fields: "exercise_name,weight_lb,reps,rir,workout_date",
