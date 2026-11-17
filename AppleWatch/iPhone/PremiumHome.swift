@@ -218,6 +218,9 @@ private struct IMUNEitanTodayCard: View {
                     if healthEnabled {
                         if let snapshot = coach.eitanSnapshot,
                            snapshot.date == HCPlanBuilder.dateString(Date()) {
+                            Text("Primary wearable: " + (snapshot.primaryWearable ?? "Auto"))
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(HCDesign.electric)
                             Text(snapshot.coverage)
                                 .font(.system(size: 11))
                                 .foregroundStyle(HCDesign.secondary)
@@ -567,6 +570,15 @@ struct PremiumHomeView: View {
         isIsaiahPresented = true
     }
 
+    private func migratePreviousHealthSourceChoice() {
+        let preferences = UserDefaults.standard
+        guard preferences.object(forKey: "hcEitanPrimaryWearable") == nil else { return }
+        let previous = preferences.string(forKey: "hcPreferredHealthSource") ?? "Auto"
+        if HCEitanWearableSource.choices.contains(previous) {
+            preferences.set(previous, forKey: "hcEitanPrimaryWearable")
+        }
+    }
+
     private func updateEitan() {
         guard eitanEnabled && eitanUseHealth else {
             coach.updateEitan(nil)
@@ -750,6 +762,7 @@ struct PremiumHomeView: View {
         }
         .onChange(of: designSignature) { _, _ in configureTabAppearance() }
         .onAppear {
+            migratePreviousHealthSourceChoice()
             if selectedTab == "coach" { selectedTab = "training" }
             if coach.signedIn && coach.workout == nil { coach.refresh(date: Date()) }
             if coach.signedIn { coach.refreshCloudProgress() }
