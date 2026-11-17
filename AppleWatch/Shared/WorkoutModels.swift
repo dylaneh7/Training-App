@@ -79,7 +79,7 @@ struct HCRunPlan: Codable, Identifiable, Hashable {
     let targetDistanceMiles: Double?
     let isCompleted: Bool
     // Optional with a default to decode previously cached iPhone/Watch plans.
-    var structuredSteps: [HCRunStep] = []
+    var structuredSteps: [HCRunStep]? = nil
 }
 
 struct HCRunFinished: Codable, Identifiable, Hashable {
