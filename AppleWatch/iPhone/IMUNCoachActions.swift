@@ -1,4 +1,5 @@
 import Foundation
+import SwiftUI
 
 /// Narrow, validated app commands. The assistant's narrative never executes
 /// directly. Every matching command is reviewed in the iMun Coach UI.
@@ -273,5 +274,107 @@ enum IMUNCoachActionInterpreter {
             return calendar.date(byAdding: .day, value: days, to: start)
         }
         return nil
+    }
+}
+
+
+/// Dedicated review UI keeps the conversation lightweight and gives every
+/// persistent app change the same approval/cancel controls.
+struct IMUNCoachActionReviewCard: View {
+    @EnvironmentObject private var coach: PhoneWorkoutBridge
+
+    let action: IMUNCoachActionProposal
+    @Binding var selectedWorkoutID: String
+    @Binding var moveDate: Date
+    @Binding var workoutTitle: String
+    @Binding var runMinutes: Int
+    @Binding var runHasHR: Bool
+    @Binding var runMinBPM: Int
+    @Binding var runMaxBPM: Int
+    let canConfirm: Bool
+    let onCancel: () -> Void
+    let onConfirm: () -> Void
+
+    var body: some View {
+        HCCard(accent: HCDesign.electric) {
+            VStack(alignment: .leading, spacing: 12) {
+                Label("REVIEW APP CHANGE", systemImage: "checkmark.shield")
+                    .font(HCDesign.label(11))
+                    .foregroundStyle(HCDesign.electric)
+                Text(action.title)
+                    .font(HCDesign.display(20))
+                    .foregroundStyle(HCDesign.ink)
+                Text(action.explanation)
+                    .font(.caption)
+                    .foregroundStyle(HCDesign.secondary)
+
+                if action.kind == .moveWorkout {
+                    Picker("Workout to move", selection: $selectedWorkoutID) {
+                        Text("Choose a workout").tag("")
+                        ForEach(coach.plannedSessions) { entry in
+                            Text("\(entry.date) · \(entry.title)")
+                                .tag(entry.id)
+                        }
+                    }
+                    .tint(HCDesign.aqua)
+                    DatePicker("Move to", selection: $moveDate,
+                               displayedComponents: .date)
+                        .tint(HCDesign.aqua)
+                }
+                if action.kind == .completeScheduledWorkout {
+                    Picker("Calendar workout", selection: $selectedWorkoutID) {
+                        Text("Choose an unfinished workout").tag("")
+                        ForEach(coach.plannedSessions.filter {
+                            !$0.completed && UUID(uuidString: $0.id) != nil
+                        }) { entry in
+                            Text("\(entry.date) · \(entry.title)")
+                                .tag(entry.id)
+                        }
+                    }
+                    .tint(HCDesign.aqua)
+                }
+                if action.kind == .createStrength ||
+                   action.kind == .renameStrength {
+                    TextField("Workout name", text: $workoutTitle)
+                        .textInputAutocapitalization(.words)
+                }
+                if action.kind == .createRun {
+                    TextField("Run name", text: $workoutTitle)
+                        .textInputAutocapitalization(.words)
+                    Stepper("Duration: \(runMinutes) minutes",
+                            value: $runMinutes, in: 1...360)
+                    Toggle("Add target BPM range", isOn: $runHasHR)
+                    if runHasHR {
+                        HStack {
+                            TextField("Minimum BPM", value: $runMinBPM, format: .number)
+                                .keyboardType(.numberPad)
+                            Text("to")
+                            TextField("Maximum BPM", value: $runMaxBPM, format: .number)
+                                .keyboardType(.numberPad)
+                        }
+                    }
+                }
+                if let parameter = action.parameter,
+                   action.kind != .createRun &&
+                   action.kind != .createStrength &&
+                   action.kind != .renameStrength {
+                    Text("Selected value: \(parameter)")
+                        .font(.caption2)
+                        .foregroundStyle(HCDesign.secondary)
+                }
+                HStack(spacing: 10) {
+                    Button("Cancel", action: onCancel)
+                        .buttonStyle(.bordered)
+                        .tint(HCDesign.secondary)
+                    Button("Confirm action", action: onConfirm)
+                        .buttonStyle(.borderedProminent)
+                        .tint(HCDesign.electric)
+                        .disabled(!canConfirm)
+                }
+                Text("Generated Coach text cannot perform an app change without confirmation.")
+                    .font(.caption2)
+                    .foregroundStyle(HCDesign.secondary)
+            }
+        }
     }
 }
