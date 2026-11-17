@@ -501,51 +501,80 @@ enum IMUNIsaiahBrand {
     static let graphite = Color(red: 0.045, green: 0.05, blue: 0.075)
 }
 
-/// An original, compact "IA" precision-frame mark. Vector geometry remains
-/// crisp in a floating iPhone launcher and in a watchOS daily summary.
-struct IMUNIsaiahMark: View {
-    var size: CGFloat = 48
+// Exact shape-traced rendition of the original approved Option C artwork.
+// Maintains the IMUN family palette at every theme and display scale.
+// The contours below are simplified vector outlines of the selected design.
+private enum IMUNIsaiahArtworkData {
+    static let markWhite = """
+377,284 374,281 360,283 358,324 343,344 326,352 286,352 282,356 283,368 331,369 356,358 366,348 375,330|48,283 49,329 55,343 67,357 93,369 140,367 140,354 137,352 97,352 82,345 72,335 65,320 64,283|275,201 275,235 230,234 255,200|307,178 300,171 286,166 251,167 236,174 137,292 188,293 205,271 277,271 281,293 333,293 313,195|181,167 134,168 86,293 131,292|286,56 287,72 328,73 338,77 351,88 360,107 360,144 362,147 374,147 377,144 377,104 373,88 363,72 347,60 335,56|139,56 90,56 64,70 54,83 48,100 48,145 64,145 65,105 69,95 81,81 102,72 139,72
+"""
+    static let markRed = "177,148 253,147 298,105 222,106"
+    static let fullWhite = """
+977,157 968,156 967,178 959,188 950,193 929,193 927,201 953,202 966,196 976,181|804,156 804,181 814,195 827,202 852,201 851,193 830,193 822,189 813,176 812,156|486,162 488,155 494,152 552,153 548,163 542,166 492,166|923,113 923,131 900,131 913,113|940,101 929,95 911,95 903,99 851,161 877,162 886,150 924,150 926,162 954,162|874,95 849,96 824,162 847,161|483,95 476,118 556,118 562,121 562,128 560,131 485,131 471,135 458,145 451,158 450,169 454,181 471,190 573,189 595,125 596,114 592,104 585,98 573,94|88,187 192,190 212,183 223,172 230,156 230,144 223,135 204,128 148,128 145,123 153,117 234,117 244,96 143,94 126,100 116,108 109,122 108,135 114,144 135,152 190,152 194,158 186,164 100,163 96,165|626,62 585,189 621,188 643,122 695,122 701,125 702,134 683,188 721,190 741,132 742,118 737,105 730,98 718,94 652,94 661,62|115,59 70,60 27,190 71,188|929,37 930,45 951,46 963,54 968,64 968,83 975,85 977,62 970,45 955,37|852,37 826,37 812,44 804,60 804,84 812,84 813,63 821,50 832,45 852,45
+"""
+    static let fullRed = """
+346,108 344,143 298,142 323,110 327,107|381,90 373,82 361,77 325,78 306,85 286,104 221,188 262,190 278,169 343,169 344,190 384,190 383,98|469,77 426,78 392,190 430,189|872,85 912,85 935,63 895,63|365,63 440,62 485,24 411,24
+"""
+}
+
+private struct IMUNIsaiahArtworkLayer: Shape {
+    let contours: String
+    let designWidth: CGFloat
+    let designHeight: CGFloat
+
+    func path(in rect: CGRect) -> Path {
+        var result = Path()
+        for raw in contours.split(separator: "|") {
+            let points = raw.split(whereSeparator: { $0 == " " || $0 == "\n" })
+                .compactMap { pair -> CGPoint? in
+                    let parts = pair.split(separator: ",")
+                    guard parts.count == 2,
+                          let x = Double(parts[0]),
+                          let y = Double(parts[1]) else { return nil }
+                    return CGPoint(x: rect.minX + CGFloat(x) * rect.width / designWidth,
+                                   y: rect.minY + CGFloat(y) * rect.height / designHeight)
+                }
+            guard let first = points.first else { continue }
+            result.move(to: first)
+            for point in points.dropFirst() { result.addLine(to: point) }
+            result.closeSubpath()
+        }
+        return result
+    }
+}
+
+struct IMUNIsaiahArtwork: View {
+    enum Layout { case full, mark }
+    let layout: Layout
+
+    private var width: CGFloat { layout == .full ? 1000 : 420 }
+    private var height: CGFloat { layout == .full ? 211 : 385 }
+    private var cream: String {
+        layout == .full ? IMUNIsaiahArtworkData.fullWhite : IMUNIsaiahArtworkData.markWhite
+    }
+    private var red: String {
+        layout == .full ? IMUNIsaiahArtworkData.fullRed : IMUNIsaiahArtworkData.markRed
+    }
 
     var body: some View {
         ZStack {
-            RoundedRectangle(cornerRadius: size * 0.20, style: .continuous)
-                .fill(IMUNIsaiahBrand.graphite)
-            Path { p in
-                let inset = size * 0.14
-                let length = size * 0.19
-                let far = size - inset
-                p.move(to: CGPoint(x: inset + length, y: inset))
-                p.addLine(to: CGPoint(x: inset, y: inset))
-                p.addLine(to: CGPoint(x: inset, y: inset + length))
-                p.move(to: CGPoint(x: far - length, y: inset))
-                p.addLine(to: CGPoint(x: far, y: inset))
-                p.addLine(to: CGPoint(x: far, y: inset + length))
-                p.move(to: CGPoint(x: inset, y: far - length))
-                p.addLine(to: CGPoint(x: inset, y: far))
-                p.addLine(to: CGPoint(x: inset + length, y: far))
-                p.move(to: CGPoint(x: far, y: far - length))
-                p.addLine(to: CGPoint(x: far, y: far))
-                p.addLine(to: CGPoint(x: far - length, y: far))
-            }
-            .stroke(IMUNIsaiahBrand.cream, style: StrokeStyle(
-                lineWidth: max(1.4, size * 0.04), lineCap: .round, lineJoin: .round))
-            HStack(spacing: -size * 0.045) {
-                Text("I").italic().foregroundStyle(IMUNIsaiahBrand.cream)
-                Text("A").italic().foregroundStyle(IMUNIsaiahBrand.cream)
-            }
-            .font(.system(size: size * 0.43, weight: .black, design: .rounded))
-            .offset(y: size * 0.055)
-            Path { p in
-                p.move(to: CGPoint(x: size * 0.50, y: size * 0.20))
-                p.addLine(to: CGPoint(x: size * 0.76, y: size * 0.20))
-                p.addLine(to: CGPoint(x: size * 0.68, y: size * 0.30))
-                p.addLine(to: CGPoint(x: size * 0.43, y: size * 0.30))
-                p.closeSubpath()
-            }
-            .fill(IMUNIsaiahBrand.crimson)
+            IMUNIsaiahBrand.graphite
+            IMUNIsaiahArtworkLayer(contours: cream, designWidth: width, designHeight: height)
+                .fill(IMUNIsaiahBrand.cream, style: FillStyle(eoFill: true))
+            IMUNIsaiahArtworkLayer(contours: red, designWidth: width, designHeight: height)
+                .fill(IMUNIsaiahBrand.crimson, style: FillStyle(eoFill: true))
         }
-        .frame(width: size, height: size)
+        .aspectRatio(width / height, contentMode: .fit)
+        .accessibilityElement(children: .ignore)
         .accessibilityLabel("IsAIah")
+    }
+}
+
+struct IMUNIsaiahMark: View {
+    var size: CGFloat = 48
+    var body: some View {
+        IMUNIsaiahArtwork(layout: .mark)
+            .frame(width: size, height: size)
     }
 }
 

@@ -1143,6 +1143,60 @@ final class HCAppleHealthReader: ObservableObject {
         }
     }
 
+    /// A scroll-independent snapshot of every currently loaded Health metric.
+    /// The assistant receives this only if the athlete enables Health sharing
+    /// and explicitly sends a message. No screen scraping or background upload.
+    func isaiahHealthSnapshot(selectedCategory: String,
+                              selectedMetric: String,
+                              question: String) -> String {
+        let all = metrics.sorted {
+            let a = ($0.category, $0.name, $0.source, $0.date)
+            let b = ($1.category, $1.name, $1.source, $1.date)
+            return a < b
+        }
+        guard !all.isEmpty else {
+            return loading ? "Apple Health is still loading on this iPhone." :
+                "No authorized Apple Health measurements are currently loaded."
+        }
+
+        var lines = ["APPLE HEALTH / WHOOP: all \(all.count) loaded metric cards, independent of scrolling.",
+                     "Selected Health category: " + selectedCategory,
+                     "Selected Health metric: " + (selectedMetric.isEmpty ? "none" : selectedMetric),
+                     "Values keep their own source, method, unit and recorded date; never merge unlike sources."]
+        for metric in all {
+            lines.append(metric.category + " | " + metric.name +
+                         " | " + metric.value + " | " +
+                         metric.source + " | " + metric.date)
+        }
+
+        // Include history for whichever readings the question concerns, when
+        // available. This is supplemental; all current readings appear above.
+        let terms = (question + " " + selectedMetric).lowercased()
+        let relevant = Set(all.filter { metric in
+            let name = metric.name.lowercased()
+            return terms.contains(name) ||
+                ((terms.contains("hrv") || terms.contains("variability")) &&
+                 name.contains("hrv")) ||
+                (terms.contains("sleep") && name.contains("sleep")) ||
+                ((terms.contains("heart") || terms.contains("pulse")) &&
+                 name.contains("heart")) ||
+                ((terms.contains("step") || terms.contains("activity")) &&
+                 name.contains("step"))
+        }.map(\.name))
+        let histories = Dictionary(grouping: metricHistory.filter {
+            relevant.contains($0.name)
+        }, by: { $0.name + " | " + $0.source })
+        for name in histories.keys.sorted() {
+            let recent = (histories[name] ?? []).sorted { $0.date > $1.date }.prefix(14)
+            if !recent.isEmpty {
+                lines.append("HISTORY " + name + ": " +
+                    recent.map { $0.date + "=" + String(format: "%.2f", $0.value) }
+                        .joined(separator: ", "))
+            }
+        }
+        return lines.joined(separator: "\n")
+    }
+
     func refresh() {
         guard HKHealthStore.isHealthDataAvailable() else { return }
         generation += 1

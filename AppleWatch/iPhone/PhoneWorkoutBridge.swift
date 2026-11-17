@@ -985,7 +985,8 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
     /// A Health/Recovery snapshot is transmitted only with the extra opt-in.
     func askIMUNCoach(question: String, shareRecovery: Bool,
                       recentConversation: String = "",
-                      screenContext: String = "") async throws -> String {
+                      screenContext: String = "",
+                      healthSnapshot: String = "") async throws -> String {
         let today = HCPlanBuilder.dateString(Date())
         var lines = ["Today: \(today)", "Source: IMUN training calendar and recorded workout history"]
         if !screenContext.isEmpty {
@@ -1035,7 +1036,11 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
             lines.append("Run: \(run.date) \(run.title), \(distance), source \(run.source)")
         }
         if shareRecovery {
-            for datum in recoveryHistory.prefix(12) {
+            // All loaded Health-screen cards, even those not scrolled into view.
+            if !healthSnapshot.isEmpty {
+                lines.append(String(healthSnapshot.prefix(16_000)))
+            }
+            for datum in recoveryHistory.prefix(48) {
                 let hrv = datum.hrvMS.map { String(format: "%.0f ms", $0) } ?? "missing"
                 let sleep = datum.sleepSeconds.map { String(format: "%.1f h", $0 / 3600) }
                     ?? "missing"
