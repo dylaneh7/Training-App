@@ -31,6 +31,7 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
     private var manuallyCompletedRunKeys = Set<String>()
     private var locallyCreatedRun: HCRunPlan?
     @Published private(set) var recoveryHistory: [HCRecoveryDatum] = []
+    @Published private(set) var eitanSnapshot: HCEitanSnapshot?
     @Published private(set) var performanceHistory: [HCPerformanceSet] = []
     @Published private(set) var status = "Preparing Health Coach…"
     @Published private(set) var watchSyncStatus = "Waiting for Watch connection"
@@ -54,6 +55,20 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
     @Published private(set) var phoneSetExerciseID: String?
     @Published private(set) var phoneSetStartedAt: Date?
     @Published private(set) var phoneRestEndsAt: Date?
+    @Published private(set) var watchLiftSessionStatus: HCWatchLiftSessionStatus?
+
+    var activeWatchStartedAt: Date? {
+        guard let state = watchLiftSessionStatus,
+              state.isActive,
+              state.workoutID == workout?.id,
+              state.workoutDate == HCPlanBuilder.dateString(Date()),
+              let started = state.startedAt,
+              started <= Date(),
+              Date().timeIntervalSince(started) < 18 * 3600 else { return nil }
+        return started
+    }
+    var activeWorkoutStartedAt: Date? { phoneSessionStartedAt ?? activeWatchStartedAt }
+    var isWorkoutActive: Bool { activeWorkoutStartedAt != nil }
 
     private let cloud = HCCloudClient()
     private let encoder = JSONEncoder()
@@ -881,6 +896,16 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
         recoveryHistory = combined
     }
 
+    /// Recompute locally from authorized data; send only a compact summary
+    /// to the paired Watch. Keep existing workout reconciliation untouched.
+    func updateEitan(_ snapshot: HCEitanSnapshot?) {
+        let previous = eitanSnapshot.flatMap { try? encoder.encode($0) }
+        let incoming = snapshot.flatMap { try? encoder.encode($0) }
+        guard previous != incoming else { return }
+        eitanSnapshot = snapshot
+        sendToWatch()
+    }
+
     /// A matching Apple Health workout marks the planned run complete in the
     /// native interface. Imports remain local (and visible offline).
     func updateHealthRuns(_ imported: [HCProgressRun]) {
@@ -1027,14 +1052,9 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
                 lines.append(summary)
             }
         }
-        for entry in performanceHistory.prefix(10) {
-            lines.append("Strength history: \(entry.date) \(entry.exercise) \(String(format: "%.1f", entry.weightLb)) lb x \(entry.reps)")
-        }
-        for run in runHistory.prefix(8) {
-            let distance = run.distanceMeters.map { String(format: "%.2f mi", $0 / 1609.344) }
-                ?? "distance unknown"
-            lines.append("Run: \(run.date) \(run.title), \(distance), source \(run.source)")
-        }
+        // Place explicitly shared Health records before the long training
+        // history; backend request context has a bounded size.
+        lines.append("Never invent missing readings, PRs or pace comparisons.")
         if shareRecovery {
             // All loaded Health-screen cards, even those not scrolled into view.
             if !healthSnapshot.isEmpty {
@@ -1047,6 +1067,52 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
                 let hr = datum.dailyLowHR.map { String(format: "%.0f bpm", $0) } ?? "missing"
                 lines.append("Recovery \(datum.source) \(datum.date): HRV RMSSD \(hrv), sleep \(sleep), low HR \(hr)")
             }
+        }
+        // Include enough actual session history to answer trends and PR queries.
+        // Derived running pace uses measured distance and elapsed time only.
+        let windows: [(String, Int, Int)] = [
+            ("Recent 30 days", 0, 30), ("Previous 30 days", 30, 60)
+        ]
+        for (label, lower, upper) in windows {
+            let measured = runHistory.filter { run in
+                guard let day = HCPlanBuilder.startOfDate(run.date) else { return false }
+                let days = Calendar.current.dateComponents([.day], from: day, to: Date()).day ?? 999
+                return days >= lower && days < upper &&
+                    (run.distanceMeters ?? 0) > 0 && (run.durationSeconds ?? 0) > 0
+            }
+            let miles = measured.reduce(0.0) { $0 + ($1.distanceMeters ?? 0) / 1609.344 }
+            let duration = measured.reduce(0.0) { $0 + ($1.durationSeconds ?? 0) }
+            lines.append(miles > 0
+                ? String(format: "%@: %d measured runs, %.1f miles, %.2f min/mi distance-weighted pace",
+                         label, measured.count, miles, duration / 60 / miles)
+                : label + ": no measured pace records available")
+        }
+        let personalRecords = Dictionary(grouping: performanceHistory, by: \.exercise)
+            .compactMap { name, sets -> (String, Double)? in
+                guard let maxLoad = sets.map(\.weightLb).max() else { return nil }
+                return (name, maxLoad)
+            }.sorted { $0.0 < $1.0 }
+        for (name, value) in personalRecords.prefix(25) {
+            lines.append("Heaviest recorded load for " + name + ": " +
+                         String(format: "%.1f lb", value) +
+                         ". Actual recorded set, not estimated 1RM.")
+        }
+        for entry in performanceHistory.sorted(by: { $0.date > $1.date }).prefix(55) {
+            lines.append("Strength set: \(entry.date) \(entry.exercise) " +
+                         String(format: "%.1f lb × %d reps", entry.weightLb, entry.reps))
+        }
+        for run in runHistory.sorted(by: { $0.date > $1.date }).prefix(24) {
+            let distance = run.distanceMeters.map {
+                String(format: "%.2f mi", $0 / 1609.344)
+            } ?? "distance unavailable"
+            let pace: String
+            if let meters = run.distanceMeters, let seconds = run.durationSeconds,
+               meters > 0, seconds > 0 {
+                pace = String(format: "%.2f min/mi", seconds / 60 / (meters / 1609.344))
+            } else {
+                pace = "pace unavailable"
+            }
+            lines.append("Measured run \(run.date) \(run.title): \(distance), \(pace), source \(run.source)")
         }
         let prior = recentConversation.trimmingCharacters(in: .whitespacesAndNewlines)
         if !prior.isEmpty {
@@ -1107,6 +1173,15 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
         context[HCPayload.weightIncrement] = prefs.object(forKey:"hcWeightIncrement") as? Double ?? 5.0
         context[HCPayload.restOverride] = prefs.integer(forKey:"hcRestOverrideSeconds")
         context[HCPayload.watchHaptics] = prefs.object(forKey:"hcWatchHaptics") as? Bool ?? true
+        let eitanEnabled = prefs.object(forKey: "hcEitanEnabled") as? Bool ?? true
+        let useEitanHealth = prefs.object(forKey: "hcEitanUseHealth") as? Bool ?? true
+        context["hcEitanEnabled"] = eitanEnabled
+        context["hcEitanUseHealth"] = useEitanHealth
+        context["hcEitanCoachingEnabled"] = prefs.object(
+            forKey: "hcEitanCoachingEnabled") as? Bool ?? true
+        // An empty Data explicitly clears stale wellness readings if opted out.
+        context["hcEitanSnapshot"] = (eitanEnabled && useEitanHealth
+            ? eitanSnapshot.flatMap { try? encoder.encode($0) } : nil) ?? Data()
         context["hcRunVoiceCues"] = prefs.object(forKey:"hcRunVoiceCues") as? Bool ?? false
         context["hcRunAutoLaps"] = prefs.object(forKey:"hcRunAutoLaps") as? Bool ?? true
         context["hcRunIntervals"] = prefs.object(forKey:"hcRunIntervals") as? Bool ?? false
@@ -1321,9 +1396,17 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
             : "Workout queued · watchOS has not recognized the companion yet"
     }
 
+    private func receiveWatchLiftSessionStatus(_ value: HCWatchLiftSessionStatus) {
+        guard value.reportedAt > (watchLiftSessionStatus?.reportedAt ?? .distantPast),
+              value.workoutDate == HCPlanBuilder.dateString(Date()) else { return }
+        watchLiftSessionStatus = value
+    }
+
     func startPhoneWorkout() {
         guard phoneSessionStartedAt == nil else { return }
-        let started = Date()
+        // If the session was started on Watch, adopt the same start timestamp
+        // instead of silently creating a second unrelated workout clock.
+        let started = activeWatchStartedAt ?? Date()
         phoneSessionStartedAt = started
         save(started,name:"iphone-session-start.json")
     }
@@ -1660,6 +1743,14 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
                     }
                     return
                 }
+            case HCPayload.liftSessionStatus:
+                if let state = try? decoder.decode(HCWatchLiftSessionStatus.self, from: payload) {
+                    DispatchQueue.main.async {
+                        self.receiveWatchLiftSessionStatus(state)
+                        replyHandler(["saved": true])
+                    }
+                    return
+                }
             case HCPayload.completedRun:
                 if let item = try? decoder.decode(HCRunFinished.self, from: payload) {
                     DispatchQueue.main.async {
@@ -1766,6 +1857,12 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
             DispatchQueue.main.async {
                 self.acceptSet(item)
                 self.confirmWatchRecord(item.id)
+            }
+        case HCPayload.liftSessionStatus:
+            guard let state = try? decoder.decode(HCWatchLiftSessionStatus.self,
+                                                  from: payload) else { return }
+            DispatchQueue.main.async {
+                self.receiveWatchLiftSessionStatus(state)
             }
         case HCPayload.completedRun:
             guard let item = try? decoder.decode(HCRunFinished.self,from:payload) else { return }

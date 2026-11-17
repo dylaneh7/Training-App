@@ -204,6 +204,52 @@ struct HCRecoveryDatum: Codable, Identifiable {
     var id: String { date + ":" + source }
 }
 
+
+/// EITAN: on-device, observational wellness estimate. No raw HealthKit
+/// samples leave the iPhone in this compact WatchConnectivity snapshot.
+struct HCEitanFactor: Codable, Identifiable {
+    let id: String
+    let title: String
+    let value: Int
+    let detail: String
+    let weight: Double
+}
+
+struct HCEitanSnapshot: Codable {
+    let date: String
+    let value: Int?
+    let factors: [HCEitanFactor]
+    let status: String
+    let coaching: String
+    let consecutiveLowDays: Int
+    let sourceCount: Int
+    let coverage: String
+
+    var isLow: Bool { (value ?? 100) < 60 }
+    var needsRecoveryConversation: Bool { consecutiveLowDays >= 3 }
+
+    // Not a medical or injury-risk prediction. The coach must ask before
+    // changing running targets, strength volume or rest prescriptions.
+    static func advice(for score: Int?, streak: Int) -> String {
+        guard let score else {
+            return "More recent, comparable health readings are needed before EITAN can guide today's training."
+        }
+        if streak >= 3 && score < 60 {
+            return "Several days of lower wellness trends: consider a recovery day, extra sleep, gentle mobility, or asking IsAIah to adjust your plan."
+        }
+        if score < 35 {
+            return "Consider an easy day or rest. If lifting, reduce intensity and take 60–90 seconds longer between sets; if running, choose easy effort."
+        }
+        if score < 60 {
+            return "Consider a lighter session: add 30–60 seconds between lifting sets or lower your running intensity. Recovery matters."
+        }
+        if score < 75 {
+            return "Follow your plan at a comfortable effort, and adjust for fatigue or how you feel."
+        }
+        return "Your recent wellness trends look steady. You can follow your training plan and progress when form and effort support it."
+    }
+}
+
 enum HCPayload {
     static let schedule = "scheduleSnapshotV2"
     static let requestSchedule = "requestScheduleV2"
@@ -221,11 +267,22 @@ enum HCPayload {
     static let completedRun = "completedRun"
     static let loggedSet = "loggedSet"
     static let workoutUndo = "imunWorkoutUndoV1"
+    static let liftSessionStatus = "imunLiftSessionStatusV1"
     static let workoutUndos = "imunWorkoutUndosV1"
     static let kind = "kind"
     static let data = "payload"
 }
 
+
+/// Informational Watch workout clock, independent of logged-set synchronization.
+/// Only the Watch can declare that its session is active or finished.
+struct HCWatchLiftSessionStatus: Codable {
+    let workoutID: String
+    let workoutDate: String
+    let startedAt: Date?
+    let isActive: Bool
+    let reportedAt: Date
+}
 
 /// Date-scoped, atomic schedule sent by the iPhone to its Watch companion.
 /// An absent workout/run is intentional, never an instruction to keep yesterday's plan.

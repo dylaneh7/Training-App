@@ -950,6 +950,337 @@ struct HCHealthTrendSample: Identifiable {
     var id: String { name + ":" + source + ":" + date }
 }
 
+
+/// EITAN is a transparent personal wellness trend, not a medical diagnosis,
+/// injury predictor, or another provider's proprietary recovery algorithm.
+/// Samples remain source- and method-specific; a missing input is never zero.
+enum IMUNEitanWellnessEngine {
+    private struct Reading {
+        let name: String
+        let source: String
+        let date: String
+        let value: Double
+    }
+    private struct Assessment {
+        let score: Int?
+        let factors: [HCEitanFactor]
+        let sourceCount: Int
+        let coverage: String
+    }
+
+    static func evaluate(health: HCAppleHealthReader,
+                         coach: PhoneWorkoutBridge,
+                         preferredSource: String) -> HCEitanSnapshot {
+        var samples: [Reading] = health.metricHistory.compactMap { item in
+            guard item.value.isFinite else { return nil }
+            return Reading(name: item.name, source: item.source,
+                           date: item.date, value: item.value)
+        }
+        // Imported overnight RMSSD and Apple Health SDNN retain separate
+        // labels, baselines, and source identities.
+        for datum in coach.recoveryHistory {
+            if let hours = datum.sleepSeconds.map({ $0 / 3600 }), hours > 0 {
+                samples.append(Reading(name: "Total asleep", source: datum.source,
+                                       date: datum.date, value: hours))
+            }
+            if let hrv = datum.hrvMS, hrv > 0 {
+                samples.append(Reading(name: "HRV · RMSSD", source: datum.source,
+                                       date: datum.date, value: hrv))
+            }
+            if let low = datum.dailyLowHR, low > 0 {
+                samples.append(Reading(name: "Daily low HR", source: datum.source,
+                                       date: datum.date, value: low))
+            }
+        }
+        let activityDays = Set(
+            coach.loggedSets.map(\.workoutDate) +
+            coach.cloudRecordedSets.map(\.workoutDate) +
+            coach.runHistory.map(\.date) +
+            coach.completedWatchRuns.map(\.date) +
+            coach.trainingActivities.map(\.date)
+        )
+        let today = Date()
+        let todayResult = assess(date: today, samples: samples,
+                                 activityDays: activityDays,
+                                 preferredSource: preferredSource)
+        var streak = 0
+        if let score = todayResult.score, score < 60 {
+            streak = 1
+            // Reconstruct prior days from actual recorded history, even when
+            // the app was not opened each day. Missing days break the streak.
+            for offset in 1...5 {
+                guard let date = Calendar.current.date(byAdding: .day,
+                                                       value: -offset, to: today)
+                else { break }
+                // One stale abnormal reading cannot create a fictitious
+                // multi-day low streak. Require fresh daily sensor evidence.
+                let dateKey = HCPlanBuilder.dateString(date)
+                let recordedToday = samples.contains {
+                    $0.date == dateKey &&
+                    ["HRV · SDNN", "HRV · RMSSD", "Resting heart rate",
+                     "Daily low HR", "Respiratory rate", "Wrist temperature"]
+                        .contains($0.name) &&
+                    (preferredSource == "Auto" ||
+                     $0.source.localizedCaseInsensitiveContains(preferredSource))
+                }
+                guard recordedToday else { break }
+                let prior = assess(date: date, samples: samples,
+                                   activityDays: activityDays,
+                                   preferredSource: preferredSource)
+                guard let value = prior.score, value < 60 else { break }
+                streak += 1
+            }
+        }
+        let message = HCEitanSnapshot.advice(for: todayResult.score, streak: streak)
+        return HCEitanSnapshot(
+            date: HCPlanBuilder.dateString(today),
+            value: todayResult.score,
+            factors: todayResult.factors,
+            status: todayResult.score == nil ? "Building your personal baseline" :
+                (streak >= 3 ? "Recovery deserves attention" :
+                    todayResult.score! < 60 ? "Consider a lighter day" :
+                    todayResult.score! < 75 ? "Stay attentive to recovery" :
+                    "Your trends look steady"),
+            coaching: message, consecutiveLowDays: streak,
+            sourceCount: todayResult.sourceCount,
+            coverage: todayResult.coverage)
+    }
+
+    private static func assess(date: Date, samples: [Reading],
+                               activityDays: Set<String>,
+                               preferredSource: String) -> Assessment {
+        let calendar = Calendar.current
+        let targetDay = HCPlanBuilder.dateString(date)
+        let earliestDay = HCPlanBuilder.dateString(
+            calendar.date(byAdding: .day, value: -28, to: date) ?? date)
+        let dayBefore = HCPlanBuilder.dateString(
+            calendar.date(byAdding: .day, value: -1, to: date) ?? date)
+        let maxTwoDaysAgo = HCPlanBuilder.dateString(
+            calendar.date(byAdding: .day, value: -2, to: date) ?? date)
+        let maxThreeDaysAgo = HCPlanBuilder.dateString(
+            calendar.date(byAdding: .day, value: -3, to: date) ?? date)
+        var parts: [HCEitanFactor] = []
+        var sources = Set<String>()
+        var baselineFactors = 0
+
+        func clamp(_ value: Double) -> Int {
+            Int(min(100, max(0, value)).rounded())
+        }
+
+        func addTrend(id: String, label: String, names: [String],
+                      weight: Double, lowIsBetter: Bool,
+                      newestAllowed: String, relativeScale: Double) {
+            let matching = samples.filter { item in
+                names.contains(item.name) && item.date <= targetDay &&
+                item.date >= earliestDay && item.value > 0 &&
+                (preferredSource == "Auto" ||
+                 item.source.localizedCaseInsensitiveContains(preferredSource))
+            }
+            // Every possible source/HRV method is evaluated independently.
+            // Do not blend SDNN with RMSSD or duplicate same-day providers.
+            let grouped = Dictionary(grouping: matching) {
+                $0.name + "|" + $0.source
+            }
+            let choices: [(Reading, Double, Int)] = grouped.values.compactMap { entries in
+                let byDay = Dictionary(grouping: entries, by: \.date)
+                let medians = byDay.compactMap { day, values -> Reading? in
+                    let sorted = values.map(\.value).sorted()
+                    guard !sorted.isEmpty else { return nil }
+                    let center = sorted.count / 2
+                    let median = sorted.count.isMultiple(of: 2) ?
+                        (sorted[center - 1] + sorted[center]) / 2 : sorted[center]
+                    return Reading(name: values[0].name, source: values[0].source,
+                                   date: day, value: median)
+                }.sorted { $0.date > $1.date }
+                guard let latest = medians.first, latest.date >= newestAllowed else {
+                    return nil
+                }
+                let previous = medians.filter {
+                    $0.date < latest.date && $0.date >= earliestDay
+                }
+                guard previous.count >= 5 else { return nil }
+                let baseline = previous.map(\.value).sorted()
+                let center = baseline.count / 2
+                let median = baseline.count.isMultiple(of: 2) ?
+                    (baseline[center - 1] + baseline[center]) / 2 : baseline[center]
+                guard median > 0 else { return nil }
+                return (latest, median, previous.count)
+            }
+            guard let chosen = choices.sorted(by: {
+                if $0.0.date != $1.0.date { return $0.0.date > $1.0.date }
+                return $0.2 > $1.2
+            }).first else { return }
+            let reading = chosen.0
+            let deviation = (reading.value - chosen.1) / chosen.1
+            let adjustment = (lowIsBetter ? -deviation : deviation) * relativeScale
+            let score = clamp(82 + adjustment)
+            let direction = deviation >= 0 ? "above" : "below"
+            parts.append(HCEitanFactor(
+                id: id, title: label, value: score, detail:
+                String(format: "%.1f %@ %.1f%% %@ your %@ baseline (%.1f); recorded %@",
+                       reading.value,
+                       reading.name == "Respiratory rate" ? "breaths/min" :
+                       reading.name.contains("HRV") ? "ms" : "bpm",
+                       abs(deviation) * 100, direction, reading.source,
+                       chosen.1, reading.date),
+                weight: weight))
+            sources.insert(reading.source)
+            baselineFactors += 1
+        }
+
+        // Sleep duration is source-attributed and compared with a simple
+        // 7.5–9 h reference rather than claiming to measure sleep quality.
+        let sleeping = samples.filter {
+            ($0.name == "Total asleep" || $0.name == "Sleep") &&
+            $0.date <= targetDay && $0.date >= maxTwoDaysAgo &&
+            $0.value >= 2 && $0.value <= 15 &&
+            (preferredSource == "Auto" ||
+             $0.source.localizedCaseInsensitiveContains(preferredSource))
+        }.sorted { $0.date > $1.date }
+        if let latest = sleeping.first {
+            let hours = latest.value
+            let score = clamp(hours < 7.5 ? (hours / 7.5) * 95 :
+                                  hours <= 9.5 ? 95 :
+                                  95 - (hours - 9.5) * 10)
+            parts.append(HCEitanFactor(
+                id: "sleep", title: "Sleep", value: score,
+                detail: String(format: "%.1f h of recorded sleep (%@, %@). Duration is one signal, not a sleep-quality diagnosis.",
+                               hours, latest.source, latest.date),
+                weight: 0.30))
+            sources.insert(latest.source)
+        }
+        addTrend(id: "hrv", label: "HRV trend",
+                 names: ["HRV · SDNN", "HRV · RMSSD"], weight: 0.27,
+                 lowIsBetter: false, newestAllowed: maxThreeDaysAgo,
+                 relativeScale: 125)
+        addTrend(id: "restingHR", label: "Heart-rate trend",
+                 names: ["Resting heart rate"], weight: 0.20,
+                 lowIsBetter: true, newestAllowed: maxThreeDaysAgo,
+                 relativeScale: 150)
+        // Daily low heart rate is not resting heart rate; it is a fallback
+        // with the same family weight but an explicit different label.
+        if !parts.contains(where: { $0.id == "restingHR" }) {
+            addTrend(id: "restingHR", label: "Daily low HR trend",
+                     names: ["Daily low HR"], weight: 0.20,
+                     lowIsBetter: true, newestAllowed: maxThreeDaysAgo,
+                     relativeScale: 135)
+        }
+        addTrend(id: "respiration", label: "Breathing trend",
+                 names: ["Respiratory rate"], weight: 0.08,
+                 lowIsBetter: true, newestAllowed: maxThreeDaysAgo,
+                 relativeScale: 145)
+
+        // Wrist temperature is compared to its own baseline, in °C, not a
+        // ratio of Celsius values (which have an arbitrary zero).
+        let wrist = samples.filter {
+            $0.name == "Wrist temperature" &&
+            $0.date <= targetDay && $0.date >= earliestDay &&
+            (preferredSource == "Auto" ||
+             $0.source.localizedCaseInsensitiveContains(preferredSource))
+        }.sorted { $0.date > $1.date }
+        if let latest = wrist.first, latest.date >= maxThreeDaysAgo {
+            let historical = wrist.filter {
+                $0.source == latest.source && $0.date < latest.date
+            }
+            let uniqueDays = Dictionary(grouping: historical, by: \.date)
+                .compactMap { $0.value.first?.value }
+            if uniqueDays.count >= 5 {
+                let baseline = uniqueDays.reduce(0, +) / Double(uniqueDays.count)
+                let change = abs(latest.value - baseline)
+                parts.append(HCEitanFactor(id: "temperature",
+                    title: "Temperature trend", value: clamp(88 - change * 32),
+                    detail: String(format: "Wrist temperature %.2f°C; %.2f°C from personal %@ baseline.",
+                                   latest.value, change, latest.source),
+                    weight: 0.07))
+                sources.insert(latest.source)
+                baselineFactors += 1
+            }
+        }
+
+        let prior21Start = HCPlanBuilder.dateString(
+            calendar.date(byAdding: .day, value: -27, to: date) ?? date)
+        let recent7Start = HCPlanBuilder.dateString(
+            calendar.date(byAdding: .day, value: -6, to: date) ?? date)
+        let before7 = HCPlanBuilder.dateString(
+            calendar.date(byAdding: .day, value: -7, to: date) ?? date)
+        let weeklyDays = activityDays.filter { $0 >= recent7Start && $0 <= targetDay }.count
+        let priorDays = activityDays.filter { $0 >= prior21Start && $0 <= before7 }.count
+        if priorDays >= 2 || weeklyDays > 0 {
+            let weeklyReference = max(1, Double(priorDays) / 3)
+            let spike = max(0, Double(weeklyDays) / weeklyReference - 1.4)
+            let loadScore = clamp(86 - spike * 14 - (weeklyDays >= 6 ? 12 : 0))
+            parts.append(HCEitanFactor(
+                id: "load", title: "Training balance", value: loadScore,
+                detail: "\(weeklyDays) training days in the last 7 vs \(priorDays) in the preceding 21. Workload estimate uses days, not set completion or measured intensity.",
+                weight: 0.08))
+        }
+        // Activity is contextual training strain, never a reason to reward
+        // exhaustion or punish a healthy rest day. Prefer recorded exercise
+        // minutes to active energy and steps, never count all three twice.
+        for activityName in ["Exercise", "Active energy", "Steps"] {
+            let activityReadings = samples.filter {
+                $0.name == activityName &&
+                $0.date >= earliestDay && $0.date <= targetDay &&
+                $0.value.isFinite && $0.value >= 0 &&
+                (preferredSource == "Auto" ||
+                 $0.source.localizedCaseInsensitiveContains(preferredSource))
+            }
+            let sourceGroups = Dictionary(grouping: activityReadings, by: \.source)
+            var candidates: [(source: String, date: String,
+                              recent: Double, prior: Double)] = []
+            for (source, values) in sourceGroups {
+                let byDay = Dictionary(grouping: values, by: \.date)
+                let daily = byDay.compactMap { day, readings -> (String, Double)? in
+                    let amounts = readings.map(\.value).sorted()
+                    guard !amounts.isEmpty else { return nil }
+                    let midpoint = amounts.count / 2
+                    let median = amounts.count.isMultiple(of: 2) ?
+                        (amounts[midpoint - 1] + amounts[midpoint]) / 2 :
+                        amounts[midpoint]
+                    return (day, median)
+                }
+                let recent = daily.filter { $0.0 >= recent7Start && $0.0 <= targetDay }
+                let older = daily.filter { $0.0 >= prior21Start && $0.0 <= before7 }
+                guard recent.count >= 4, older.count >= 10,
+                      let latest = recent.map(\.0).max(),
+                      latest >= maxThreeDaysAgo else { continue }
+                let recentAverage = recent.reduce(0.0) { $0 + $1.1 } /
+                    Double(recent.count)
+                let oldAverage = older.reduce(0.0) { $0 + $1.1 } /
+                    Double(older.count)
+                guard oldAverage > 0 else { continue }
+                candidates.append((source, latest, recentAverage, oldAverage))
+            }
+            guard let found = candidates.sorted(by: {
+                if $0.date != $1.date { return $0.date > $1.date }
+                return $0.source < $1.source
+            }).first else { continue }
+            let relative = found.recent / found.prior
+            let score = clamp(86 - max(0, relative - 1.3) * 28)
+            parts.append(HCEitanFactor(
+                id: "activity", title: "Activity balance", value: score,
+                detail: String(format: "%@: 7-day average %.0f vs earlier average %.0f (%@); unusually high volume is one recovery consideration.",
+                               activityName, found.recent, found.prior, found.source),
+                weight: 0.08))
+            sources.insert(found.source)
+            break
+        }
+        // No health-only score from a single sleep night or exercise count.
+        // A score requires at least two physiological factors and a genuine
+        // personal baseline trend. Remaining weights are renormalized.
+        let physiologicalCount = parts.filter { $0.id != "load" }.count
+        let isSufficient = physiologicalCount >= 2 && baselineFactors >= 1
+        let sumWeights = parts.reduce(0) { $0 + $1.weight }
+        let value: Int? = isSufficient && sumWeights > 0 ?
+            clamp(parts.reduce(0) { $0 + Double($1.value) * $1.weight } / sumWeights) : nil
+        let coverage = isSufficient ?
+            "\(physiologicalCount) wellness signals · \(baselineFactors) personal baseline trends" :
+            "At least two recent wellness signals and five historical readings for a baseline are required"
+        return Assessment(score: value, factors: parts,
+                          sourceCount: sources.count, coverage: coverage)
+    }
+}
+
 private struct HCHealthCatalogItem {
     let identifier: String
     let name: String

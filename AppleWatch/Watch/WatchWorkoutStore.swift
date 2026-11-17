@@ -42,6 +42,7 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
     @Published private(set) var runPlan: HCRunPlan?
     @Published private(set) var runHistory: [HCProgressRun] = []
     @Published private(set) var recoverySummary: HCRecoveryDatum?
+    @Published private(set) var eitanSnapshot: HCEitanSnapshot?
     @Published private(set) var sets: [HCLoggedSet] = []
     // Preserve all original records locally; cloud history is read-only.
     @Published private(set) var cloudSets: [HCLoggedSet] = []
@@ -438,6 +439,7 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
             try? FileManager.default.removeItem(at: directory.appendingPathComponent(file))
         }
         appendUndo(undo, forwardToPhone: true)
+        publishLiftSessionStatus(startedAt: clock.startedAt, active: false)
         status = "Workout undone. Ready to start again."
     }
 
@@ -607,6 +609,30 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
         }
     }
 
+    private func publishLiftSessionStatus(startedAt: Date?, active: Bool) {
+        guard WCSession.isSupported() else { return }
+        let session = WCSession.default
+        guard session.activationState == .activated else { return }
+        let state = HCWatchLiftSessionStatus(
+            workoutID: workout.id,
+            workoutDate: workout.date,
+            startedAt: startedAt,
+            isActive: active,
+            reportedAt: Date()
+        )
+        guard let data = try? encoder.encode(state) else { return }
+        let packet: [String: Any] = [
+            HCPayload.kind: HCPayload.liftSessionStatus,
+            HCPayload.data: data
+        ]
+        // Background copy is durable; interactive copy updates the iPhone now.
+        session.transferUserInfo(packet)
+        if session.isReachable {
+            session.sendMessage(packet, replyHandler: { _ in },
+                                errorHandler: { _ in })
+        }
+    }
+
     // MARK: - Full strength session clock
 
     func startLifting() {
@@ -627,6 +653,7 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
             save(first.id, name: "guided-exercise-id.json")
         }
         save(liftClock, name: "lifting-clock.json")
+        publishLiftSessionStatus(startedAt: liftClock?.startedAt, active: true)
         // Pressing START WORKOUT starts the first working set immediately.
         if let first { startSet(for: first) }
     }
@@ -666,6 +693,7 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
         try? FileManager.default.removeItem(at: directory.appendingPathComponent("guided-set-selection.json"))
         try? FileManager.default.removeItem(at: directory.appendingPathComponent("queued-guided-set.json"))
         save(clock, name: "lifting-clock.json")
+        publishLiftSessionStatus(startedAt: clock.startedAt, active: false)
         if let latestSchedule { applySchedule(latestSchedule) }
         invalidatePreviousDayIfNeeded()
     }
@@ -1253,6 +1281,19 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
                 }
             }
         }
+        for key in ["hcEitanEnabled", "hcEitanUseHealth",
+                    "hcEitanCoachingEnabled"] {
+            if let enabled = context[key] as? Bool {
+                UserDefaults.standard.set(enabled, forKey: key)
+            }
+        }
+        // Clearing the score on opt-out is just as important as avoiding a
+        // fresh transfer. No stale sensitive data remains in the Watch view.
+        if let payload = context["hcEitanSnapshot"] as? Data {
+            let newSnapshot = payload.isEmpty ? nil :
+                (try? decoder.decode(HCEitanSnapshot.self, from: payload))
+            DispatchQueue.main.async { self.eitanSnapshot = newSnapshot }
+        }
         if let data = context["hcRecoverySnapshot"] as? Data,
            let reading = try? decoder.decode(HCRecoveryDatum.self, from: data) {
             DispatchQueue.main.async { self.recoverySummary = reading }
@@ -1356,6 +1397,11 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
             DispatchQueue.main.async {
                 self.checkPhoneConnection()
                 self.sendPending()
+                if self.hasScheduledLift && self.workout.date == Self.today() {
+                    self.publishLiftSessionStatus(
+                        startedAt: self.liftClock?.startedAt,
+                        active: self.liftClock?.isActive == true)
+                }
                 let manual = self.pendingManualScheduleRequest
                 self.pendingManualScheduleRequest = false
                 self.requestCurrentSchedule(manual: manual)
@@ -1371,6 +1417,11 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
             guard session.activationState == .activated, session.isReachable else { return }
             // Build 28: retry queued sets/runs and request latest dated plan.
             self.sendPending(forceResend: true)
+            if self.hasScheduledLift && self.workout.date == Self.today() {
+                self.publishLiftSessionStatus(
+                    startedAt: self.liftClock?.startedAt,
+                    active: self.liftClock?.isActive == true)
+            }
             self.requestCurrentSchedule()
         }
     }
