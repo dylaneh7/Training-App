@@ -427,6 +427,52 @@ enum IMUNCoachActionInterpreter {
             }
         }
 
+        if containsAny(value, ["set ", "switch ", "change ", "make ", "turn ",
+                               "use ", "adjust ", "enable ", "disable "]) {
+            let aliases: [(String, [String])] = [
+                ("hcDesignMode", ["light mode", "dark mode", "appearance mode",
+                                  "color mode", "app appearance"]),
+                ("hcDesignDensity", ["spacing", "layout density", "layout spacing",
+                                     "compact layout", "airy layout"]),
+                ("hcDesignFont", ["typography", "app font", "font style"]),
+                ("hcDesignReduceMotion", ["reduce motion", "animation"]),
+                ("hcDesignWatchSyncEnabled", ["design to watch", "theme to watch"]),
+                ("hcMotivationTone", ["motivation tone", "motivational tone"]),
+                ("hcMotivationTranslation", ["bible translation",
+                                              "scripture translation"]),
+                ("hcMotivationShowTraining", ["motivation in training",
+                                               "training motivation card"]),
+                ("hcAggressiveProgression", ["aggressive progression",
+                                               "strength progression"]),
+                ("hcWeightIncrement", ["weight increment", "load increment"]),
+                ("hcRunCueMinutes", ["run cue interval", "running cue interval"]),
+                ("hcRunIntervals", ["show run intervals",
+                                     "running intervals display"])
+            ]
+            let matches = aliases.filter { _, names in
+                containsAny(value, names)
+            }
+            if matches.count == 1, let key = matches.first?.0,
+               let preference = IMUNCoachPreference.byID(key) {
+                let foundValue = preference.choices.first(where: { candidate in
+                    let lower = candidate.lowercased()
+                    if lower == "on" {
+                        return containsAny(value, ["turn on", "enable ", "switch on"])
+                    }
+                    if lower == "off" {
+                        return containsAny(value, ["turn off", "disable ", "switch off"])
+                    }
+                    return value.range(of:
+                        "\\b" + NSRegularExpression.escapedPattern(for: lower) + "\\b",
+                        options: .regularExpression) != nil
+                })
+                return proposal(.setAppPreference, "Change " + preference.title,
+                    "Apply a typed iMun preference without changing recorded workouts or health permissions.",
+                    parameter: foundValue ?? preference.choices.first,
+                    settingKey: key)
+            }
+        }
+
         if containsAny(value, ["rest timer", "rest between sets", "rest duration", "rest period"]) &&
            containsAny(value, ["set", "change", "use", "make", "turn"]) {
             let rest: Int?
@@ -529,6 +575,8 @@ enum IMUNCoachActionInterpreter {
         - motivation: off,original,performance,scripture,custom
         - haptics/voice/laps: on,off
         - rest seconds: 0,60,90,120,180
+        For setAppPreference, use settingKey from this exact allowlist:
+        \(IMUNCoachPreference.all.map { $0.id + ":" + $0.choices.joined(separator: "|") }.joined(separator: ", "))
         Don't invent session IDs or claim the change is complete.
         User's exact request: \(content)
         """
@@ -618,6 +666,15 @@ enum IMUNCoachActionInterpreter {
             return proposal(.renameStrength, "Rename strength workout",
                 "Keep all prescribed exercises and recorded sets intact.",
                 parameter: String((value ?? workout.title).prefix(80)))
+        case "setAppPreference":
+            guard let key = object["settingKey"] as? String,
+                  let pref = IMUNCoachPreference.byID(key) else { return nil }
+            let selected = value.flatMap {
+                pref.choices.contains($0) ? $0 : nil
+            } ?? pref.choices.first
+            return proposal(.setAppPreference, "Change " + pref.title,
+                "Review this whitelisted setting. No health-sharing or account permissions are modified.",
+                parameter: selected, settingKey: key)
         case "setTheme":
             guard let value, let preset = IMUNPreset(rawValue: value) else { return nil }
             return proposal(.setTheme, "Use \(preset.title) theme",
