@@ -1251,9 +1251,58 @@ private struct WatchPreferences: View {
                 Text("Running voice cues and automatic miles remain in the Run screen.")
                     .font(.caption2).foregroundStyle(WTheme.muted)
             }
+            Section("CONNECTIVITY & DIAGNOSTICS") {
+                Button {
+                    store.checkPhoneConnection()
+                } label: {
+                    Label("Check iPhone connection", systemImage: "iphone.gen3.radiowaves.left.and.right")
+                }
+                Button {
+                    store.testPhoneLink()
+                } label: {
+                    Label("Test live iPhone link", systemImage: "waveform.path")
+                }
+                Text(store.phoneConnectionStatus)
+                    .font(.system(size: 10)).foregroundStyle(WTheme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text(store.phonePingStatus)
+                    .font(.system(size: 10)).foregroundStyle(WTheme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+                Button {
+                    store.requestCurrentSchedule(manual: true)
+                    if store.cloudSignedIn {
+                        store.refreshCloudWorkout()
+                        store.refreshCloudSets()
+                    }
+                } label: {
+                    Label("Check cloud and sync", systemImage: "icloud.and.arrow.down")
+                }
+                .disabled(store.isRequestingSchedule)
+                if !store.cloudSignedIn {
+                    NavigationLink {
+                        WatchCloudBackupSetup()
+                    } label: {
+                        Label("Cloud account", systemImage: "person.crop.circle")
+                    }
+                }
+                Text(store.cloudStatus)
+                    .font(.system(size: 10)).foregroundStyle(WTheme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text(store.progressSyncStatus)
+                    .font(.system(size: 10)).foregroundStyle(WTheme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+                if let last = store.scheduleUpdatedAt {
+                    Text("Last schedule sync: " +
+                         last.formatted(date: .abbreviated, time: .shortened))
+                        .font(.system(size: 10)).foregroundStyle(WTheme.muted)
+                }
+                Text(store.status)
+                    .font(.system(size: 10)).foregroundStyle(WTheme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
         .listStyle(.plain)
-        .navigationTitle("Preferences")
+        .navigationTitle("Settings")
         .background(WTheme.bg.ignoresSafeArea())
     }
 }
