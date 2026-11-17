@@ -201,9 +201,21 @@ private struct IMUNActiveWorkoutMiniBar: View {
                         .font(.system(size: 12, weight: .semibold))
                         .lineLimit(1)
                         .foregroundStyle(HCDesign.ink)
-                    Text("Tap to return to your active session")
-                        .font(.system(size: 10))
-                        .foregroundStyle(HCDesign.secondary)
+                    if let rest = coach.phoneRestEndsAt, rest > Date() {
+                        TimelineView(.periodic(from: .now, by: 1)) { timeline in
+                            Text(timeline.date < rest ?
+                                 "Rest · " + hcDuration(rest.timeIntervalSince(timeline.date)) :
+                                 "Rest finished")
+                                .font(.system(size: 10, weight: .medium))
+                                .foregroundStyle(HCDesign.electric)
+                        }
+                    } else {
+                        Text(coach.cloudPendingCount > 0 ?
+                             "\(coach.cloudPendingCount) changes awaiting sync" :
+                             "Tap to return to your active session")
+                            .font(.system(size: 10))
+                            .foregroundStyle(HCDesign.secondary)
+                    }
                 }
                 Spacer(minLength: 4)
                 if let started = coach.phoneSessionStartedAt {
@@ -213,9 +225,15 @@ private struct IMUNActiveWorkoutMiniBar: View {
                             .foregroundStyle(HCDesign.ink)
                     }
                 }
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(HCDesign.electric)
+                if coach.phoneRestEndsAt != nil {
+                    Image(systemName: "timer")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(HCDesign.electric)
+                } else {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(HCDesign.electric)
+                }
             }
             .padding(.horizontal, 13)
             .padding(.vertical, 12)
