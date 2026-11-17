@@ -54,6 +54,13 @@ struct IMUNThemeEmblem: View {
     private var accent: Color { IMUNStyle.palette.accent }
     private var muted: Color { IMUNStyle.palette.secondary }
     private var ink: Color { IMUNStyle.palette.ink }
+    private var titleDesign: Font.Design {
+        switch theme {
+        case .heritage, .atelier: return .serif
+        case .retro, .techno, .rally: return .monospaced
+        default: return .default
+        }
+    }
 
     var body: some View {
         HStack(spacing: compact ? 8 : 13) {
@@ -63,9 +70,7 @@ struct IMUNThemeEmblem: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text(IMUNThemeText.heading(theme, for: area))
                     .font(.system(size: compact ? 9 : 12, weight: .bold,
-                                  design: theme == .heritage || theme == .atelier ?
-                                    .serif : theme == .retro || theme == .techno ||
-                                    theme == .rally ? .monospaced : .default))
+                                  design: titleDesign))
                     .tracking(compact ? 0.45 : 1.3)
                     .foregroundStyle(ink)
                     .lineLimit(2)
