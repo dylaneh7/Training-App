@@ -32,6 +32,11 @@ struct PremiumHomeView: View {
     @StateObject private var tredictImporter = HCTredictImporter()
     @StateObject private var tredictPlans = HCTredictWatchPlanSync()
     @AppStorage("hcSelectedTab") private var selectedTab = "training"
+    @AppStorage("hcTrainingActivity") private var visibleTrainingActivity = "weightlifting"
+    @AppStorage("hcSelectedHealthCategory") private var visibleHealthCategory = "Overview"
+    @AppStorage("hcSelectedHealthMetric") private var visibleHealthMetric = ""
+    @State private var isIsaiahPresented = false
+    @State private var isaiahLaunchContext = ""
     @AppStorage("hcAccentStyle") private var accentStyle = "crimson"
     @AppStorage("hcDesignPreset") private var designPreset = "techno"
     @AppStorage("hcDesignMode") private var designMode = "dark"
@@ -56,6 +61,48 @@ struct PremiumHomeView: View {
          String(designCustomGeometry)].joined(separator: "|")
     }
 
+    // Snapshot of visible app context. No health measurements are included here.
+    private var screenContext: String {
+        var details = ["Screen: " + selectedTab.capitalized,
+                       "Date: " + HCPlanBuilder.dateString(Date())]
+        switch selectedTab {
+        case "training":
+            details.append("Activity: " + visibleTrainingActivity)
+            if visibleTrainingActivity == "run", let plan = coach.runPlan {
+                details.append("Selected run: " + plan.title + " [ID: " + plan.id + "]")
+            } else if let plan = coach.workout {
+                details.append("Selected strength workout: " + plan.title +
+                               " [ID: " + plan.id + "]")
+                details.append("Exercises: " +
+                               plan.exercises.prefix(16).map(\.name).joined(separator: ", "))
+                if coach.phoneSessionStartedAt != nil {
+                    details.append("An iPhone strength session is currently active")
+                }
+                if let activeID = coach.phoneSetExerciseID,
+                   let activeExercise = plan.exercises.first(where: { $0.id == activeID }) {
+                    details.append("Active strength set: " + activeExercise.name)
+                }
+            }
+        case "health":
+            details.append("Health category: " + visibleHealthCategory)
+            if !visibleHealthMetric.isEmpty {
+                details.append("Selected metric: " + visibleHealthMetric)
+            }
+            details.append("Health measurements are opt-in, not included in screen context")
+        case "progress":
+            details.append("Showing recorded progress and training history")
+        case "settings":
+            details.append("Showing appearance, sync and integration settings")
+        default: break
+        }
+        return details.joined(separator: "\n")
+    }
+
+    private func presentIsaiah() {
+        isaiahLaunchContext = screenContext
+        isIsaiahPresented = true
+    }
+
     var body: some View {
         TabView(selection: $selectedTab) {
             NavigationStack { PremiumTrainingPage() }
@@ -67,9 +114,6 @@ struct PremiumHomeView: View {
             NavigationStack { PremiumRecoveryPage(appleHealth: appleHealth) }
                 .tabItem { Label("Health", systemImage: "heart.text.square.fill") }
                 .tag("health")
-            NavigationStack { PremiumCoachPage() }
-                .tabItem { Label("IsAIah", systemImage: "bubble.left.and.text.bubble.right") }
-                .tag("coach")
             NavigationStack { PremiumSettingsPage() }
                 .tabItem { Label("Settings", systemImage: "gearshape.fill") }
                 .tag("settings")
@@ -79,6 +123,42 @@ struct PremiumHomeView: View {
         .environmentObject(runImporter)
         .environmentObject(tredictImporter)
         .environmentObject(tredictPlans)
+        .overlay(alignment: .bottomTrailing) {
+            Button(action: presentIsaiah) {
+                IMUNIsaiahMark(size: 53)
+                    .padding(3)
+                    .background(HCDesign.electric,
+                                in: RoundedRectangle(cornerRadius: 15))
+                    .shadow(color: .black.opacity(0.22), radius: 9, y: 4)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Ask IsAIah about this screen")
+            .accessibilityHint("Open your contextual assistant")
+            .padding(.trailing, 18)
+            .padding(.bottom, 70)
+        }
+        .sheet(isPresented: $isIsaiahPresented) {
+            NavigationStack {
+                PremiumCoachPage(launchContext: isaiahLaunchContext)
+                    .toolbar {
+                        ToolbarItem(placement: .topBarTrailing) {
+                            Button("Done") { isIsaiahPresented = false }
+                        }
+                    }
+            }
+            .environmentObject(coach)
+            .environmentObject(runImporter)
+            .environmentObject(tredictImporter)
+            .environmentObject(tredictPlans)
+            .presentationDetents([.large])
+            .presentationDragIndicator(.visible)
+        }
+        .onChange(of: selectedTab) { _, tab in
+            if tab == "coach" {
+                selectedTab = "training"
+                presentIsaiah()
+            }
+        }
         .onReceive(tredictPlans.$runs) { coach.updateTredictScheduledRuns($0) }
         .onReceive(tredictPlans.$lastSentTodayRunID) { id in
             guard let id,
@@ -118,6 +198,7 @@ struct PremiumHomeView: View {
         }
         .onChange(of: designSignature) { _, _ in configureTabAppearance() }
         .onAppear {
+            if selectedTab == "coach" { selectedTab = "training" }
             if coach.signedIn && coach.workout == nil { coach.refresh(date: Date()) }
             if coach.signedIn { coach.refreshCloudProgress() }
             configureTabAppearance()
@@ -2060,6 +2141,7 @@ private struct HCHealthTrendChart: View {
 private struct HCMetricFamilyCard: View {
     let family: HCMetricFamily
     @Binding var expandedTrends: Set<String>
+    @AppStorage("hcSelectedHealthMetric") private var selectedHealthMetric = ""
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -2112,6 +2194,7 @@ private struct HCMetricFamilyCard: View {
                         Spacer()
                         if reading.points.count > 1 {
                             Button {
+                                selectedHealthMetric = family.title + " / " + reading.label
                                 if expandedTrends.contains(reading.id) {
                                     expandedTrends.remove(reading.id)
                                 } else {
@@ -2185,7 +2268,8 @@ private struct PremiumRecoveryPage: View {
     @ObservedObject var appleHealth: HCAppleHealthReader
     @State private var showHistory = false
     @State private var showRawReadings = false
-    @State private var selectedHealthCategory = "Overview"
+    @AppStorage("hcSelectedHealthCategory") private var selectedHealthCategory = "Overview"
+    @AppStorage("hcSelectedHealthMetric") private var selectedHealthMetric = ""
     @State private var metricSearch = ""
     @State private var expandedTrends: Set<String> = []
     // Trends and baselines are expensive; only rebuild when source records
@@ -2528,6 +2612,10 @@ private struct PremiumRecoveryPage: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbarBackground(HCDesign.canvas, for: .navigationBar)
         .toolbarBackground(.visible, for: .navigationBar)
+        .onChange(of: selectedHealthCategory) { _, _ in
+            // Avoid describing a stale metric after switching health sections.
+            selectedHealthMetric = ""
+        }
         .onAppear {
             rebuildSignalCache()
             appleHealth.refreshIfAuthorized()
@@ -2548,6 +2636,7 @@ private struct PremiumRecoveryPage: View {
 
 // Chat is the home of Coach. The training calendar and settings sit beneath it.
 private struct PremiumCoachPage: View {
+    let launchContext: String
     @EnvironmentObject private var coach: PhoneWorkoutBridge
     @State private var movingSession: HCPlannedSession?
     @State private var showUpcomingSessions = false
@@ -2572,10 +2661,13 @@ private struct PremiumCoachPage: View {
                                 .font(HCDesign.label(10))
                                 .tracking(1.5)
                                 .foregroundStyle(HCDesign.aqua)
-                            Text("IsAIah")
-                                .font(HCDesign.display(32))
-                                .tracking(-1)
-                                .foregroundStyle(HCDesign.ink)
+                            HStack(spacing: 12) {
+                                IMUNIsaiahMark(size: 44)
+                                IMUNIsaiahWordmark(size: 29)
+                            }
+                            .padding(8)
+                            .background(IMUNIsaiahBrand.graphite,
+                                        in: RoundedRectangle(cornerRadius: 12))
                             Text("Your training. One conversation.")
                                 .font(.system(size: 13))
                                 .foregroundStyle(HCDesign.secondary)
@@ -2586,7 +2678,7 @@ private struct PremiumCoachPage: View {
                         PremiumLogin()
                     }
 
-                    PremiumCoachConversation()
+                    PremiumCoachConversation(launchContext: launchContext)
                         .id("imun-coach-chat")
 
                     DisclosureGroup(isExpanded: $showUpcomingSessions) {
@@ -2795,6 +2887,7 @@ private struct IMUNIsAIahThinking: View {
 // A real conversation surface, not a backend diagnostics panel. Chats remain
 // on the phone. Nothing is transmitted until the athlete chooses Send.
 private struct PremiumCoachConversation: View {
+    let launchContext: String
     @EnvironmentObject private var coach: PhoneWorkoutBridge
     @AppStorage("hcAIShareRecovery") private var shareRecovery = false
     @AppStorage("hcCoachConversationLocalV1") private var storedConversation = Data()
@@ -2852,13 +2945,19 @@ private struct PremiumCoachConversation: View {
                             .font(.system(size: 10, weight: .semibold))
                             .tracking(1.3)
                             .foregroundStyle(HCDesign.secondary)
-                        Text("IsAIah")
-                            .font(.system(size: 20, weight: .semibold))
-                            .tracking(-0.4)
-                            .foregroundStyle(HCDesign.ink)
+                        IMUNIsaiahWordmark(size: 22)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
+                            .background(IMUNIsaiahBrand.graphite,
+                                        in: RoundedRectangle(cornerRadius: 10))
                         Text("Training decisions, made simpler.")
                             .font(.system(size: 12))
                             .foregroundStyle(HCDesign.secondary)
+                        Label(launchContext.components(separatedBy: "\n").first ?? "Current screen",
+                              systemImage: "rectangle.on.rectangle")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(HCDesign.electric)
+                            .lineLimit(1)
                     }
                     Spacer(minLength: 5)
                     if !turns.isEmpty {
@@ -3059,7 +3158,7 @@ private struct PremiumCoachConversation: View {
                             .textSelection(.enabled)
                     }
                 }
-                Text("Your question and a short training summary are shared only when you send. Recovery measurements are shared only if you enable the option.")
+                Text("Your question, current screen context and a short training summary are shared only when you send. Recovery measurements are shared only if you enable the option.")
                     .font(.system(size: 10))
                     .foregroundStyle(HCDesign.secondary)
             }
@@ -3351,7 +3450,8 @@ private struct PremiumCoachConversation: View {
         case .openTab:
             guard let destination = action.parameter else { return }
             selectedTab = destination
-            reply = "Opened the \(destination.capitalized) tab."
+            reply = destination == "coach" ?
+                "Opened IsAIah." : "Opened the \(destination.capitalized) tab."
         case .setMotivation:
             guard let source = action.parameter else { return }
             motivationSource = source
@@ -3461,7 +3561,7 @@ private struct PremiumCoachConversation: View {
             if IMUNCoachActionInterpreter.mightNeedModelProposal(questionText) {
                 await MainActor.run { thinkingPhase = "Reviewing your request" }
                 if let classification = try? await coach.classifyIMUNCoachAction(
-                    request: questionText),
+                    request: questionText, screenContext: launchContext),
                    let proposal = IMUNCoachActionInterpreter.proposalFromModel(
                     classification, sessions: coach.plannedSessions,
                     workout: coach.workout, run: coach.runPlan) {
@@ -3476,7 +3576,8 @@ private struct PremiumCoachConversation: View {
                 let reply = try await coach.askIMUNCoach(
                     question: questionText,
                     shareRecovery: shareRecovery,
-                    recentConversation: history)
+                    recentConversation: history,
+                     screenContext: launchContext)
                 await MainActor.run {
                     turns.append(IMUNCoachTurn(role: "assistant", text: reply))
                     isSending = false

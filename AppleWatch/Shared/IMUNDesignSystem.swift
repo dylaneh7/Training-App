@@ -490,3 +490,80 @@ enum IMUNMotivation {
         }
     }
 }
+
+
+// MARK: - IsAIah identity
+// Deliberately fixed, like the IMUN app icon. Surrounding UI follows the
+// active design preset; the mark itself is always cream, crimson and graphite.
+enum IMUNIsaiahBrand {
+    static let cream = Color(red: 0.97, green: 0.965, blue: 0.95)
+    static let crimson = Color(red: 0.77, green: 0.035, blue: 0.22)
+    static let graphite = Color(red: 0.045, green: 0.05, blue: 0.075)
+}
+
+/// An original, compact "IA" precision-frame mark. Vector geometry remains
+/// crisp in a floating iPhone launcher and in a watchOS daily summary.
+struct IMUNIsaiahMark: View {
+    var size: CGFloat = 48
+
+    var body: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: size * 0.20, style: .continuous)
+                .fill(IMUNIsaiahBrand.graphite)
+            Path { p in
+                let inset = size * 0.14
+                let length = size * 0.19
+                let far = size - inset
+                p.move(to: CGPoint(x: inset + length, y: inset))
+                p.addLine(to: CGPoint(x: inset, y: inset))
+                p.addLine(to: CGPoint(x: inset, y: inset + length))
+                p.move(to: CGPoint(x: far - length, y: inset))
+                p.addLine(to: CGPoint(x: far, y: inset))
+                p.addLine(to: CGPoint(x: far, y: inset + length))
+                p.move(to: CGPoint(x: inset, y: far - length))
+                p.addLine(to: CGPoint(x: inset, y: far))
+                p.addLine(to: CGPoint(x: inset + length, y: far))
+                p.move(to: CGPoint(x: far, y: far - length))
+                p.addLine(to: CGPoint(x: far, y: far))
+                p.addLine(to: CGPoint(x: far - length, y: far))
+            }
+            .stroke(IMUNIsaiahBrand.cream, style: StrokeStyle(
+                lineWidth: max(1.4, size * 0.04), lineCap: .round, lineJoin: .round))
+            HStack(spacing: -size * 0.045) {
+                Text("I").italic().foregroundStyle(IMUNIsaiahBrand.cream)
+                Text("A").italic().foregroundStyle(IMUNIsaiahBrand.cream)
+            }
+            .font(.system(size: size * 0.43, weight: .black, design: .rounded))
+            .offset(y: size * 0.055)
+            Path { p in
+                p.move(to: CGPoint(x: size * 0.50, y: size * 0.20))
+                p.addLine(to: CGPoint(x: size * 0.76, y: size * 0.20))
+                p.addLine(to: CGPoint(x: size * 0.68, y: size * 0.30))
+                p.addLine(to: CGPoint(x: size * 0.43, y: size * 0.30))
+                p.closeSubpath()
+            }
+            .fill(IMUNIsaiahBrand.crimson)
+        }
+        .frame(width: size, height: size)
+        .accessibilityLabel("IsAIah")
+    }
+}
+
+struct IMUNIsaiahWordmark: View {
+    var size: CGFloat = 26
+
+    var body: some View {
+        HStack(spacing: 0) {
+            Text("Is").italic().tracking(-size * 0.035)
+                .foregroundStyle(IMUNIsaiahBrand.cream)
+            Text("AI").italic().tracking(-size * 0.035)
+                .foregroundStyle(IMUNIsaiahBrand.crimson)
+            Text("ah").italic().tracking(-size * 0.035)
+                .foregroundStyle(IMUNIsaiahBrand.cream)
+        }
+        .font(.system(size: size, weight: .heavy, design: .rounded))
+        .fixedSize(horizontal: true, vertical: false)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("IsAIah")
+    }
+}
