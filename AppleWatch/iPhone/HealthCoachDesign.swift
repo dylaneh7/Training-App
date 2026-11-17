@@ -421,6 +421,30 @@ struct HCSyncStatus: View {
     }
 }
 
+/// Quiet skeleton for the very first data load. No repeating shimmer or
+/// animated gradients while scrolling; the real metric cards replace it.
+struct IMUNLoadingPlaceholder: View {
+    var lines: Int = 3
+    var height: CGFloat = 108
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 13) {
+            ForEach(0..<max(1, lines), id: \.self) { index in
+                RoundedRectangle(cornerRadius: 5, style: .continuous)
+                    .fill(HCDesign.raised)
+                    .frame(height: index == 0 ? 14 : 11)
+                    .padding(.trailing, index.isMultiple(of: 2) ? 35 : 85)
+            }
+        }
+        .padding(.horizontal, 14)
+        .frame(maxWidth: .infinity)
+        .frame(height: height, alignment: .center)
+        .background(HCDesign.card,
+                    in: RoundedRectangle(cornerRadius: 13, style: .continuous))
+        .accessibilityLabel("Loading measurements")
+    }
+}
+
 extension View {
     func hcPage() -> some View {
         self
