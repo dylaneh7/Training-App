@@ -42,6 +42,7 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
     @Published private(set) var runPlan: HCRunPlan?
     @Published private(set) var runHistory: [HCProgressRun] = []
     @Published private(set) var recoverySummary: HCRecoveryDatum?
+    @Published private(set) var eitanSnapshot: HCEitanSnapshot?
     @Published private(set) var sets: [HCLoggedSet] = []
     // Preserve all original records locally; cloud history is read-only.
     @Published private(set) var cloudSets: [HCLoggedSet] = []
@@ -1279,6 +1280,19 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
                     self.applySchedule(snapshot, fromPhone: true)
                 }
             }
+        }
+        for key in ["hcEitanEnabled", "hcEitanUseHealth",
+                    "hcEitanCoachingEnabled"] {
+            if let enabled = context[key] as? Bool {
+                UserDefaults.standard.set(enabled, forKey: key)
+            }
+        }
+        // Clearing the score on opt-out is just as important as avoiding a
+        // fresh transfer. No stale sensitive data remains in the Watch view.
+        if let payload = context["hcEitanSnapshot"] as? Data {
+            let newSnapshot = payload.isEmpty ? nil :
+                (try? decoder.decode(HCEitanSnapshot.self, from: payload))
+            DispatchQueue.main.async { self.eitanSnapshot = newSnapshot }
         }
         if let data = context["hcRecoverySnapshot"] as? Data,
            let reading = try? decoder.decode(HCRecoveryDatum.self, from: data) {
