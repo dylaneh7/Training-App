@@ -68,6 +68,7 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
     private var confirmedIDs: Set<UUID> = []
     private var latestSchedule: HCWatchSchedule?
     private var hasReceivedPhoneScheduleToday = false
+    private var latestAppliedPhoneScheduleAt: Date?
     private let cloud = HCWatchCloudFallback()
     private var cloudUploadedIDs: Set<UUID> = []
     private var isUploadingCloudSets = false
@@ -817,19 +818,27 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
         }
     }
 
-    private func applySchedule(_ schedule: HCWatchSchedule) {
+    private func applySchedule(_ schedule: HCWatchSchedule, fromPhone: Bool = false) {
         guard schedule.date == Self.today() else {
             invalidatePreviousDayIfNeeded()
             return
         }
+        if fromPhone, let latestAppliedPhoneScheduleAt,
+           latestAppliedPhoneScheduleAt > schedule.generatedAt {
+            // Ignore an out-of-order older iPhone delivery.
+            return
+        }
         if let previous = latestSchedule, previous.date == schedule.date {
-            // Once the authenticated cloud or iPhone has confirmed today's
-            // workout, a later provisional "loading" update must not make
-            // it appear unscheduled again.
+            // A cloud-strength fallback can have a newer timestamp than the
+            // actual iPhone running plan. The iPhone is authoritative for runs.
+            if !fromPhone && hasReceivedPhoneScheduleToday { return }
             if previous.state == "ready" && schedule.state == "loading" {
                 return
             }
-            if previous.generatedAt > schedule.generatedAt { return }
+            if previous.generatedAt > schedule.generatedAt && !fromPhone { return }
+        }
+        if fromPhone && schedule.state == "ready" {
+            latestAppliedPhoneScheduleAt = schedule.generatedAt
         }
         latestSchedule = schedule
         isRequestingSchedule = false
@@ -1054,13 +1063,13 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
                 if snapshot.date == Self.today() && snapshot.state == "ready" {
                     hasReceivedPhoneScheduleToday = true
                 }
-                applySchedule(snapshot)
+                applySchedule(snapshot, fromPhone: true)
             } else {
                 DispatchQueue.main.async {
                     if snapshot.date == Self.today() && snapshot.state == "ready" {
                         self.hasReceivedPhoneScheduleToday = true
                     }
-                    self.applySchedule(snapshot)
+                    self.applySchedule(snapshot, fromPhone: true)
                 }
             }
         }
