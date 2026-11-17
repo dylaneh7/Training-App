@@ -1238,6 +1238,11 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
                 UserDefaults.standard.set(enabled, forKey: key)
             }
         }
+        if let preferred = packet["hcEitanPrimaryWearable"] as? String,
+           HCEitanWearableSource.choices.contains(preferred) {
+            UserDefaults.standard.set(preferred,
+                                      forKey: "hcEitanPrimaryWearable")
+        }
         UserDefaults.standard.set(stamp, forKey: "hcEitanReceivedTimestamp")
         eitanSnapshot = reading
         if let reading {
@@ -1261,14 +1266,31 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
         return true
     }
 
+    private func acknowledgeEitanIfReachable(_ stamp: Double) {
+        let connection = WCSession.default
+        guard stamp > 0, connection.activationState == .activated,
+              connection.isReachable else { return }
+        connection.sendMessage([
+            HCPayload.kind: HCPayload.eitanReceipt,
+            HCPayload.eitanStamp: stamp
+        ], replyHandler: { _ in }, errorHandler: { _ in
+            // The Watch already has the latest snapshot; live acknowledgement
+            // failure is not a failure to display the received wellness data.
+        })
+    }
+
     private func queueEitanRequest(_ session: WCSession) {
-        let pending = session.outstandingUserInfoTransfers.contains {
-            ($0.userInfo[HCPayload.kind] as? String) == HCPayload.eitanRequest
+        // A wellness score is replaceable state, NOT a background event.
+        // Do not create transferUserInfo jobs that may repeatedly time out.
+        let stored = session.receivedApplicationContext
+        if stored[HCPayload.eitanStamp] != nil,
+           applyEitanPacket(stored) {
+            eitanSyncStatus =
+                "Showing last EITAN received · open iMun on both devices for a fresh sync"
+        } else {
+            eitanSyncStatus =
+                "iPhone not reachable · open iMun on iPhone and Watch to sync EITAN"
         }
-        if !pending {
-            session.transferUserInfo([HCPayload.kind: HCPayload.eitanRequest])
-        }
-        eitanSyncStatus = "EITAN refresh queued · open iMun on iPhone"
     }
 
     func requestEitanSync() {
@@ -1291,7 +1313,10 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
             replyHandler: { [weak self] response in
                 DispatchQueue.main.async {
                     guard let self else { return }
-                    if !self.applyEitanPacket(response) {
+                    if self.applyEitanPacket(response) {
+                        self.acknowledgeEitanIfReachable(
+                            response[HCPayload.eitanStamp] as? Double ?? 0)
+                    } else {
                         self.eitanSyncStatus = "EITAN response invalid · try again"
                     }
                 }
@@ -1389,8 +1414,9 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
                 DispatchQueue.main.async { _ = self.applyEitanPacket(context) }
             }
         }
-        if let data = context["hcRecoverySnapshot"] as? Data,
-           let reading = try? decoder.decode(HCRecoveryDatum.self, from: data) {
+        if let data = context["hcRecoverySnapshot"] as? Data {
+            let reading = data.isEmpty ? nil :
+                (try? decoder.decode(HCRecoveryDatum.self, from: data))
             DispatchQueue.main.async { self.recoverySummary = reading }
         }
         if let data = context[HCPayload.runHistory] as? Data,
@@ -1492,6 +1518,17 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
             DispatchQueue.main.async {
                 self.checkPhoneConnection()
                 self.sendPending()
+                let stored = session.receivedApplicationContext
+                if stored[HCPayload.eitanStamp] != nil {
+                    _ = self.applyEitanPacket(stored)
+                }
+                // Cancel only obsolete EITAN refresh requests from older builds.
+                // Workout and undo transfers must never be canceled here.
+                for transfer in session.outstandingUserInfoTransfers
+                    where transfer.userInfo[HCPayload.kind] as? String ==
+                        HCPayload.eitanRequest {
+                    transfer.cancel()
+                }
                 if self.hasScheduledLift && self.workout.date == Self.today() {
                     self.publishLiftSessionStatus(
                         startedAt: self.liftClock?.startedAt,
@@ -1524,7 +1561,12 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
     }
 
     func session(_ session: WCSession, didReceiveApplicationContext context: [String: Any]) {
-        applyContext(context)
+        DispatchQueue.main.async {
+            self.applyContext(context)
+            if let stamp = context[HCPayload.eitanStamp] as? Double {
+                self.acknowledgeEitanIfReachable(stamp)
+            }
+        }
     }
 
     /// Only acknowledge a schedule after it decodes and has been applied.

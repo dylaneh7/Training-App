@@ -972,13 +972,17 @@ enum IMUNEitanWellnessEngine {
                          coach: PhoneWorkoutBridge,
                          preferredSource: String) -> HCEitanSnapshot {
         var samples: [Reading] = health.metricHistory.compactMap { item in
-            guard item.value.isFinite else { return nil }
+            guard item.value.isFinite,
+                  HCEitanWearableSource.accepts(item.source,
+                      preferred: preferredSource) else { return nil }
             return Reading(name: item.name, source: item.source,
                            date: item.date, value: item.value)
         }
         // Imported overnight RMSSD and Apple Health SDNN retain separate
         // labels, baselines, and source identities.
-        for datum in coach.recoveryHistory {
+        for datum in coach.recoveryHistory
+            where HCEitanWearableSource.accepts(datum.source,
+                                                preferred: preferredSource) {
             if let hours = datum.sleepSeconds.map({ $0 / 3600 }), hours > 0 {
                 samples.append(Reading(name: "Total asleep", source: datum.source,
                                        date: datum.date, value: hours))
@@ -1020,8 +1024,8 @@ enum IMUNEitanWellnessEngine {
                     ["HRV · SDNN", "HRV · RMSSD", "Resting heart rate",
                      "Daily low HR", "Respiratory rate", "Wrist temperature"]
                         .contains($0.name) &&
-                    (preferredSource == "Auto" ||
-                     $0.source.localizedCaseInsensitiveContains(preferredSource))
+                    HCEitanWearableSource.accepts($0.source,
+                                                  preferred: preferredSource)
                 }
                 guard recordedToday else { break }
                 let prior = assess(date: date, samples: samples,
@@ -1045,6 +1049,7 @@ enum IMUNEitanWellnessEngine {
             sourceCount: todayResult.sourceCount,
             coverage: todayResult.coverage)
         result.coachingPlan = coachingPlan
+        result.primaryWearable = preferredSource
         return result
     }
 
@@ -1075,8 +1080,8 @@ enum IMUNEitanWellnessEngine {
             let matching = samples.filter { item in
                 names.contains(item.name) && item.date <= targetDay &&
                 item.date >= earliestDay && item.value > 0 &&
-                (preferredSource == "Auto" ||
-                 item.source.localizedCaseInsensitiveContains(preferredSource))
+                HCEitanWearableSource.accepts(item.source,
+                                             preferred: preferredSource)
             }
             // Every possible source/HRV method is evaluated independently.
             // Do not blend SDNN with RMSSD or duplicate same-day providers.
@@ -1136,8 +1141,8 @@ enum IMUNEitanWellnessEngine {
             ($0.name == "Total asleep" || $0.name == "Sleep") &&
             $0.date <= targetDay && $0.date >= maxTwoDaysAgo &&
             $0.value >= 2 && $0.value <= 15 &&
-            (preferredSource == "Auto" ||
-             $0.source.localizedCaseInsensitiveContains(preferredSource))
+            HCEitanWearableSource.accepts($0.source,
+                                         preferred: preferredSource)
         }.sorted { $0.date > $1.date }
         if let latest = sleeping.first {
             let hours = latest.value
@@ -1177,8 +1182,8 @@ enum IMUNEitanWellnessEngine {
         let wrist = samples.filter {
             $0.name == "Wrist temperature" &&
             $0.date <= targetDay && $0.date >= earliestDay &&
-            (preferredSource == "Auto" ||
-             $0.source.localizedCaseInsensitiveContains(preferredSource))
+            HCEitanWearableSource.accepts($0.source,
+                                         preferred: preferredSource)
         }.sorted { $0.date > $1.date }
         if let latest = wrist.first, latest.date >= maxThreeDaysAgo {
             let historical = wrist.filter {
@@ -1224,8 +1229,8 @@ enum IMUNEitanWellnessEngine {
                 $0.name == activityName &&
                 $0.date >= earliestDay && $0.date <= targetDay &&
                 $0.value.isFinite && $0.value >= 0 &&
-                (preferredSource == "Auto" ||
-                 $0.source.localizedCaseInsensitiveContains(preferredSource))
+                HCEitanWearableSource.accepts($0.source,
+                                             preferred: preferredSource)
             }
             let sourceGroups = Dictionary(grouping: activityReadings, by: \.source)
             var candidates: [(source: String, date: String,
@@ -1275,9 +1280,11 @@ enum IMUNEitanWellnessEngine {
         let sumWeights = parts.reduce(0) { $0 + $1.weight }
         let value: Int? = isSufficient && sumWeights > 0 ?
             clamp(parts.reduce(0) { $0 + Double($1.value) * $1.weight } / sumWeights) : nil
+        let label = preferredSource == "Auto" ?
+            "Automatic wearable sources" : preferredSource + " primary"
         let coverage = isSufficient ?
-            "\(physiologicalCount) wellness signals · \(baselineFactors) personal baseline trends" :
-            "At least two recent wellness signals and five historical readings for a baseline are required"
+            label + " · \(physiologicalCount) signals · \(baselineFactors) same-source baseline trends" :
+            label + " · requires two available wellness signals and at least five historical readings for a baseline; missing values are not substituted from other wearables"
         return Assessment(score: value, factors: parts,
                           sourceCount: sources.count, coverage: coverage)
     }
@@ -1349,14 +1356,18 @@ private enum IMUNEitanTrainingCoach {
         // Choose one consistent provider and day per night. HRV SDNN/RMSSD
         // remain separate in the EITAN wellness calculation.
         var raw: [SleepNight] = health.metricHistory.compactMap { item in
-            guard item.name == "Total asleep", item.value >= 2,
+            guard HCEitanWearableSource.accepts(item.source,
+                                                preferred: preferredSource),
+                  item.name == "Total asleep", item.value >= 2,
                   item.value <= 15, item.value.isFinite,
                   item.date >= start7, item.date <= todayKey else { return nil }
             return SleepNight(source: item.source, date: item.date,
                               hours: item.value)
         }
         for reading in coach.recoveryHistory {
-            guard reading.date >= start7 && reading.date <= todayKey,
+            guard HCEitanWearableSource.accepts(reading.source,
+                                                preferred: preferredSource),
+                  reading.date >= start7 && reading.date <= todayKey,
                   let seconds = reading.sleepSeconds,
                   seconds.isFinite, seconds >= 7200, seconds <= 54000 else {
                 continue
@@ -1364,10 +1375,9 @@ private enum IMUNEitanTrainingCoach {
             raw.append(SleepNight(source: reading.source, date: reading.date,
                                   hours: seconds / 3600))
         }
-        if preferredSource != "Auto" {
-            raw = raw.filter {
-                $0.source.localizedCaseInsensitiveContains(preferredSource)
-            }
+        raw = raw.filter {
+            HCEitanWearableSource.accepts($0.source,
+                                         preferred: preferredSource)
         }
         let grouped = Dictionary(grouping: raw, by: \.source)
         let selected = grouped.values.sorted { a, b in
@@ -1623,18 +1633,24 @@ final class HCAppleHealthReader: ObservableObject {
     /// and explicitly sends a message. No screen scraping or background upload.
     func isaiahHealthSnapshot(selectedCategory: String,
                               selectedMetric: String,
-                              question: String) -> String {
-        let all = metrics.sorted {
+                              question: String,
+                              primaryWearable: String = "Auto") -> String {
+        let all = metrics.filter {
+            HCEitanWearableSource.accepts($0.source,
+                                          preferred: primaryWearable)
+        }.sorted {
             let a = ($0.category, $0.name, $0.source, $0.date)
             let b = ($1.category, $1.name, $1.source, $1.date)
             return a < b
         }
         guard !all.isEmpty else {
             return loading ? "Apple Health is still loading on this iPhone." :
-                "No authorized Apple Health measurements are currently loaded."
+                "No authorized " + primaryWearable +
+                " measurements are currently loaded. Do not substitute data from another wearable."
         }
 
-        var lines = ["APPLE HEALTH / WHOOP: all \(all.count) loaded metric cards, independent of scrolling.",
+        var lines = ["APPLE HEALTH: \(all.count) source-verified Health metric cards.",
+                     "Primary wearable: " + primaryWearable + ". Do not mix other wearables into physiological trends. Tredict workouts remain a separate training source.",
                      "Selected Health category: " + selectedCategory,
                      "Selected Health metric: " + (selectedMetric.isEmpty ? "none" : selectedMetric),
                      "Values keep their own source, method, unit and recorded date; never merge unlike sources."]
@@ -1659,7 +1675,9 @@ final class HCAppleHealthReader: ObservableObject {
                  name.contains("step"))
         }.map(\.name))
         let histories = Dictionary(grouping: metricHistory.filter {
-            relevant.contains($0.name)
+            relevant.contains($0.name) &&
+            HCEitanWearableSource.accepts($0.source,
+                                         preferred: primaryWearable)
         }, by: { $0.name + " | " + $0.source })
         for name in histories.keys.sorted() {
             let recent = (histories[name] ?? []).sorted { $0.date > $1.date }.prefix(14)
@@ -1668,6 +1686,9 @@ final class HCAppleHealthReader: ObservableObject {
                     recent.map { $0.date + "=" + String(format: "%.2f", $0.value) }
                         .joined(separator: ", "))
             }
+        }
+        if primaryWearable == "WHOOP" {
+            lines.append("Important: WHOOP HRV/RMSSD is not written to Apple Health. No Apple Watch SDNN substitution; use a separately authorized direct WHOOP API source when available.")
         }
         return lines.joined(separator: "\n")
     }

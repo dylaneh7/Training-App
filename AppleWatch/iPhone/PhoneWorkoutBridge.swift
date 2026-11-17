@@ -1100,7 +1100,14 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
             if !healthSnapshot.isEmpty {
                 lines.append(String(healthSnapshot.prefix(16_000)))
             }
-            for datum in recoveryHistory.prefix(48) {
+            let primary = UserDefaults.standard.string(
+                forKey: "hcEitanPrimaryWearable") ?? "Auto"
+            lines.append("Primary wearable for recovery insights: " + primary +
+                ". Do not infer WHOOP HRV from Apple Watch SDNN or from Tredict Garmin history.")
+            for datum in recoveryHistory
+                .filter({ HCEitanWearableSource.accepts($0.source,
+                                                        preferred: primary) })
+                .prefix(48) {
                 let hrv = datum.hrvMS.map { String(format: "%.0f ms", $0) } ?? "missing"
                 let sleep = datum.sleepSeconds.map { String(format: "%.1f h", $0 / 3600) }
                     ?? "missing"
@@ -1186,68 +1193,97 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
             HCPayload.eitanStamp: stamp,
             "hcEitanEnabled": enabled,
             "hcEitanUseHealth": useHealth,
-            "hcEitanCoachingEnabled": coaching
+            "hcEitanCoachingEnabled": coaching,
+            "hcEitanPrimaryWearable": preferences.string(
+                forKey: "hcEitanPrimaryWearable") ?? "Auto"
         ]
     }
 
-    private func queueEitanPacket(_ packet: [String: Any]) {
-        let connection = WCSession.default
-        guard connection.activationState == .activated,
-              let stamp = packet[HCPayload.eitanStamp] as? Double,
-              stamp >= latestEitanDedicatedStamp else { return }
-        // Only the newest score or opt-out needs reliable queued delivery.
-        // Explicitly cancel older pending snapshots so an old score does
-        // not appear again after the athlete disables EITAN Health access.
-        for transfer in connection.outstandingUserInfoTransfers
-            where transfer.userInfo[HCPayload.kind] as? String == HCPayload.eitanSync {
-            transfer.cancel()
-        }
-        connection.transferUserInfo(packet)
-        eitanWatchSyncStatus = "EITAN queued for Watch · waiting for receipt"
-    }
-
+    /// EITAN is a replaceable latest-state snapshot, not an event log.
+    /// updateApplicationContext works when the Watch isn't reachable and
+    /// supersedes older wellness payloads instead of accumulating timed-out
+    /// transferUserInfo packets. It does NOT prove Watch receipt.
     func sendEitanToWatch(forceQueue: Bool = false) {
         guard WCSession.isSupported() else {
-            eitanWatchSyncStatus = "WatchConnectivity unavailable"
+            eitanWatchSyncStatus = "EITAN WatchConnectivity not supported"
             return
         }
-        let connection = WCSession.default
-        guard connection.activationState == .activated else {
-            eitanWatchSyncStatus = "Connecting EITAN to Watch…"
-            connection.activate()
+        let session = WCSession.default
+        guard session.activationState == .activated else {
+            eitanWatchSyncStatus = "Activating Watch connection for EITAN…"
+            session.activate()
             return
         }
-        guard connection.isPaired else {
-            eitanWatchSyncStatus = "No paired Apple Watch"
+        guard session.isPaired else {
+            eitanWatchSyncStatus = "No paired Watch detected"
             return
         }
         let packet = currentEitanPacket()
         let stamp = packet[HCPayload.eitanStamp] as? Double ?? 0
         latestEitanDedicatedStamp = stamp
-        if forceQueue || !connection.isReachable {
-            queueEitanPacket(packet)
+        eitanWatchAcknowledgedAt = nil
+
+        // The old implementation used reliable user-info queues for every
+        // wellness refresh and manual retry. Cancel only those obsolete EITAN
+        // transfers (never workout/undo records).
+        for transfer in session.outstandingUserInfoTransfers
+            where transfer.userInfo[HCPayload.kind] as? String == HCPayload.eitanSync {
+            transfer.cancel()
         }
-        guard connection.isReachable else { return }
-        eitanWatchSyncStatus = "Sending EITAN to Watch…"
-        connection.sendMessage(packet, replyHandler: { [weak self] reply in
+
+        var contextError: String?
+        do {
+            var context = session.applicationContext
+            for (key, value) in packet where key != HCPayload.kind {
+                context[key] = value
+            }
+            try session.updateApplicationContext(context)
+        } catch {
+            contextError = error.localizedDescription
+        }
+        if !session.isReachable {
+            if let contextError {
+                eitanWatchSyncStatus =
+                    "Watch unavailable; EITAN state could not be queued: " +
+                    contextError
+            } else {
+                eitanWatchSyncStatus =
+                    "EITAN saved for background delivery · open iMun on Watch to receive"
+            }
+            return
+        }
+        // A failed application-context update must not prevent an immediate
+        // delivery while both apps are reachable.
+
+
+        // A short interactive message is only used while BOTH apps are awake.
+        // If it times out, replaceable applicationContext is still pending.
+        eitanWatchSyncStatus = contextError == nil ?
+            "EITAN sent · waiting for Watch acknowledgment" :
+            "Trying live EITAN delivery · background state failed: " + contextError!
+        session.sendMessage(packet, replyHandler: { [weak self] reply in
             DispatchQueue.main.async {
                 guard let self else { return }
-                let receivedStamp = reply[HCPayload.eitanStamp] as? Double ?? -1
-                if reply["eitanReceived"] as? Bool == true &&
-                   abs(receivedStamp - stamp) < 0.01 {
-                    if stamp >= self.latestEitanDedicatedStamp &&
-                       stamp >= (self.eitanWatchAcknowledgedAt?.timeIntervalSince1970 ?? 0) {
-                        self.eitanWatchAcknowledgedAt = Date(timeIntervalSince1970: stamp)
-                        self.eitanWatchSyncStatus = "EITAN confirmed on Watch · " +
-                            Date().formatted(date: .omitted, time: .shortened)
-                    }
-                } else if !forceQueue {
-                    self.queueEitanPacket(packet)
+                let incoming = reply[HCPayload.eitanStamp] as? Double ?? -1
+                let confirmed = reply["eitanReceived"] as? Bool == true &&
+                    abs(incoming - stamp) < 0.01
+                guard stamp >= self.latestEitanDedicatedStamp else { return }
+                if confirmed {
+                    self.eitanWatchAcknowledgedAt = Date(timeIntervalSince1970: stamp)
+                    self.eitanWatchSyncStatus =
+                        "EITAN confirmed on Watch · " +
+                        Date().formatted(date: .omitted, time: .shortened)
+                } else {
+                    self.eitanWatchSyncStatus =
+                        "Watch did not confirm EITAN; latest state remains available"
                 }
             }
-        }, errorHandler: { [weak self] _ in
+        }, errorHandler: { [weak self] error in
             DispatchQueue.main.async {
-                if !forceQueue { self?.queueEitanPacket(packet) }
+                guard let self, stamp >= self.latestEitanDedicatedStamp else { return }
+                self.eitanWatchSyncStatus =
+                    "Live Watch reply unavailable (" + error.localizedDescription +
+                    "); latest EITAN is saved for background delivery"
             }
         })
     }
@@ -1306,6 +1342,8 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
         context["hcEitanUseHealth"] = useEitanHealth
         context["hcEitanCoachingEnabled"] = prefs.object(
             forKey: "hcEitanCoachingEnabled") as? Bool ?? true
+        context["hcEitanPrimaryWearable"] =
+            prefs.string(forKey: "hcEitanPrimaryWearable") ?? "Auto"
         // An empty Data explicitly clears stale wellness readings if opted out.
         context["hcEitanSnapshot"] = (eitanEnabled && useEitanHealth
             ? eitanSnapshot.flatMap { try? encoder.encode($0) } : nil) ?? Data()
@@ -1330,10 +1368,15 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
         if let history = try? encoder.encode(summaries), history.count < 40_000 {
             context[HCPayload.runHistory] = history
         }
-        if let recent = recoveryHistory.first,
-           let snapshot = try? encoder.encode(recent), snapshot.count < 16_000 {
-            context["hcRecoverySnapshot"] = snapshot
+        let primary = prefs.string(forKey: "hcEitanPrimaryWearable") ?? "Auto"
+        let recent = recoveryHistory.first {
+            HCEitanWearableSource.accepts($0.source, preferred: primary)
         }
+        // Empty payload clears stale Garmin/Tredict-derived Watch recovery
+        // after the user selects WHOOP or another primary wearable.
+        let recoveryBytes = recent.flatMap { try? encoder.encode($0) }
+        context["hcRecoverySnapshot"] = (recoveryBytes?.count ?? 0) < 16_000 ?
+            (recoveryBytes ?? Data()) : Data()
         return context
     }
 
@@ -1845,6 +1888,19 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
             }
             return
         }
+        if kind == HCPayload.eitanReceipt {
+            DispatchQueue.main.async {
+                let stamp = message[HCPayload.eitanStamp] as? Double ?? 0
+                if stamp >= self.latestEitanDedicatedStamp &&
+                   stamp >= (self.eitanWatchAcknowledgedAt?.timeIntervalSince1970 ?? 0) {
+                    self.eitanWatchAcknowledgedAt = Date(timeIntervalSince1970: stamp)
+                    self.eitanWatchSyncStatus = "EITAN confirmed by Watch · " +
+                        Date().formatted(date: .omitted, time: .shortened)
+                }
+                replyHandler(["received": true])
+            }
+            return
+        }
         if kind == "imunDiagnosticPingV1" {
             replyHandler(["imunDiagnosticPong": true])
             return
@@ -1946,14 +2002,8 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
                  error: Error?) {
         let transferKind = userInfoTransfer.userInfo[HCPayload.kind] as? String
         if transferKind == HCPayload.eitanSync {
-            DispatchQueue.main.async {
-                if let error {
-                    self.eitanWatchSyncStatus = "EITAN delivery failed: " +
-                        error.localizedDescription
-                } else if self.eitanWatchAcknowledgedAt == nil {
-                    self.eitanWatchSyncStatus = "EITAN transferred · awaiting Watch receipt"
-                }
-            }
+            // Obsolete queued EITAN packets from older builds may time out.
+            // Their result is not the status of the newer latest-state sync.
             return
         }
         guard transferKind == HCPayload.pushSchedule else { return }
