@@ -3050,8 +3050,10 @@ private struct PremiumCoachConversation: View {
                 $0.name.localizedCaseInsensitiveContains(name)
         } ?? []
         selectedEditExerciseID = matches.count == 1 ? (matches.first?.id ?? "") : ""
-        if actionEditOperation == .add || actionEditOperation == .replace {
+        if actionEditOperation == .add {
             actionEditExerciseName = hint?.exerciseName ?? ""
+        } else if actionEditOperation == .replace {
+            actionEditExerciseName = hint?.newName ?? ""
         }
         if !selectedEditExerciseID.isEmpty &&
            actionEditOperation != .add {
