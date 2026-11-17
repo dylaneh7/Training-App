@@ -1270,14 +1270,17 @@ private struct WatchPreferences: View {
                     .fixedSize(horizontal: false, vertical: true)
                 Button {
                     store.requestCurrentSchedule(manual: true)
-                    if store.cloudSignedIn {
-                        store.refreshCloudWorkout()
-                        store.refreshCloudSets()
-                    }
                 } label: {
-                    Label("Check cloud and sync", systemImage: "icloud.and.arrow.down")
+                    Label("Refresh today's plan", systemImage: "arrow.clockwise")
                 }
                 .disabled(store.isRequestingSchedule)
+                Button {
+                    store.refreshCloudWorkout()
+                    store.refreshCloudSets()
+                } label: {
+                    Label("Test cloud connection", systemImage: "icloud.and.arrow.down")
+                }
+                .disabled(!store.cloudSignedIn)
                 if !store.cloudSignedIn {
                     NavigationLink {
                         WatchCloudBackupSetup()
