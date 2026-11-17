@@ -38,6 +38,7 @@ struct PremiumHomeView: View {
     @AppStorage("hcDesignBackgroundHex") private var designBackgroundHex = "070C16"
     @Environment(\.scenePhase) private var scenePhase
     private let scheduleRefresh = Timer.publish(every: 60, on: .main, in: .common).autoconnect()
+    private let progressRefresh = Timer.publish(every: 15, on: .main, in: .common).autoconnect()
 
     var body: some View {
         TabView {
@@ -49,8 +50,8 @@ struct PremiumHomeView: View {
                 .tabItem { Label("Health", systemImage: "heart.text.square.fill") }
             NavigationStack { PremiumCoachPage() }
                 .tabItem { Label("Coach", systemImage: "bubble.left.and.text.bubble.right") }
-            NavigationStack { IMUNDesignStudioPage() }
-                .tabItem { Label("Studio", systemImage: "paintpalette.fill") }
+            NavigationStack { PremiumSettingsPage() }
+                .tabItem { Label("Settings", systemImage: "gearshape.fill") }
         }
         .tint(HCDesign.electric)
         .preferredColorScheme(IMUNStyle.preferredScheme)
@@ -68,6 +69,11 @@ struct PremiumHomeView: View {
             if phase == .active {
                 runImporter.startIfAuthorized()
                 if coach.signedIn { coach.refresh(date: Date()) }
+            }
+        }
+        .onReceive(progressRefresh) { _ in
+            if scenePhase == .active && coach.signedIn {
+                coach.refreshCloudProgress()
             }
         }
         .onReceive(scheduleRefresh) { _ in
@@ -88,6 +94,7 @@ struct PremiumHomeView: View {
         .onChange(of: designBackgroundHex) { _, _ in configureTabAppearance() }
         .onAppear {
             if coach.signedIn && coach.workout == nil { coach.refresh(date: Date()) }
+            if coach.signedIn { coach.refreshCloudProgress() }
             configureTabAppearance()
         }
     }
@@ -325,7 +332,7 @@ private struct PremiumStrengthPage: View {
     private var plan: HCWorkout? { coach.workout }
     private var doneSets: [HCLoggedSet] {
         guard let plan else { return [] }
-        return coach.loggedSets.filter { $0.workoutID == plan.id }
+        return coach.completedSets(for: plan)
     }
     private var volume: Double {
         doneSets.reduce(0) { $0 + ($1.weightLb ?? 0) * Double($1.reps) }
@@ -354,12 +361,10 @@ private struct PremiumStrengthPage: View {
                                         .font(.subheadline).foregroundStyle(HCDesign.secondary)
                                 }
                                 Spacer(minLength: 0)
-                                HCProgressRing(
-                                    progress: plan.prescribedSetCount > 0 ?
-                                        Double(doneSets.count) / Double(plan.prescribedSetCount) : 0,
-                                    value: "\(min(doneSets.count,plan.prescribedSetCount))",
-                                    subtitle: "Sets done",
-                                    tint: HCDesign.electric, diameter: 91)
+                                IMUNThemeProgressView(
+                                    completed: doneSets.count,
+                                    planned: plan.prescribedSetCount,
+                                    compact: true)
                             }
 
                             HStack(spacing: 7) {
@@ -375,7 +380,13 @@ private struct PremiumStrengthPage: View {
                                                   } ?? 0))
                                 }
                             }
-                            if coach.phoneSessionStartedAt == nil {
+                            if doneSets.count >= plan.prescribedSetCount &&
+                               plan.prescribedSetCount > 0 &&
+                               coach.phoneSessionStartedAt == nil {
+                                HCStatusLine(text: "Today's prescribed sets are complete on your devices.",
+                                             symbol: "checkmark.seal.fill",
+                                             tint: HCDesign.good)
+                            } else if coach.phoneSessionStartedAt == nil {
                                 HCFilledButton(title: "START WORKOUT", icon: "play.fill") {
                                     coach.startPhoneWorkout()
                                 }
@@ -638,8 +649,8 @@ private struct PremiumExerciseSession: View {
     private var ex: HCExercise? { coach.workout?.exercises.first { $0.id == exerciseID } }
     private var completed: [HCLoggedSet] {
         guard let p = coach.workout else { return [] }
-        return coach.loggedSets.filter { $0.workoutID == p.id && $0.exerciseID == exerciseID }
-            .sorted { $0.index < $1.index }
+        return coach.completedSets(for: p)
+            .filter { $0.exerciseID == exerciseID }
     }
     private var active: Bool { coach.phoneSetExerciseID == exerciseID && coach.phoneSetStartedAt != nil }
 
@@ -1785,6 +1796,48 @@ private struct PremiumRecoveryPage: View {
                                 .font(.system(size: 14, weight: .bold, design: .rounded))
                             Text("Ring shows available comparisons, not a made-up recovery score.")
                                 .font(.caption).foregroundStyle(HCDesign.secondary)
+                        }
+                    }
+                }
+
+                HCSectionTitle(title: "Your theme dashboard",
+                               detail: IMUNStyle.preset.title)
+                HCCard(accent: HCDesign.electric) {
+                    VStack(alignment: .leading, spacing: 12) {
+                        HStack {
+                            Image(systemName: IMUNStyle.preset.symbol)
+                                .foregroundStyle(HCDesign.electric)
+                            Text(IMUNStyle.preset.title.uppercased() + " / TRAINING PROGRESS")
+                                .font(HCDesign.label(11))
+                                .tracking(1)
+                            Spacer()
+                        }
+                        IMUNThemeProgressView(
+                            completed: coach.workout.map {
+                                coach.completedSets(for: $0).count
+                            } ?? 0,
+                            planned: coach.workout?.prescribedSetCount ?? 0)
+                        Text("The visual tracks prescribed sets completed today across iPhone and Watch—not a recovery score.")
+                            .font(.caption2)
+                            .foregroundStyle(HCDesign.secondary)
+                        if let latest = signals.first {
+                            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                                Text("RECENT RECOVERY SIGNAL")
+                                    .font(HCDesign.label(9))
+                                    .tracking(0.8)
+                                    .foregroundStyle(HCDesign.secondary)
+                                Spacer()
+                                Text(latest.label + " · " + latest.formattedValue)
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(HCDesign.ink)
+                            }
+                            Text("Measured by " + latest.source + " · " + latest.date)
+                                .font(.caption2)
+                                .foregroundStyle(HCDesign.secondary)
+                        } else {
+                            Text("Recovery readings appear here once Apple Health or an authorized source provides them.")
+                                .font(.caption2)
+                                .foregroundStyle(HCDesign.secondary)
                         }
                     }
                 }
