@@ -386,48 +386,14 @@ struct IMUNPanelShape: Shape {
     }
 }
 
-/// Low-contrast vector motifs: no photos/downloads and no extra permissions.
+/// Content-first page backdrop. Theme patterns are reserved for intentional
+/// artwork or identity surfaces, not repeated behind charts and controls.
 struct IMUNBackdrop: View {
     var body: some View {
-        ZStack {
-            IMUNStyle.palette.canvas
-            if IMUNStyle.motif == "glow" {
-                RadialGradient(colors: [IMUNStyle.palette.accent.opacity(0.20), .clear],
-                               center: .topTrailing, startRadius: 10, endRadius: 480)
-            } else if IMUNStyle.motif != "none" {
-                Canvas { context, size in
-                    let motif = IMUNStyle.motif
-                    let spacing: CGFloat = motif == "grid" ? 30 : 54
-                    let color = IMUNStyle.palette.supporting.opacity(0.11)
-                    if motif == "stripes" {
-                        for v in stride(from: CGFloat(-size.height), through: size.width, by: spacing) {
-                            var line = Path()
-                            line.move(to: CGPoint(x:v,y:0))
-                            line.addLine(to: CGPoint(x:v+size.height,y:size.height))
-                            context.stroke(line, with:.color(color), lineWidth:1)
-                        }
-                    } else {
-                        for x in stride(from: CGFloat(0), through: size.width, by: spacing) {
-                            var line = Path()
-                            line.move(to: CGPoint(x:x,y:0))
-                            line.addLine(to: CGPoint(x:x,y:size.height))
-                            context.stroke(line, with:.color(color), lineWidth:0.7)
-                        }
-                        if motif == "grid" || motif == "contours" {
-                            for y in stride(from: CGFloat(0), through: size.height, by: spacing) {
-                                var line = Path()
-                                line.move(to: CGPoint(x:0,y:y))
-                                line.addLine(to: CGPoint(x:size.width,y:y))
-                                context.stroke(line, with:.color(color), lineWidth:0.7)
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        .ignoresSafeArea()
-        .allowsHitTesting(false)
-        .accessibilityHidden(true)
+        IMUNStyle.palette.canvas
+            .ignoresSafeArea()
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
     }
 }
 
