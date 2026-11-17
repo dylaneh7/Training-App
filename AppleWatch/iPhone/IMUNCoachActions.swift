@@ -65,6 +65,8 @@ enum IMUNCoachActionKind: String, CaseIterable {
     case createRun
     case renameStrength
     case editStrength
+    case undoSet
+    case undoWorkout
     case selectTraining
     case openTab
     case setMotivation
@@ -180,6 +182,12 @@ enum IMUNCoachActionCatalog {
         .init(kind: .editStrength, domain: "Training", title: "Edit exercises",
               summary: "Add, replace, remove, reorder and change sets, reps, rest or suggested load.",
               access: "Review and confirm"),
+        .init(kind: .undoSet, domain: "Training", title: "Undo Set",
+              summary: "Reverse a recorded set while preserving other progress.",
+              access: "Review and confirm"),
+        .init(kind: .undoWorkout, domain: "Training", title: "Undo Workout",
+              summary: "Reverse an active iPhone workout and its sets; keep the plan.",
+              access: "Review and confirm"),
         .init(kind: .createStrength, domain: "Training", title: "Create strength workout",
               summary: "Create a blank workout for today.", access: "Review and confirm"),
         .init(kind: .renameStrength, domain: "Training", title: "Rename a workout",
@@ -245,6 +253,17 @@ enum IMUNCoachActionInterpreter {
                         workout: HCWorkout?, run: HCRunPlan?) -> IMUNCoachActionProposal? {
         let value = request.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
         guard !value.isEmpty else { return nil }
+
+        if containsAny(value, ["undo", "reverse", "unlog"]) &&
+           containsAny(value, ["set", "last rep", "logged set"]) {
+            return proposal(.undoSet, "Undo Set",
+                "Reverse the most recent completed set and update phone/Watch progress.")
+        }
+        if containsAny(value, ["undo", "reverse", "cancel"]) &&
+           containsAny(value, ["workout", "strength session", "lifting session"]) {
+            return proposal(.undoWorkout, "Undo Workout",
+                "Stop the active iPhone workout and reverse only its session sets. The plan stays available.")
+        }
 
         // Prescription edits are a first-class capability, not an answer
         // about how to use the manual editor. No guessed exercise IDs.
@@ -600,6 +619,12 @@ enum IMUNCoachActionInterpreter {
         let value = (object["parameter"] as? String)?
             .trimmingCharacters(in: .whitespacesAndNewlines)
         switch action {
+        case "undoSet":
+            return proposal(.undoSet, "Undo Set",
+                "Review the latest set before reversing it.")
+        case "undoWorkout":
+            return proposal(.undoWorkout, "Undo Workout",
+                "Reverse the active iPhone session without deleting its plan.")
         case "editStrength":
             guard let workout, workout.date == HCPlanBuilder.dateString(Date()),
                   !workout.isPreview else { return nil }
@@ -1055,9 +1080,12 @@ struct IMUNCoachActionReviewCard: View {
                     Button("Cancel", action: onCancel)
                         .buttonStyle(.bordered)
                         .tint(HCDesign.secondary)
-                    Button("Confirm action", action: onConfirm)
+                    Button(action.kind == .undoWorkout ? "Undo Workout" :
+                           action.kind == .undoSet ? "Undo Set" : "Confirm action",
+                           action: onConfirm)
                         .buttonStyle(.borderedProminent)
-                        .tint(HCDesign.electric)
+                        .tint(action.kind == .undoWorkout ?
+                              HCDesign.caution : HCDesign.electric)
                         .disabled(!canConfirm)
                 }
                 Text("IsAIah never makes app changes without your confirmation.")
