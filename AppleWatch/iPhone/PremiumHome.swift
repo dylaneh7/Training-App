@@ -74,6 +74,11 @@ struct PremiumHomeView: View {
         .environmentObject(tredictImporter)
         .environmentObject(tredictPlans)
         .onReceive(tredictPlans.$runs) { coach.updateTredictScheduledRuns($0) }
+        .onReceive(tredictPlans.$lastSentTodayRunID) { id in
+            guard let id,
+                  let selected = tredictPlans.runs.first(where: { $0.id == id }) else { return }
+            coach.useTredictRunAsToday(selected)
+        }
         .onReceive(tredictImporter.$snapshot) { snapshot in
             if snapshot.lastSync != nil {
                 coach.updateTredictSnapshot(snapshot)
@@ -958,6 +963,11 @@ private struct PremiumRunPage: View {
                         }
                         Text("Set warm-up, intervals, recovery and heart-rate targets for Apple's Workout app.")
                             .font(.caption2).foregroundStyle(HCDesign.secondary)
+                        Text(coach.watchSyncStatus)
+                            .font(.caption2).foregroundStyle(HCDesign.secondary)
+                        HCOutlineButton(title: "Sync this run to iMun Watch", icon: "arrow.triangle.2.circlepath") {
+                            coach.refreshAndSendToWatch()
+                        }
                         if let steps = coach.runPlan?.structuredSteps, !steps.isEmpty {
                             VStack(alignment: .leading, spacing: 6) {
                                 Text("PRESCRIBED INTERVALS")

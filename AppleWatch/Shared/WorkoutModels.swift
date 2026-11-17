@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 
 // MARK: - Data shared by the iPhone and the watch
 
@@ -80,6 +81,17 @@ struct HCRunPlan: Codable, Identifiable, Hashable {
     let isCompleted: Bool
     // Optional with a default to decode previously cached iPhone/Watch plans.
     var structuredSteps: [HCRunStep]? = nil
+}
+
+extension HCRunPlan {
+    /// Stable across iPhone and watchOS processes; covers the entire plan,
+    /// including step times, BPM targets and completion state.
+    var syncSignature: String {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        guard let payload = try? encoder.encode(self) else { return "" }
+        return Data(SHA256.hash(data: payload)).base64EncodedString()
+    }
 }
 
 struct HCRunFinished: Codable, Identifiable, Hashable {

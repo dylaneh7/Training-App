@@ -67,6 +67,8 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
     private var queuedIDs: Set<UUID> = []
     private var confirmedIDs: Set<UUID> = []
     private var latestSchedule: HCWatchSchedule?
+    private var hasReceivedPhoneScheduleToday = false
+    private var latestAppliedPhoneScheduleAt: Date?
     private let cloud = HCWatchCloudFallback()
     private var cloudUploadedIDs: Set<UUID> = []
     private var isUploadingCloudSets = false
@@ -165,6 +167,17 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
                 let published = try await cloud.fetchPublishedWorkout(date: day)
                 DispatchQueue.main.async {
                     guard day == Self.today() else { return }
+                    // The direct cloud endpoint only publishes strength plans.
+                    // Never overwrite an iPhone-confirmed running schedule with
+                    // a fresh cloud timestamp and stale/missing running data.
+                    if self.hasReceivedPhoneScheduleToday ||
+                       (self.latestSchedule?.date == day &&
+                        self.latestSchedule?.state == "ready" &&
+                        self.latestSchedule?.runPlan != nil) {
+                        self.cloudStatus = "iPhone running plan preserved · cloud strength available"
+                        self.refreshCloudSets()
+                        return
+                    }
                     guard let published else {
                         self.cloudStatus = "No workout published for today yet · open iMun on iPhone once"
                         return
@@ -805,19 +818,27 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
         }
     }
 
-    private func applySchedule(_ schedule: HCWatchSchedule) {
+    private func applySchedule(_ schedule: HCWatchSchedule, fromPhone: Bool = false) {
         guard schedule.date == Self.today() else {
             invalidatePreviousDayIfNeeded()
             return
         }
+        if fromPhone, let latestAppliedPhoneScheduleAt,
+           latestAppliedPhoneScheduleAt > schedule.generatedAt {
+            // Ignore an out-of-order older iPhone delivery.
+            return
+        }
         if let previous = latestSchedule, previous.date == schedule.date {
-            // Once the authenticated cloud or iPhone has confirmed today's
-            // workout, a later provisional "loading" update must not make
-            // it appear unscheduled again.
+            // A cloud-strength fallback can have a newer timestamp than the
+            // actual iPhone running plan. The iPhone is authoritative for runs.
+            if !fromPhone && hasReceivedPhoneScheduleToday { return }
             if previous.state == "ready" && schedule.state == "loading" {
                 return
             }
-            if previous.generatedAt > schedule.generatedAt { return }
+            if previous.generatedAt > schedule.generatedAt && !fromPhone { return }
+        }
+        if fromPhone && schedule.state == "ready" {
+            latestAppliedPhoneScheduleAt = schedule.generatedAt
         }
         latestSchedule = schedule
         isRequestingSchedule = false
@@ -1039,9 +1060,17 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
         if let data = context[HCPayload.schedule] as? Data,
            let snapshot = try? decoder.decode(HCWatchSchedule.self, from: data) {
             if Thread.isMainThread {
-                applySchedule(snapshot)
+                if snapshot.date == Self.today() && snapshot.state == "ready" {
+                    hasReceivedPhoneScheduleToday = true
+                }
+                applySchedule(snapshot, fromPhone: true)
             } else {
-                DispatchQueue.main.async { self.applySchedule(snapshot) }
+                DispatchQueue.main.async {
+                    if snapshot.date == Self.today() && snapshot.state == "ready" {
+                        self.hasReceivedPhoneScheduleToday = true
+                    }
+                    self.applySchedule(snapshot, fromPhone: true)
+                }
             }
         }
         if let data = context["hcRecoverySnapshot"] as? Data,
@@ -1156,7 +1185,9 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
         guard let current = latestSchedule,
               current.date == incoming.date,
               current.state == incoming.state,
-              current.workout?.id == incoming.workout?.id else { return false }
+              current.workout?.id == incoming.workout?.id,
+              current.runPlan == incoming.runPlan,
+              runPlan == incoming.runPlan else { return false }
         // An ongoing older workout is intentionally protected from replacement,
         // but in that case the new workout is not yet available for training.
         if incoming.state == "ready", let scheduled = incoming.workout {
@@ -1181,7 +1212,9 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
                 "received": accepted,
                 "scheduleState": self.scheduleState,
                 "workoutID": self.latestSchedule?.workout?.id ?? "",
-                "reason": accepted ? "" : "Watch did not load this workout"
+                "runID": self.runPlan?.id ?? "",
+                "runSignature": self.runPlan?.syncSignature ?? "",
+                "reason": accepted ? "" : "Watch did not load the same strength and running plans"
             ])
         }
     }
@@ -1200,7 +1233,9 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
                     HCPayload.kind: HCPayload.scheduleReceipt,
                     "date": incoming.date,
                     "scheduleState": incoming.state,
-                    "workoutID": incoming.workout?.id ?? ""
+                    "workoutID": incoming.workout?.id ?? "",
+                    "runID": self.runPlan?.id ?? "",
+                    "runSignature": self.runPlan?.syncSignature ?? ""
                 ])
             }
             return
