@@ -214,6 +214,135 @@ enum IMUNCoachActionInterpreter {
         return nil
     }
 
+    /// The local recognizer covers common requests. More conversational
+    /// commands can use the existing signed-in Coach service as a classifier,
+    /// but ONLY when the athlete clearly asks for an app action.
+    static func mightNeedModelProposal(_ request: String) -> Bool {
+        let text = request.lowercased()
+        return containsAny(text, ["please ", "can you ", "could you ",
+            "move", "reschedule", "mark", "schedule", "create", "add ",
+            "change", "switch", "set ", "turn ", "open ", "show ",
+            "finish", "complete", "adjust", "rename", "update"]) &&
+            containsAny(text, ["workout", "run", "strength", "lifting",
+                "training", "health", "coach", "theme", "appearance",
+                "rest", "watch", "motivation", "haptics", "voice", "laps",
+                "calendar", "settings"])
+    }
+
+    static func classificationPrompt(for request: String) -> String {
+        let content = String(request.prefix(500))
+        return """
+        Classify the user's iMun app-control request. You are a classifier,
+        NOT an executor. Return ONLY a compact JSON object. No markdown.
+        Choose "action" from:
+        moveWorkout, completeRun, completeScheduledWorkout, syncWatch,
+        setTheme, createStrength, createRun, renameStrength, selectTraining,
+        openTab, setMotivation, setRestDuration, setWatchHaptics,
+        setRunVoiceCues, setRunAutoLaps, none.
+        Return {"action":"none"} if the user is asking for advice, information,
+        medical interpretation, or something outside those exact capabilities.
+        Other optional fields: "parameter" string and "minutes" integer.
+        For setting values, use only valid app choices:
+        - themes: heritage,retro,techno,coast,fieldNotes,discipline,atelier,rally
+        - tabs: training,progress,health,coach,settings
+        - activity: run,weightlifting
+        - motivation: off,original,performance,scripture,custom
+        - haptics/voice/laps: on,off
+        - rest seconds: 0,60,90,120,180
+        Don't invent session IDs or claim the change is complete.
+        User's exact request: \(content)
+        """
+    }
+
+    /// Strictly validates the model's *suggestion* against the allowlist.
+    /// No model-controlled ID, SQL, URL or executable instruction is accepted.
+    static func proposalFromModel(_ response: String,
+                                  sessions: [HCPlannedSession],
+                                  workout: HCWorkout?,
+                                  run: HCRunPlan?) -> IMUNCoachActionProposal? {
+        guard let open = response.firstIndex(of: "{"),
+              let close = response.lastIndex(of: "}"), open <= close else {
+            return nil
+        }
+        let snippet = String(response[open...close])
+        guard snippet.utf8.count <= 1500,
+              let object = try? JSONSerialization.jsonObject(
+                with: Data(snippet.utf8)) as? [String: Any],
+              let action = object["action"] as? String else { return nil }
+        let value = (object["parameter"] as? String)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        switch action {
+        case "moveWorkout":
+            return proposal(.moveWorkout, "Move a workout",
+                "Choose the exact calendar entry and the destination. The AI cannot decide which history records to modify.")
+        case "completeScheduledWorkout":
+            guard sessions.contains(where: { !$0.completed &&
+                UUID(uuidString: $0.id) != nil }) else { return nil }
+            return proposal(.completeScheduledWorkout,
+                "Confirm a saved workout is complete",
+                "Choose the actual calendar session. Recorded sets and activity metrics remain untouched.")
+        case "completeRun":
+            guard let run, !run.isCompleted,
+                  run.date == HCPlanBuilder.dateString(Date()) else { return nil }
+            return proposal(.completeRun, "Confirm today's run is complete",
+                "This is your confirmation only, not a sensor-recorded activity.",
+                workoutID: run.id)
+        case "syncWatch":
+            return proposal(.syncWatch, "Sync today's Watch plan",
+                "Request a fresh authenticated training schedule for iMun Watch.")
+        case "createStrength":
+            return proposal(.createStrength, "Create a strength workout",
+                "Create an empty editable strength plan.",
+                parameter: String((value ?? "Custom Strength Workout").prefix(80)))
+        case "createRun":
+            let minutes = (object["minutes"] as? Int).flatMap {
+                (1...360).contains($0) ? $0 : nil
+            }
+            return proposal(.createRun, "Create today's run",
+                "Enter and review the duration and optional BPM goals.",
+                parameter: minutes.map { String($0) })
+        case "renameStrength":
+            guard let workout else { return nil }
+            return proposal(.renameStrength, "Rename strength workout",
+                "Keep all prescribed exercises and recorded sets intact.",
+                parameter: String((value ?? workout.title).prefix(80)))
+        case "setTheme":
+            guard let value, let preset = IMUNPreset(rawValue: value) else { return nil }
+            return proposal(.setTheme, "Use \(preset.title) theme",
+                "Only visual design changes.", theme: preset.rawValue)
+        case "setMotivation":
+            guard let value, ["off", "original", "performance",
+                              "scripture", "custom"].contains(value) else { return nil }
+            return proposal(.setMotivation, "Update motivation",
+                "Change the daily content source independently of design.",
+                parameter: value)
+        case "setRestDuration":
+            guard let value, let seconds = Int(value),
+                  [0,60,90,120,180].contains(seconds) else { return nil }
+            return proposal(.setRestDuration, "Update rest timer",
+                "Change the workout rest countdown without editing records.",
+                parameter: String(seconds))
+        case "setWatchHaptics", "setRunVoiceCues", "setRunAutoLaps":
+            guard value == "on" || value == "off" else { return nil }
+            let kind: IMUNCoachActionKind = action == "setWatchHaptics"
+                ? .setWatchHaptics
+                : (action == "setRunVoiceCues" ? .setRunVoiceCues : .setRunAutoLaps)
+            return proposal(kind, "Update training feedback",
+                "Change the selected app preference.", parameter: value)
+        case "selectTraining":
+            guard value == "run" || value == "weightlifting" else { return nil }
+            return proposal(.selectTraining, "Switch Training activity",
+                "Show the selected activity in Training.", parameter: value)
+        case "openTab":
+            guard let value, ["training","progress","health","coach","settings"]
+                .contains(value) else { return nil }
+            return proposal(.openTab, "Open \(value.capitalized)",
+                "Navigate to that app section.", parameter: value)
+        default:
+            return nil
+        }
+    }
+
     private static func containsAny(_ input: String, _ terms: [String]) -> Bool {
         terms.contains { input.contains($0) }
     }
