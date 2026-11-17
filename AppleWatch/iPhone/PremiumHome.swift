@@ -1998,6 +1998,32 @@ private struct HCMetricFamily: Identifiable {
     }
 }
 
+/// Dedicated chart builder avoids a huge SwiftUI type-check expression in
+/// the metric row and keeps a same-source baseline separate from other data.
+private struct HCHealthTrendChart: View {
+    let reading: HCRecoverySignal
+
+    var body: some View {
+        Chart {
+            ForEach(reading.points) { point in
+                LineMark(x: .value("Date", point.date),
+                         y: .value("Reading", point.value))
+                    .foregroundStyle(HCDesign.electric)
+            }
+            if let baseline = reading.baseline {
+                RuleMark(y: .value("Baseline", baseline))
+                    .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 4]))
+                    .foregroundStyle(HCDesign.secondary.opacity(0.75))
+            }
+        }
+        .chartXAxis(.hidden)
+        .chartYAxis(.automatic(desiredCount: 3))
+        .frame(height: 120)
+        .padding(.top, 6)
+        .accessibilityLabel("Recent \(reading.label) from \(reading.source)")
+    }
+}
+
 /// One understated metric surface, with source-attributed readings inside.
 /// Never presents a blended HRV or "combined" sleep value.
 private struct HCMetricFamilyCard: View {
@@ -2074,23 +2100,7 @@ private struct HCMetricFamilyCard: View {
                         }
                     }
                     if expandedTrends.contains(reading.id) && reading.points.count > 1 {
-                        Chart {
-                            ForEach(reading.points) { point in
-                                LineMark(x: .value("Date", point.date),
-                                         y: .value("Reading", point.value))
-                                    .foregroundStyle(HCDesign.electric)
-                            }
-                            if let baseline = reading.baseline {
-                                RuleMark(y: .value("Baseline", baseline))
-                                    .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 4]))
-                                    .foregroundStyle(HCDesign.secondary.opacity(0.75))
-                            }
-                        }
-                        .chartXAxis(.hidden)
-                        .chartYAxis(.automatic(desiredCount: 3))
-                        .frame(height: 120)
-                        .padding(.top, 6)
-                        .accessibilityLabel("Recent \(reading.label) from \(reading.source)")
+                        HCHealthTrendChart(reading: reading)
                     }
                 }
                 .padding(.vertical, 11)
@@ -2180,7 +2190,9 @@ private struct PremiumRecoveryPage: View {
         case "All":
             groupFiltered = signals
         case "Sleep":
-            groupFiltered = signals.filter(isSleepSignal)
+            groupFiltered = signals.filter {
+                HCMetricFamily.familyID($0) == "sleep"
+            }
         case "WHOOP":
             groupFiltered = signals.filter {
                 $0.source.localizedCaseInsensitiveContains("whoop")
