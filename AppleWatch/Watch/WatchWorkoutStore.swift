@@ -352,6 +352,13 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
             DispatchQueue.main.async {
                 self.isUploadingCloudSets = false
                 self.refreshCloudSets()
+                // A correction can arrive while the previous upload is
+                // active. Process it immediately after a successful batch.
+                if !failed && self.undoRecords.contains(where: {
+                    !self.uploadedUndoIDs.contains($0.id)
+                }) {
+                    self.uploadPendingCloudSets()
+                }
             }
         }
     }
@@ -396,6 +403,22 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
               !allUndoRecords.contains(where: { $0.applies(to: entry) })
         else { return }
         appendUndo(HCWorkoutUndo.set(entry), forwardToPhone: true)
+        if var clock = liftClock, clock.isActive, clock.setStartedAt == nil {
+            // Return to the corrected set rather than remaining on a later
+            // queued set or an unrelated rest countdown.
+            clock.restEndsAt = nil
+            liftClock = clock
+            save(clock, name: "lifting-clock.json")
+            let choice = HCGuidedSetChoice(exerciseID: entry.exerciseID,
+                                          setNumber: entry.index)
+            selectedGuidedSet = choice
+            guidedExerciseID = entry.exerciseID
+            queuedNextGuidedSet = nil
+            save(choice, name: "guided-set-selection.json")
+            save(entry.exerciseID, name: "guided-exercise-id.json")
+            try? FileManager.default.removeItem(
+                at: directory.appendingPathComponent("queued-guided-set.json"))
+        }
         status = "Set undone · sync pending"
     }
 
@@ -407,6 +430,9 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
         selectedGuidedSet = nil
         queuedNextGuidedSet = nil
         guidedExerciseID = workout.exercises.first?.id
+        if let first = guidedExerciseID {
+            save(first, name: "guided-exercise-id.json")
+        }
         for file in ["lifting-clock.json", "guided-set-selection.json",
                      "queued-guided-set.json"] {
             try? FileManager.default.removeItem(at: directory.appendingPathComponent(file))
