@@ -40,12 +40,35 @@ both iPhone and watchOS CI checks are successful and the branch is merged to mai
 ## Phase 44 — EITAN identity for Watch Home
 - Watch opening tile is full-width rather than cramped beside a sets graphic.
 - **EITAN** (ay-TAHN; אֵיתָן) is a genuine Biblical Hebrew word associated with endurance, firmness and strength. It is an iMun score name, not the literal Hebrew word for readiness.
-- Watch subtitle: **TRAINING MOMENTUM**. The detail screen explains the authentic Hebrew name,
-  measured components, reference targets, and what happens when data is missing.
-- Score is a descriptive activity-momentum indicator, not a medical readiness
-  prediction; it never counts missing Health readings as zero.
+- Watch subtitle: **BODY WELLNESS** by default, or **TRAINING MOMENTUM** when Health is excluded.
+- Opt-in/opt-out switches in iPhone Settings independently control displaying EITAN,
+  using Health data for its score, and enabling IsAIah recovery suggestions. Preferences
+  sync to the Watch. Disabling Health clears the compact wellness snapshot on Watch.
+- On-device EITAN uses recorded sleep duration, source/method-specific HRV compared
+  with personal baselines, resting or daily-low HR, respiratory and wrist-temperature
+  trends, recent activity volume and training balance. Incompatible SDNN/RMSSD
+  readings are never averaged. Other authorized Health metrics remain visible in
+  the Health tab but do not arbitrarily alter a wellness score.
+- Require two physiological signals and a personal-baseline trend before showing
+  a wellness number. Missing/old signals are excluded rather than counted as zero.
+- IsAIah can recommend training as normal, more recovery between sets, easier running,
+  or optional rest and plan adjustments. Three consecutively low score days require
+  genuinely fresh daily physiological observations, not reuse of one old measurement.
+  The Today check-in can be dismissed for the day; changes still require approval.
+- No raw Health snapshot is sent to the AI backend until the athlete explicitly
+  enables Health sharing in the IsAIah composer and taps Send. No workout is
+  automatically altered or marked complete on the basis of EITAN.
+- EITAN is an experimental observational wellness estimate, NOT a clinical,
+  injury-risk, or validated readiness prediction.
 - [ ] Watch Home EITAN typography fits smallest supported display
-- [ ] Score details explain each component and source; no bogus ready/not-ready claim
+- [ ] EITAN Health OFF excludes sleep/HRV/resting HR and still displays training-only mode
+- [ ] EITAN display OFF hides the tile on Watch and Today; changing either switch
+      clears stale transferred wellness data on Watch
+- [ ] Same-source baselines and low-day streak require fresh comparable records
+- [ ] No fake numbers for missing Health permissions or insufficient personal baseline
+- [ ] IsAIah push vs recovery suggestions vary appropriately, with user approval
+- [ ] Dismiss the multi-day low score nudge for one day, with no forced rest
+- [ ] Coach Health context only shared after separate user consent and Send
 
 ## Phase 44 — Widgets and premium iOS integration
 - Embedded WidgetKit app extension includes small/medium Today Home Screen
