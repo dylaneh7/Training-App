@@ -1432,6 +1432,34 @@ private actor HCWatchCloudFallback {
         return data
     }
 
+    func fetchWorkoutUndos(for workout: HCWorkout) async throws -> [HCWorkoutUndo] {
+        let session = try await authorized()
+        let response = try await request(
+            path: "/rest/v1/health_coach_workout_undos",
+            query: [
+                URLQueryItem(name: "select", value:
+                    "id,kind,set_id,workout_date,session_key,window_started_at,window_ended_at,created_at"),
+                URLQueryItem(name: "user_id", value: "eq." + session.userID),
+                URLQueryItem(name: "workout_date", value: "eq." + workout.date),
+                URLQueryItem(name: "session_key", value: "eq." + workout.sessionKey),
+                URLQueryItem(name: "limit", value: "500")
+            ], bearer: session.access)
+        guard let rows = try JSONSerialization.jsonObject(with: response) as? [[String: Any]]
+        else { throw HCWatchCloudError.malformed }
+        return HCWorkoutUndo.decodeCloudRows(rows)
+    }
+
+    func recordWorkoutUndo(_ undo: HCWorkoutUndo) async throws {
+        let session = try await authorized()
+        let response = try await request(
+            path: "/rest/v1/rpc/imun_undo_workout_record",
+            method: "POST", json: undo.apiPayload,
+            bearer: session.access)
+        guard let ok = (try? JSONSerialization.jsonObject(
+            with: response, options: .fragmentsAllowed)) as? Bool,
+              ok else { throw HCWatchCloudError.malformed }
+    }
+
     func fetchCompletedSets(for workout: HCWorkout) async throws -> [HCLoggedSet] {
         let session = try await authorized()
         let data = try await request(path: "/rest/v1/health_coach_watch_sets",
