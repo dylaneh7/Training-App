@@ -844,8 +844,9 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
     /// A single serialized queue prevents older plans from winning races.
     private func publishTodayToCloud() {
         guard signedIn, confirmedScheduleDate == HCPlanBuilder.dateString(Date()) else { return }
+        guard let date = confirmedScheduleDate else { return }
         let snapshot = HCWatchSchedule(
-            date: confirmedScheduleDate!,
+            date: date,
             workout: workout?.date == confirmedScheduleDate ? workout : nil,
             runPlan: runPlan?.date == confirmedScheduleDate ? runPlan : nil,
             generatedAt: Date(), state: "ready")
@@ -898,10 +899,15 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
             connection.activate()
             return
         }
+        // Developer-installed watchOS builds can have a stale companion
+        // registration indicator. Do not present it as proof of installation
+        // or make it a prerequisite for scheduled cloud workouts.
         watchConnectionDetails =
             "Paired: " + (connection.isPaired ? "Yes" : "No") +
-            " · iMun Watch installed: " + (connection.isWatchAppInstalled ? "Yes" : "No") +
-            " · Live reachable: " + (connection.isReachable ? "Yes" : "No")
+            " · Companion registration: " +
+                (connection.isWatchAppInstalled ? "Recognized" : "Not confirmed") +
+            " · Live messaging: " + (connection.isReachable ? "Available" : "Unavailable") +
+            " · Cloud schedule independent"
     }
 
     /// A context update is a *pending delivery*, not proof of Watch receipt.
