@@ -1908,6 +1908,117 @@ private struct HCRecoverySignal: Identifiable {
     }
 }
 
+/// Display identity only. These groups NEVER combine physiologically
+/// different HRV measurement methods or merge samples across providers.
+private struct HCMetricFamily: Identifiable {
+    let id: String
+    let title: String
+    let readings: [HCRecoverySignal]
+
+    var alerts: Int { readings.filter { $0.severity > 0 && $0.baseline != nil }.count }
+    var isHRV: Bool { id == "hrv" }
+    var sourceCount: Int {
+        Set(readings.map { Self.sourceKey($0.source) }).count
+    }
+
+    static func sourceKey(_ name: String) -> String {
+        let value = name.lowercased()
+        if value.contains("whoop") { return "whoop" }
+        if value.contains("apple watch") || value.contains("watch ultra") ||
+           value.contains("watch series") { return "apple-watch" }
+        if value.contains("garmin") { return "garmin" }
+        return value.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    static func sourceName(_ name: String) -> String {
+        switch sourceKey(name) {
+        case "whoop": return "WHOOP"
+        case "apple-watch": return "Apple Watch"
+        case "garmin": return "Garmin"
+        default: return name
+        }
+    }
+
+    static func method(_ signal: HCRecoverySignal) -> String {
+        guard familyID(signal) == "hrv" else { return signal.label }
+        let label = signal.label.lowercased()
+        if label.contains("rmssd") { return "RMSSD" }
+        if label.contains("sdnn") { return "SDNN" }
+        return "Unspecified HRV method"
+    }
+
+    static func familyID(_ signal: HCRecoverySignal) -> String {
+        let text = signal.label.lowercased()
+        if text.contains("hrv") || text.contains("heart rate variability") {
+            return "hrv"
+        }
+        if text.contains("sleep") || text.contains("asleep") { return "sleep" }
+        if text.contains("resting heart") { return "resting-heart-rate" }
+        if text.contains("daily low hr") { return "daily-low-heart-rate" }
+        if text.contains("respiratory rate") { return "respiratory-rate" }
+        if text.contains("blood oxygen") || text.contains("oxygen saturation") ||
+           text.contains("spo2") { return "blood-oxygen" }
+        if text == "steps" || text == "step count" { return "steps" }
+        if text == "heart rate" { return "heart-rate" }
+        return "metric:" + text.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    static func familyTitle(_ id: String, first: HCRecoverySignal) -> String {
+        switch id {
+        case "hrv": return "Heart rate variability"
+        case "sleep": return "Sleep"
+        case "resting-heart-rate": return "Resting heart rate"
+        case "daily-low-heart-rate": return "Daily low heart rate"
+        case "respiratory-rate": return "Respiratory rate"
+        case "blood-oxygen": return "Blood oxygen"
+        case "steps": return "Steps"
+        case "heart-rate": return "Heart rate"
+        default: return first.label
+        }
+    }
+
+    static func build(from signals: [HCRecoverySignal]) -> [HCMetricFamily] {
+        let families = Dictionary(grouping: signals, by: familyID)
+        return families.compactMap { id, values -> HCMetricFamily? in
+            // One row per canonical source *and method*. Repeated data flows
+            // (e.g. WHOOP via HealthKit and a saved WHOOP snapshot) do not
+            // produce duplicate cards or indistinguishable source rows.
+            let bySourceAndMethod = Dictionary(grouping: values) {
+                sourceKey($0.source) + "|" +
+                (id == "hrv" ? method($0).lowercased() : "reading")
+            }
+            let entries = bySourceAndMethod.values.compactMap { duplicates in
+                duplicates.sorted {
+                    if $0.date != $1.date { return $0.date > $1.date }
+                    if $0.points.count != $1.points.count {
+                        return $0.points.count > $1.points.count
+                    }
+                    if ($0.baseline != nil) != ($1.baseline != nil) {
+                        return $0.baseline != nil
+                    }
+                    return $0.label.localizedStandardCompare($1.label) == .orderedAscending
+                }.first
+            }.sorted {
+                let leftSource = sourceName($0.source)
+                let rightSource = sourceName($1.source)
+                if leftSource != rightSource { return leftSource < rightSource }
+                return method($0) < method($1)
+            }
+            guard let first = entries.first else { return nil }
+            return HCMetricFamily(id: id, title: familyTitle(id, first: first),
+                                  readings: entries)
+        }.sorted { lhs, rhs in
+            let order = [
+                "sleep", "hrv", "resting-heart-rate", "respiratory-rate",
+                "blood-oxygen", "daily-low-heart-rate", "steps", "heart-rate"
+            ]
+            let left = order.firstIndex(of: lhs.id) ?? 100
+            let right = order.firstIndex(of: rhs.id) ?? 100
+            return left == right ? lhs.title < rhs.title : left < right
+        }
+    }
+}
+
 private struct PremiumRecoveryPage: View {
     @EnvironmentObject private var coach: PhoneWorkoutBridge
     @ObservedObject var appleHealth: HCAppleHealthReader
