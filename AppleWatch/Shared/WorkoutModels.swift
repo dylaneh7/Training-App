@@ -225,7 +225,7 @@ struct HCEitanSnapshot: Codable {
     let sourceCount: Int
     let coverage: String
 
-    var isLow: Bool { (value ?? 100) < 50 }
+    var isLow: Bool { (value ?? 100) < 60 }
     var needsRecoveryConversation: Bool { consecutiveLowDays >= 3 }
 
     // Not a medical or injury-risk prediction. The coach must ask before
@@ -234,16 +234,16 @@ struct HCEitanSnapshot: Codable {
         guard let score else {
             return "More recent, comparable health readings are needed before EITAN can guide today's training."
         }
-        if streak >= 3 && score < 50 {
+        if streak >= 3 && score < 60 {
             return "Several days of lower wellness trends: consider a recovery day, extra sleep, gentle mobility, or asking IsAIah to adjust your plan."
         }
         if score < 35 {
             return "Consider an easy day or rest. If lifting, reduce intensity and take 60–90 seconds longer between sets; if running, choose easy effort."
         }
-        if score < 50 {
+        if score < 60 {
             return "Consider a lighter session: add 30–60 seconds between lifting sets or lower your running intensity. Recovery matters."
         }
-        if score < 70 {
+        if score < 75 {
             return "Follow your plan at a comfortable effort, and adjust for fatigue or how you feel."
         }
         return "Your recent wellness trends look steady. You can follow your training plan and progress when form and effort support it."
