@@ -294,6 +294,8 @@ struct PremiumHomeView: View {
     @AppStorage("hcDesignShape") private var designCardShape = "rounded"
     @AppStorage("hcDesignFont") private var designFont = "standard"
     @AppStorage("hcDesignCustomGeometry") private var designCustomGeometry = false
+    @AppStorage("hcWidgetShareHealth") private var shareWidgetHealth = false
+    @AppStorage("hcLiveActivitiesEnabled") private var enableLiveActivities = true
     @Environment(\.scenePhase) private var scenePhase
     private let scheduleRefresh = Timer.publish(every: 60, on: .main, in: .common).autoconnect()
     // Network polling should never be a 15-second render interruption on Health/Progress.
@@ -352,6 +354,16 @@ struct PremiumHomeView: View {
         isIsaiahPresented = true
     }
 
+    private func publishWidgets() {
+        IMUNWidgetPublisher.publish(coach: coach,
+                                    health: appleHealth,
+                                    allowHealth: shareWidgetHealth)
+    }
+    private func updateLiveWorkout() {
+        IMUNLiveWorkoutController.synchronize(coach: coach,
+                                             enabled: enableLiveActivities)
+    }
+
     var body: some View {
         TabView(selection: $selectedTab) {
             NavigationStack { IMUNTodayPage(appleHealth: appleHealth) }
@@ -401,6 +413,26 @@ struct PremiumHomeView: View {
             .presentationDetents([.large])
             .presentationDragIndicator(.visible)
         }
+        .onOpenURL { url in
+            guard url.scheme == "imun" else { return }
+            let destination = url.host ?? ""
+            if destination == "today" || destination == "training" ||
+               destination == "health" || destination == "progress" {
+                selectedTab = destination
+            }
+        }
+        .onReceive(coach.objectWillChange) { _ in
+            // Publish after @Published has committed new values.
+            DispatchQueue.main.async {
+                publishWidgets()
+                updateLiveWorkout()
+            }
+        }
+        .onReceive(appleHealth.$metrics) { _ in
+            DispatchQueue.main.async { publishWidgets() }
+        }
+        .onChange(of: shareWidgetHealth) { _, _ in publishWidgets() }
+        .onChange(of: enableLiveActivities) { _, _ in updateLiveWorkout() }
         .onChange(of: selectedTab) { _, tab in
             if tab == "progress" && coach.signedIn {
                 coach.refreshCloudProgress()
@@ -455,6 +487,8 @@ struct PremiumHomeView: View {
             if coach.signedIn { coach.refreshCloudProgress() }
             configureTabAppearance()
             if tredictPlans.connected { tredictPlans.refresh() }
+            publishWidgets()
+            updateLiveWorkout()
         }
     }
 
@@ -4389,6 +4423,8 @@ private struct PremiumSettingsPage: View {
     @AppStorage("hcAggressiveProgression") private var aggressive = true
     @AppStorage("hcCoachingNotes") private var notes = ""
     @AppStorage("hcIncludeRecoveryExport") private var includeRecovery = false
+    @AppStorage("hcWidgetShareHealth") private var shareWidgetHealth = false
+    @AppStorage("hcLiveActivitiesEnabled") private var enableLiveActivities = true
     @AppStorage("hcAccentStyle") private var accentStyle = "crimson"
     @AppStorage("hcDesignPreset") private var designPreset = "techno"
     @AppStorage("hcMotivationSource") private var motivationSource = "off"
@@ -4457,7 +4493,36 @@ private struct PremiumSettingsPage: View {
                             .font(.caption2).foregroundStyle(HCDesign.secondary)
                     }
                 }
-                HCSectionTitle(title: "Identity", detail: "Your look & your mindset")
+                HCSectionTitle(title: "Home & Lock Screen", detail: "Widgets and live workouts")
+                HCCard {
+                    VStack(alignment: .leading, spacing: 13) {
+                        Toggle(isOn: $enableLiveActivities) {
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text("Live workout activity")
+                                    .font(.system(size: 14, weight: .semibold))
+                                Text("Show active workout and rest timer on the Lock Screen and Dynamic Island.")
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(HCDesign.secondary)
+                            }
+                        }
+                        .tint(HCDesign.electric)
+                        Divider()
+                        Toggle(isOn: $shareWidgetHealth) {
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text("Show health data in widgets")
+                                    .font(.system(size: 14, weight: .semibold))
+                                Text("Opt in to show source-labeled sleep and HRV on the Home Screen widget. Off by default.")
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(HCDesign.secondary)
+                            }
+                        }
+                        .tint(HCDesign.electric)
+                        Text("Add iMun Today from iPhone's widget gallery. Tap the widget to open Today.")
+                            .font(.system(size: 11))
+                            .foregroundStyle(HCDesign.secondary)
+                    }
+                }
+                                HCSectionTitle(title: "Identity", detail: "Your look & your mindset")
                 NavigationLink {
                     IMUNDesignStudioPage()
                 } label: {
