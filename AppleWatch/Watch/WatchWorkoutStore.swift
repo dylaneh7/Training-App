@@ -1570,7 +1570,7 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
                 let manual = self.pendingManualScheduleRequest
                 self.pendingManualScheduleRequest = false
                 self.requestCurrentSchedule(manual: manual)
-                self.requestEitanSync()
+                self.requestEitanSync(manual: false)
             }
         } else if let error {
             DispatchQueue.main.async { self.status = error.localizedDescription }
@@ -1589,14 +1589,17 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
                     active: self.liftClock?.isActive == true)
             }
             self.requestCurrentSchedule()
-            self.requestEitanSync()
+            self.requestEitanSync(manual: false)
         }
     }
 
     func session(_ session: WCSession, didReceiveApplicationContext context: [String: Any]) {
         DispatchQueue.main.async {
             self.applyContext(context)
-            if let stamp = context[HCPayload.eitanStamp] as? Double {
+            if let stamp = context[HCPayload.eitanStamp] as? Double,
+               self.applyEitanPacket(context) {
+                // Acknowledge only AFTER the payload decoded and its date was
+                // validated. An app context update isn't inherently a success.
                 self.acknowledgeEitanIfReachable(stamp)
             }
         }
@@ -1655,11 +1658,11 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
         if userInfo[HCPayload.kind] as? String == HCPayload.eitanSync {
             DispatchQueue.main.async {
                 guard self.applyEitanPacket(userInfo) else { return }
-                session.transferUserInfo([
-                    HCPayload.kind: HCPayload.eitanReceipt,
-                    HCPayload.eitanStamp:
-                        userInfo[HCPayload.eitanStamp] as? Double ?? 0
-                ])
+                // An older build might still have EITAN userInfo in flight.
+                // Do not enqueue yet another background receipt that will
+                // itself time out; use a small interactive acknowledgment.
+                self.acknowledgeEitanIfReachable(
+                    userInfo[HCPayload.eitanStamp] as? Double ?? 0)
             }
             return
         }
