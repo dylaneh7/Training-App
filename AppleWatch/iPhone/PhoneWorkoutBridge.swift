@@ -10,6 +10,8 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
     @Published private(set) var preferredTredictRunID: String?
     @Published private(set) var loggedSets: [HCLoggedSet] = []
     @Published private(set) var cloudRecordedSets: [HCLoggedSet] = []
+    @Published private(set) var undoRecords: [HCWorkoutUndo] = []
+    @Published private(set) var cloudUndoRecords: [HCWorkoutUndo] = []
     @Published private(set) var progressSyncStatus = "Progress saved locally"
     @Published private(set) var completedWatchRuns: [HCRunFinished] = []
     @Published private(set) var runHistory: [HCProgressRun] = []
@@ -57,6 +59,7 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
     private var uploadedIDs: Set<UUID> = []
+    private var uploadedUndoIDs: Set<UUID> = []
     private var syncingQueue = false
     private var fetchingProgress = false
     private var pendingEditedWorkout: HCWorkout?
@@ -125,6 +128,8 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
     override init() {
         super.init()
         loggedSets = read("health-coach-watch-sets.json") ?? []
+        undoRecords = read("imun-workout-undos.json") ?? []
+        uploadedUndoIDs = Set(read("imun-uploaded-undo-ids.json") ?? [])
         lastArchiveAt = read("imun-source-archive-date.json")
         plannedSessions = read("imun-planned-workouts.json") ?? []
         cloudTrainingActivities = read("imun-training-activity-history.json") ?? []
@@ -1329,8 +1334,13 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
 
     /// All raw device records remain available for corrections and exports,
     /// but only one dated prescribed set slot counts toward progress.
+    var combinedUndoRecords: [HCWorkoutUndo] {
+        HCWorkoutUndo.merged(local: undoRecords, cloud: cloudUndoRecords)
+    }
+
     var combinedRecordedSets: [HCLoggedSet] {
-        HCSetReconciliation.allRecords(local: loggedSets, cloud: cloudRecordedSets)
+        HCSetReconciliation.allRecords(local: loggedSets, cloud: cloudRecordedSets,
+                                      undos: combinedUndoRecords)
     }
 
     func completedSets(for plan: HCWorkout) -> [HCLoggedSet] {
@@ -1344,10 +1354,12 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
         fetchingProgress = true
         Task {
             do {
+                let undoEntries = try await cloud.fetchWorkoutUndos(for: requested)
                 let entries = try await cloud.fetchCompletedSets(for: requested)
                 DispatchQueue.main.async {
                     self.fetchingProgress = false
                     guard self.workout?.id == requested.id else { return }
+                    self.cloudUndoRecords = undoEntries
                     self.cloudRecordedSets = entries
                     self.progressSyncStatus = "Phone and Watch progress synced"
                 }
@@ -1383,7 +1395,9 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
     }
 
     func correctLoggedSet(id: UUID, weightLb: Double?, reps: Int, rir: Double?) {
-        guard reps > 0, reps <= 300, let index=loggedSets.firstIndex(where:{$0.id==id}),
+        guard reps > 0, reps <= 300,
+              !combinedUndoRecords.contains(where: { $0.setID == id }),
+              let index=loggedSets.firstIndex(where:{$0.id==id}),
               weightLb == nil || (weightLb! >= 0 && weightLb! <= 3000),
               rir == nil || (rir! >= 0 && rir! <= 10)
         else { return }
@@ -1417,16 +1431,68 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
     }
 
     private func updatePendingCount() {
-        cloudPendingCount = loggedSets.filter { !uploadedIDs.contains($0.id) }.count +
-            completedWatchRuns.filter { !uploadedIDs.contains($0.id) }.count
+        cloudPendingCount = loggedSets.filter {
+            !uploadedIDs.contains($0.id) &&
+            !combinedUndoRecords.contains(where: { undo in undo.applies(to: $0) })
+        }.count +
+            completedWatchRuns.filter { !uploadedIDs.contains($0.id) }.count +
+            undoRecords.filter { !uploadedUndoIDs.contains($0.id) }.count
     }
 
     private func acceptSet(_ entry: HCLoggedSet) {
-        guard !loggedSets.contains(where:{$0.id == entry.id}) else { return }
+        guard !loggedSets.contains(where: { $0.id == entry.id }),
+              !combinedUndoRecords.contains(where: { $0.applies(to: entry) })
+        else { return }
         loggedSets.append(entry)
         save(loggedSets,name:"health-coach-watch-sets.json")
         updatePendingCount()
         status = "Set saved locally"
+        retryPendingCloudSets()
+        refreshCloudProgress()
+    }
+
+    var lastUndoableSet: HCLoggedSet? {
+        guard let plan = workout else { return nil }
+        return completedSets(for: plan).max(by: { $0.completedAt < $1.completedAt })
+    }
+
+    /// Reverse a logged set, including one received from the Apple Watch.
+    /// Undo is applied locally immediately and then synced idempotently.
+    func undoSet(_ id: UUID) {
+        guard let entry = combinedRecordedSets.first(where: { $0.id == id }),
+              !combinedUndoRecords.contains(where: { $0.applies(to: entry) })
+        else { return }
+        appendUndo(HCWorkoutUndo.set(entry), forwardToWatch: true)
+        status = "Set undone. Syncing the correction…"
+    }
+
+    /// Undo the active timer and ONLY the sets logged during this session.
+    /// The prescribed workout remains available to start again.
+    func undoPhoneWorkout() {
+        guard let startedAt = phoneSessionStartedAt, let plan = workout,
+              plan.date == HCPlanBuilder.dateString(Date()) else { return }
+        let correction = HCWorkoutUndo.workout(plan, startedAt: startedAt)
+        cancelPhoneSet()
+        phoneSessionStartedAt = nil
+        phoneRestEndsAt = nil
+        try? FileManager.default.removeItem(at: local("iphone-session-start.json"))
+        try? FileManager.default.removeItem(at: local("iphone-rest-end.json"))
+        appendUndo(correction, forwardToWatch: true)
+        status = "Workout undone. The plan is ready to start again."
+    }
+
+    private func appendUndo(_ undo: HCWorkoutUndo, forwardToWatch: Bool) {
+        guard !undoRecords.contains(where: { $0.id == undo.id }) else { return }
+        undoRecords.append(undo)
+        save(undoRecords, name: "imun-workout-undos.json")
+        updatePendingCount()
+        if forwardToWatch, WCSession.isSupported(),
+           WCSession.default.activationState == .activated,
+           let data = try? encoder.encode(undo) {
+            WCSession.default.transferUserInfo([
+                HCPayload.kind: HCPayload.workoutUndo, HCPayload.data: data
+            ])
+        }
         retryPendingCloudSets()
         refreshCloudProgress()
     }
@@ -1444,16 +1510,32 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
 
     func retryPendingCloudSets() {
         guard signedIn, !syncingQueue else { return }
-        let pendingSets = loggedSets.filter { !uploadedIDs.contains($0.id) }
+        let pendingUndo = undoRecords.filter { !uploadedUndoIDs.contains($0.id) }
+        let pendingSets = loggedSets.filter { entry in
+            !uploadedIDs.contains(entry.id) &&
+            !combinedUndoRecords.contains(where: { $0.applies(to: entry) })
+        }
         let pendingRuns = completedWatchRuns.filter { !uploadedIDs.contains($0.id) }
-        guard !pendingSets.isEmpty || !pendingRuns.isEmpty else { return }
+        guard !pendingUndo.isEmpty || !pendingSets.isEmpty || !pendingRuns.isEmpty else { return }
         syncingQueue = true
         Task {
             var errorMessage: String?
             var savedIDs:[UUID] = []
-            for s in pendingSets {
-                do { try await cloud.upload(s); savedIDs.append(s.id) }
-                catch { errorMessage=error.localizedDescription; break }
+            var confirmedUndoIDs:[UUID] = []
+            for item in pendingUndo {
+                do {
+                    try await cloud.recordWorkoutUndo(item)
+                    confirmedUndoIDs.append(item.id)
+                } catch {
+                    errorMessage = error.localizedDescription
+                    break
+                }
+            }
+            if errorMessage == nil {
+                for s in pendingSets {
+                    do { try await cloud.upload(s); savedIDs.append(s.id) }
+                    catch { errorMessage=error.localizedDescription; break }
+                }
             }
             if errorMessage == nil {
                 for r in pendingRuns {
@@ -1463,6 +1545,8 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
             }
             DispatchQueue.main.async {
                 self.uploadedIDs.formUnion(savedIDs)
+                self.uploadedUndoIDs.formUnion(confirmedUndoIDs)
+                self.save(Array(self.uploadedUndoIDs), name: "imun-uploaded-undo-ids.json")
                 self.save(Array(self.uploadedIDs),name:"uploaded-watch-set-ids.json")
                 self.updatePendingCount()
                 self.syncingQueue = false
