@@ -2579,6 +2579,10 @@ private struct PremiumCoachConversation: View {
     @State private var turns: [IMUNCoachTurn] = []
     @State private var isSending = false
     @State private var errorMessage: String?
+    @State private var pendingAction: IMUNCoachActionProposal?
+    @State private var selectedActionWorkoutID = ""
+    @State private var actionMoveDate = Date()
+    @AppStorage("hcDesignPreset") private var designPreset = "techno"
 
     private var context: String {
         turns.suffix(6).map { turn in
@@ -2638,6 +2642,10 @@ private struct PremiumCoachConversation: View {
                         suggestion("What's my focus this week?")
                         suggestion("How can I improve my running?")
                         suggestion("How are my workouts progressing?")
+                        suggestion("Move tomorrow's workout to Friday")
+                        suggestion("Mark today's run complete")
+                        suggestion("Sync today's workout to my Watch")
+                        suggestion("Change the theme to Heritage")
                     }
                     .padding(.vertical, 10)
                 } else {
@@ -2725,6 +2733,56 @@ private struct PremiumCoachConversation: View {
                     .accessibilityLabel("Send your question")
                 }
 
+                if let action = pendingAction {
+                    HCCard(accent: HCDesign.electric) {
+                        VStack(alignment: .leading, spacing: 12) {
+                            Label("REVIEW APP CHANGE", systemImage: "checkmark.shield")
+                                .font(HCDesign.label(11))
+                                .foregroundStyle(HCDesign.electric)
+                            Text(action.title)
+                                .font(HCDesign.display(20))
+                                .foregroundStyle(HCDesign.ink)
+                            Text(action.explanation)
+                                .font(.caption)
+                                .foregroundStyle(HCDesign.secondary)
+                            if action.kind == .moveWorkout {
+                                Picker("Workout to move", selection: $selectedActionWorkoutID) {
+                                    Text("Choose a workout").tag("")
+                                    ForEach(coach.plannedSessions) { item in
+                                        Text("\(item.date) · \(item.title)")
+                                            .tag(item.id)
+                                    }
+                                }
+                                .tint(HCDesign.aqua)
+                                DatePicker("Move to", selection: $actionMoveDate,
+                                           displayedComponents: .date)
+                                    .tint(HCDesign.aqua)
+                            }
+                            HStack(spacing: 10) {
+                                Button("Cancel") {
+                                    pendingAction = nil
+                                }
+                                .buttonStyle(.bordered)
+                                .tint(HCDesign.secondary)
+                                Button("Confirm action") {
+                                    confirmAction(action)
+                                }
+                                .buttonStyle(.borderedProminent)
+                                .tint(HCDesign.electric)
+                                .disabled(action.kind == .moveWorkout &&
+                                    (selectedActionWorkoutID.isEmpty ||
+                                     coach.movingWorkoutID != nil ||
+                                     coach.plannedSessions.first(where: {
+                                        $0.id == selectedActionWorkoutID
+                                     })?.date == HCPlanBuilder.dateString(actionMoveDate)))
+                            }
+                            Text("Coach never executes an app change from generated text alone.")
+                                .font(.caption2)
+                                .foregroundStyle(HCDesign.secondary)
+                        }
+                    }
+                }
+
                 if composerFocused {
                     Button("Done typing") {
                         composerFocused = false
@@ -2806,9 +2864,68 @@ private struct PremiumCoachConversation: View {
         }
     }
 
+    private func confirmAction(_ action: IMUNCoachActionProposal) {
+        guard coach.signedIn else {
+            errorMessage = "Sign in to iMun before changing your workouts."
+            return
+        }
+        switch action.kind {
+        case .moveWorkout:
+            guard let workout = coach.plannedSessions.first(where: {
+                $0.id == selectedActionWorkoutID
+            }), workout.date != HCPlanBuilder.dateString(actionMoveDate) else {
+                errorMessage = "Select an existing session and a different date."
+                return
+            }
+            coach.moveWorkout(workout, to: actionMoveDate)
+            turns.append(IMUNCoachTurn(role: "assistant", text:
+                "Requested calendar move for \(workout.title) to \(HCPlanBuilder.dateString(actionMoveDate)). The calendar updates only when the server confirms it."))
+        case .completeRun:
+            guard let run = coach.runPlan, run.id == action.suggestedWorkoutID,
+                  run.date == HCPlanBuilder.dateString(Date()),
+                  !run.isCompleted else {
+                errorMessage = "The run has changed or is already complete. Refresh Training."
+                return
+            }
+            coach.setRunManuallyCompleted(true)
+            turns.append(IMUNCoachTurn(role: "assistant", text:
+                "Recorded your confirmation that today's run was completed. No sensor measurements were added."))
+        case .syncWatch:
+            coach.refreshAndSendToWatch()
+            turns.append(IMUNCoachTurn(role: "assistant", text:
+                "Requested a refreshed phone and cloud workout schedule for iMun Watch."))
+        case .setTheme:
+            guard let theme = action.themeID,
+                  IMUNPreset(rawValue: theme) != nil else {
+                errorMessage = "The requested theme is not available."
+                return
+            }
+            designPreset = theme
+            turns.append(IMUNCoachTurn(role: "assistant", text:
+                "Changed iMun's appearance preset to \(IMUNPreset(rawValue: theme)!.title)."))
+        }
+        pendingAction = nil
+        errorMessage = nil
+        persist()
+    }
+
     private func send() {
         let questionText = question.trimmingCharacters(in: .whitespacesAndNewlines)
         guard canSend else { return }
+        if let proposed = IMUNCoachActionInterpreter.propose(
+            questionText, sessions: coach.plannedSessions, run: coach.runPlan) {
+            question = ""
+            composerFocused = false
+            errorMessage = nil
+            turns.append(IMUNCoachTurn(role: "user", text: questionText))
+            turns.append(IMUNCoachTurn(role: "assistant",
+                                      text: "I found an app action for that request. Review the exact change below before confirming."))
+            pendingAction = proposed
+            selectedActionWorkoutID = proposed.suggestedWorkoutID ?? ""
+            actionMoveDate = proposed.suggestedDate ?? Date()
+            persist()
+            return
+        }
         let history = context
         question = ""
         composerFocused = false
