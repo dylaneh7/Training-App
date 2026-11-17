@@ -188,8 +188,13 @@ enum IMUNCoachActionInterpreter {
            (hasExerciseIntent || containsAny(value,
               ["edit my workout", "edit today's workout", "edit workout",
                "change my workout", "modify my workout"])) {
+            let isChangingSetCount = matchedExercise != nil &&
+                (value.contains("set") || value.contains("rep")) &&
+                !containsAny(value, ["add exercise", "remove exercise",
+                                     "replace exercise", "swap exercise"])
             let operation: IMUNCoachExerciseOperation
-            if containsAny(value, ["remove ", "delete "]) { operation = .remove }
+            if isChangingSetCount { operation = .update }
+            else if containsAny(value, ["remove ", "delete "]) { operation = .remove }
             else if containsAny(value, ["swap ", "replace "]) { operation = .replace }
             else if containsAny(value, ["add ", "insert "]) { operation = .add }
             else if containsAny(value, ["move ", "reorder "]) {
@@ -197,6 +202,19 @@ enum IMUNCoachActionInterpreter {
                     .moveDown : .moveUp
             } else { operation = .update }
             let targets = extractTargets(value)
+            // "Add 2 sets" means change the current count, not add a movement.
+            let relativeAddition = capture(value,
+                pattern: #"\b(?:add|increase\s+by)\s+(\d{1,2})\s+sets?\b"#,
+                group: 1).flatMap(Int.init)
+            let relativeRemoval = capture(value,
+                pattern: #"\b(?:remove|reduce\s+by|subtract)\s+(\d{1,2})\s+sets?\b"#,
+                group: 1).flatMap(Int.init)
+            let relativeSets = matchedExercise.flatMap { exercise -> Int? in
+                let delta = relativeAddition ?? relativeRemoval.map { -$0 }
+                guard let delta,
+                      (1...12).contains(exercise.prescribedSets + delta) else { return nil }
+                return exercise.prescribedSets + delta
+            }
             let candidateName: String? = {
                 if let matchedExercise { return matchedExercise.name }
                 guard operation == .add || operation == .replace else { return nil }
@@ -215,7 +233,7 @@ enum IMUNCoachActionInterpreter {
                 workoutID: workout?.id,
                 workoutEdit: IMUNCoachWorkoutEditHint(
                     operation: operation, exerciseName: candidateName,
-                    newName: replacementName, sets: targets.sets, repMin: targets.repMin,
+                    newName: replacementName, sets: relativeSets ?? targets.sets, repMin: targets.repMin,
                     repMax: targets.repMax, restSeconds: targets.rest,
                     weightLb: targets.weight))
         }
