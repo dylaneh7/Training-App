@@ -408,14 +408,15 @@ enum IMUNCoachActionInterpreter {
         return """
         Classify the user's iMun app-control request. You are a classifier,
         NOT an executor. Return ONLY a compact JSON object. No markdown.
-        Choose "action" from:
-        moveWorkout, completeRun, completeScheduledWorkout, syncWatch,
-        setTheme, createStrength, createRun, renameStrength, selectTraining,
-        openTab, setMotivation, setRestDuration, setWatchHaptics,
-        setRunVoiceCues, setRunAutoLaps, none.
-        Return {"action":"none"} if the user is asking for advice, information,
-        medical interpretation, or something outside those exact capabilities.
-        Other optional fields: "parameter" string and "minutes" integer.
+        Valid registered actions and their exact effects:
+        \(IMUNCoachActionCatalog.modelAllowlist)
+        Use action="none" when the request is advice, medical interpretation,
+        an unsupported operation or a health data edit you cannot authorize.
+        Other optional fields: "parameter" string, "minutes" integer.
+        For editStrength, optional: "operation" (update/add/replace/remove/
+        moveUp/moveDown), "exerciseName" string, "sets" integer,
+        "repMin"/"repMax" integers, "restSeconds" integer, "weightLb" number.
+        Never invent an exercise ID. The user chooses the actual workout item.
         For setting values, use only valid app choices:
         - themes: heritage,retro,techno,coast,fieldNotes,discipline,atelier,rally
         - tabs: training,progress,health,coach,settings
@@ -446,6 +447,35 @@ enum IMUNCoachActionInterpreter {
         let value = (object["parameter"] as? String)?
             .trimmingCharacters(in: .whitespacesAndNewlines)
         switch action {
+        case "editStrength":
+            guard let workout, workout.date == HCPlanBuilder.dateString(Date()),
+                  !workout.isPreview else { return nil }
+            let operation = (object["operation"] as? String)
+                .flatMap(IMUNCoachExerciseOperation.init(rawValue:)) ?? .update
+            let name = (object["exerciseName"] as? String)?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            let candidate = name.map { String($0.prefix(80)) }
+            func inRange(_ name: String, min: Int, max: Int) -> Int? {
+                guard let number = object[name] as? Int,
+                      (min...max).contains(number) else { return nil }
+                return number
+            }
+            let sets = inRange("sets", min: 1, max: 12)
+            let repMin = inRange("repMin", min: 1, max: 30)
+            let repMax = inRange("repMax", min: 1, max: 40)
+            let rest = inRange("restSeconds", min: 15, max: 360)
+            let restValid = rest.flatMap { $0.isMultiple(of: 15) ? $0 : nil }
+            let weight = (object["weightLb"] as? NSNumber)?.doubleValue
+            let safeWeight = weight.flatMap {
+                $0.isFinite && (0...1500).contains($0) ? $0 : nil
+            }
+            return proposal(.editStrength, "Edit today's workout",
+                "Review the exact exercise, prescription and target values. No completed set logs will be invented or deleted.",
+                workoutID: workout.id,
+                workoutEdit: IMUNCoachWorkoutEditHint(
+                    operation: operation, exerciseName: candidate,
+                    sets: sets, repMin: repMin, repMax: repMax,
+                    restSeconds: restValid, weightLb: safeWeight))
         case "moveWorkout":
             return proposal(.moveWorkout, "Move a workout",
                 "Choose the exact calendar entry and the destination. The AI cannot decide which history records to modify.")
