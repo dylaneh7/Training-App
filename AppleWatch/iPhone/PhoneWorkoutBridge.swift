@@ -32,6 +32,10 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
     private var locallyCreatedRun: HCRunPlan?
     @Published private(set) var recoveryHistory: [HCRecoveryDatum] = []
     @Published private(set) var eitanSnapshot: HCEitanSnapshot?
+    @Published private(set) var eitanCheckIns: [HCEitanDailyCheckIn] = []
+    var todayEitanCheckIn: HCEitanDailyCheckIn? {
+        eitanCheckIns.first { $0.date == HCPlanBuilder.dateString(Date()) }
+    }
     @Published private(set) var eitanWatchSyncStatus = "EITAN has not synced with Watch yet"
     @Published private(set) var eitanWatchAcknowledgedAt: Date?
     private var lastEitanPacketStamp: TimeInterval = 0
@@ -153,6 +157,7 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
         uploadedUndoIDs = Set(read("imun-uploaded-undo-ids.json") ?? [])
         lastArchiveAt = read("imun-source-archive-date.json")
         plannedSessions = read("imun-planned-workouts.json") ?? []
+        eitanCheckIns = read("imun-eitan-check-ins.json") ?? []
         cloudTrainingActivities = read("imun-training-activity-history.json") ?? []
         trainingActivities = cloudTrainingActivities
         importedHealthRuns = read("apple-health-imported-runs.json") ?? []
@@ -900,6 +905,25 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
             }
         }
         recoveryHistory = combined
+    }
+
+    /// Store subjective athlete feedback privately for up to 90 days. Missing
+    /// check-ins are unknown, never fabricated as a good or bad recovery day.
+    func recordEitanCheckIn(energy: Int, soreness: Int, stress: Int,
+                            motivation: Int, painOrIllness: Bool) {
+        let today = HCPlanBuilder.dateString(Date())
+        let item = HCEitanDailyCheckIn(
+            date: today, energy: min(5, max(1, energy)),
+            soreness: min(5, max(1, soreness)),
+            stress: min(5, max(1, stress)),
+            motivation: min(5, max(1, motivation)),
+            painOrIllness: painOrIllness)
+        let cutoff = HCPlanBuilder.dateString(
+            Calendar.current.date(byAdding: .day, value: -90, to: Date()) ?? Date())
+        eitanCheckIns = ([item] + eitanCheckIns.filter {
+            $0.date != today && $0.date >= cutoff
+        }).sorted { $0.date > $1.date }
+        save(eitanCheckIns, name: "imun-eitan-check-ins.json")
     }
 
     /// Recompute locally from authorized data; send only a compact summary
