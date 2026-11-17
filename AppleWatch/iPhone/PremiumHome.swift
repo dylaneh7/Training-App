@@ -350,6 +350,7 @@ private struct PremiumStrengthPage: View {
                 if let plan {
                     HCCard(accent: HCDesign.electric) {
                         VStack(alignment: .leading, spacing: 17) {
+                            IMUNThemeEmblem(area: "training")
                             HCAccentTag(title: "TODAY'S PROGRAM", color: HCDesign.electric)
                             HStack(alignment: .center, spacing: 18) {
                                 VStack(alignment: .leading, spacing: 8) {
@@ -383,9 +384,7 @@ private struct PremiumStrengthPage: View {
                             if doneSets.count >= plan.prescribedSetCount &&
                                plan.prescribedSetCount > 0 &&
                                coach.phoneSessionStartedAt == nil {
-                                HCStatusLine(text: "Today's prescribed sets are complete on your devices.",
-                                             symbol: "checkmark.seal.fill",
-                                             tint: HCDesign.good)
+                                IMUNThemeCompletionCallout()
                             } else if coach.phoneSessionStartedAt == nil {
                                 HCFilledButton(title: "START WORKOUT", icon: "play.fill") {
                                     coach.startPhoneWorkout()
@@ -1367,6 +1366,7 @@ private struct PremiumProgressPage: View {
                               subtitle: "Your history, your momentum, and the next milestone.",
                               icon: "chart.line.uptrend.xyaxis",
                               tint: HCDesign.aqua) {
+                    IMUNThemeEmblem(area: "progress")
                     HStack(spacing: 18) {
                         HCMetricBlock(label: "Recorded sets",
                                       value: "\(coach.performanceHistory.count)",
@@ -1377,6 +1377,19 @@ private struct PremiumProgressPage: View {
                         HCMetricBlock(label: "Upcoming",
                                       value: "\(upcoming.count)",
                                       tint: HCDesign.ink)
+                    }
+                }
+                HCCard(accent: HCDesign.electric) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        IMUNThemeEmblem(area: "progress")
+                        IMUNThemeProgressView(
+                            completed: coach.workout.map {
+                                coach.completedSets(for: $0).count
+                            } ?? 0,
+                            planned: coach.workout?.prescribedSetCount ?? 0)
+                        Text("TODAY'S PRESCRIBED WORKING SETS · RECORDED ON BOTH DEVICES")
+                            .font(HCDesign.label(9))
+                            .foregroundStyle(HCDesign.secondary)
                     }
                 }
                 HStack(spacing: 11) {
@@ -1856,6 +1869,12 @@ private struct PremiumRecoveryPage: View {
 
                 HCSectionTitle(title: "Your theme dashboard",
                                detail: IMUNStyle.preset.title)
+                HCCard(accent: HCDesign.aqua) {
+                    IMUNThemeRecoveryBrief(
+                        compared: baselineCount,
+                        flagged: warningCount,
+                        sources: Set(allSignals.map(\.source)).count)
+                }
                 HCCard(accent: HCDesign.electric) {
                     VStack(alignment: .leading, spacing: 12) {
                         HStack {
@@ -2226,6 +2245,10 @@ private struct PremiumCoachPage: View {
                             .frame(width: 49, height: 49)
                             .background(HCDesign.electric.opacity(0.11),
                                         in: RoundedRectangle(cornerRadius: 15))
+                    }
+
+                    HCCard {
+                        IMUNThemeEmblem(area: "coach")
                     }
 
                     if !coach.signedIn {
