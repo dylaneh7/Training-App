@@ -3219,6 +3219,10 @@ private struct PremiumCoachConversation: View {
                 })
             }
             return true
+        case .undoSet:
+            return coach.lastUndoableSet != nil
+        case .undoWorkout:
+            return coach.phoneSessionStartedAt != nil && coach.workout != nil
         case .completeRun:
             return coach.runPlan?.id == action.suggestedWorkoutID &&
                 coach.runPlan?.isCompleted == false
@@ -3268,6 +3272,14 @@ private struct PremiumCoachConversation: View {
             }) else { return }
             coach.moveWorkout(workout, to: actionMoveDate)
             reply = "Requested the move of \(workout.title) to \(HCPlanBuilder.dateString(actionMoveDate)). iMun will apply it only if the calendar server accepts it."
+        case .undoSet:
+            guard let set = coach.lastUndoableSet else { return }
+            coach.undoSet(set.id)
+            reply = "Undid set \(set.index) of \(set.exerciseName). Progress is updated locally and the correction is queued for sync."
+        case .undoWorkout:
+            guard coach.phoneSessionStartedAt != nil else { return }
+            coach.undoPhoneWorkout()
+            reply = "The active workout was undone. Your prescribed plan is still available, and the correction is queued for sync."
         case .completeRun:
             coach.setRunManuallyCompleted(true)
             reply = "Recorded your confirmation of today's completed run. No sensor measurements were invented."
