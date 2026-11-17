@@ -475,8 +475,8 @@ struct PremiumHomeView: View {
                                              enabled: enableLiveActivities)
     }
 
-    var body: some View {
-        TabView(selection: $selectedTab) {
+    private var navigationShell: AnyView {
+        AnyView(TabView(selection: $selectedTab) {
             NavigationStack { IMUNTodayPage(appleHealth: appleHealth, openCoach: presentIsaiah) }
                 .tabItem { Label("Today", systemImage: "sun.max.fill") }
                 .tag("today")
@@ -532,6 +532,11 @@ struct PremiumHomeView: View {
                 selectedTab = destination
             }
         }
+        )
+    }
+
+    private var dataObservationShell: AnyView {
+        AnyView(navigationShell
         .onReceive(coach.objectWillChange) { _ in
             // Publish after @Published has committed new values.
             DispatchQueue.main.async {
@@ -564,6 +569,11 @@ struct PremiumHomeView: View {
         }
         .onChange(of: eitanCoachingEnabled) { _, _ in coach.sendToWatch() }
         .onChange(of: eitanSource) { _, _ in updateEitan() }
+        )
+    }
+
+    private var preferencesShell: AnyView {
+        AnyView(dataObservationShell
         .onChange(of: shareWidgetHealth) { _, _ in publishWidgets() }
         .onChange(of: enableLiveActivities) { _, _ in updateLiveWorkout() }
         .onChange(of: selectedTab) { _, tab in
@@ -575,6 +585,11 @@ struct PremiumHomeView: View {
                 presentIsaiah()
             }
         }
+        )
+    }
+
+    var body: some View {
+        preferencesShell
         .onReceive(tredictPlans.$runs) { coach.updateTredictScheduledRuns($0) }
         .onReceive(tredictPlans.$lastSentTodayRunID) { id in
             guard let id,
