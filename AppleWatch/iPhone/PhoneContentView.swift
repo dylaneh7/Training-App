@@ -972,13 +972,17 @@ enum IMUNEitanWellnessEngine {
                          coach: PhoneWorkoutBridge,
                          preferredSource: String) -> HCEitanSnapshot {
         var samples: [Reading] = health.metricHistory.compactMap { item in
-            guard item.value.isFinite else { return nil }
+            guard item.value.isFinite,
+                  HCEitanWearableSource.accepts(item.source,
+                      preferred: preferredSource) else { return nil }
             return Reading(name: item.name, source: item.source,
                            date: item.date, value: item.value)
         }
         // Imported overnight RMSSD and Apple Health SDNN retain separate
         // labels, baselines, and source identities.
-        for datum in coach.recoveryHistory {
+        for datum in coach.recoveryHistory
+            where HCEitanWearableSource.accepts(datum.source,
+                                                preferred: preferredSource) {
             if let hours = datum.sleepSeconds.map({ $0 / 3600 }), hours > 0 {
                 samples.append(Reading(name: "Total asleep", source: datum.source,
                                        date: datum.date, value: hours))
@@ -1020,8 +1024,8 @@ enum IMUNEitanWellnessEngine {
                     ["HRV · SDNN", "HRV · RMSSD", "Resting heart rate",
                      "Daily low HR", "Respiratory rate", "Wrist temperature"]
                         .contains($0.name) &&
-                    (preferredSource == "Auto" ||
-                     $0.source.localizedCaseInsensitiveContains(preferredSource))
+                    HCEitanWearableSource.accepts($0.source,
+                                                  preferred: preferredSource)
                 }
                 guard recordedToday else { break }
                 let prior = assess(date: date, samples: samples,
@@ -1045,6 +1049,7 @@ enum IMUNEitanWellnessEngine {
             sourceCount: todayResult.sourceCount,
             coverage: todayResult.coverage)
         result.coachingPlan = coachingPlan
+        result.primaryWearable = preferredSource
         return result
     }
 
@@ -1075,8 +1080,8 @@ enum IMUNEitanWellnessEngine {
             let matching = samples.filter { item in
                 names.contains(item.name) && item.date <= targetDay &&
                 item.date >= earliestDay && item.value > 0 &&
-                (preferredSource == "Auto" ||
-                 item.source.localizedCaseInsensitiveContains(preferredSource))
+                HCEitanWearableSource.accepts(item.source,
+                                             preferred: preferredSource)
             }
             // Every possible source/HRV method is evaluated independently.
             // Do not blend SDNN with RMSSD or duplicate same-day providers.
@@ -1136,8 +1141,8 @@ enum IMUNEitanWellnessEngine {
             ($0.name == "Total asleep" || $0.name == "Sleep") &&
             $0.date <= targetDay && $0.date >= maxTwoDaysAgo &&
             $0.value >= 2 && $0.value <= 15 &&
-            (preferredSource == "Auto" ||
-             $0.source.localizedCaseInsensitiveContains(preferredSource))
+            HCEitanWearableSource.accepts($0.source,
+                                         preferred: preferredSource)
         }.sorted { $0.date > $1.date }
         if let latest = sleeping.first {
             let hours = latest.value
@@ -1177,8 +1182,8 @@ enum IMUNEitanWellnessEngine {
         let wrist = samples.filter {
             $0.name == "Wrist temperature" &&
             $0.date <= targetDay && $0.date >= earliestDay &&
-            (preferredSource == "Auto" ||
-             $0.source.localizedCaseInsensitiveContains(preferredSource))
+            HCEitanWearableSource.accepts($0.source,
+                                         preferred: preferredSource)
         }.sorted { $0.date > $1.date }
         if let latest = wrist.first, latest.date >= maxThreeDaysAgo {
             let historical = wrist.filter {
@@ -1224,8 +1229,8 @@ enum IMUNEitanWellnessEngine {
                 $0.name == activityName &&
                 $0.date >= earliestDay && $0.date <= targetDay &&
                 $0.value.isFinite && $0.value >= 0 &&
-                (preferredSource == "Auto" ||
-                 $0.source.localizedCaseInsensitiveContains(preferredSource))
+                HCEitanWearableSource.accepts($0.source,
+                                             preferred: preferredSource)
             }
             let sourceGroups = Dictionary(grouping: activityReadings, by: \.source)
             var candidates: [(source: String, date: String,
@@ -1275,9 +1280,11 @@ enum IMUNEitanWellnessEngine {
         let sumWeights = parts.reduce(0) { $0 + $1.weight }
         let value: Int? = isSufficient && sumWeights > 0 ?
             clamp(parts.reduce(0) { $0 + Double($1.value) * $1.weight } / sumWeights) : nil
+        let label = preferredSource == "Auto" ?
+            "Automatic wearable sources" : preferredSource + " primary"
         let coverage = isSufficient ?
-            "\(physiologicalCount) wellness signals · \(baselineFactors) personal baseline trends" :
-            "At least two recent wellness signals and five historical readings for a baseline are required"
+            label + " · \(physiologicalCount) signals · \(baselineFactors) same-source baseline trends" :
+            label + " · requires two available wellness signals and at least five historical readings for a baseline; missing values are not substituted from other wearables"
         return Assessment(score: value, factors: parts,
                           sourceCount: sources.count, coverage: coverage)
     }
@@ -1349,14 +1356,18 @@ private enum IMUNEitanTrainingCoach {
         // Choose one consistent provider and day per night. HRV SDNN/RMSSD
         // remain separate in the EITAN wellness calculation.
         var raw: [SleepNight] = health.metricHistory.compactMap { item in
-            guard item.name == "Total asleep", item.value >= 2,
+            guard HCEitanWearableSource.accepts(item.source,
+                                                preferred: preferredSource),
+                  item.name == "Total asleep", item.value >= 2,
                   item.value <= 15, item.value.isFinite,
                   item.date >= start7, item.date <= todayKey else { return nil }
             return SleepNight(source: item.source, date: item.date,
                               hours: item.value)
         }
         for reading in coach.recoveryHistory {
-            guard reading.date >= start7 && reading.date <= todayKey,
+            guard HCEitanWearableSource.accepts(reading.source,
+                                                preferred: preferredSource),
+                  reading.date >= start7 && reading.date <= todayKey,
                   let seconds = reading.sleepSeconds,
                   seconds.isFinite, seconds >= 7200, seconds <= 54000 else {
                 continue
@@ -1364,10 +1375,9 @@ private enum IMUNEitanTrainingCoach {
             raw.append(SleepNight(source: reading.source, date: reading.date,
                                   hours: seconds / 3600))
         }
-        if preferredSource != "Auto" {
-            raw = raw.filter {
-                $0.source.localizedCaseInsensitiveContains(preferredSource)
-            }
+        raw = raw.filter {
+            HCEitanWearableSource.accepts($0.source,
+                                         preferred: preferredSource)
         }
         let grouped = Dictionary(grouping: raw, by: \.source)
         let selected = grouped.values.sorted { a, b in
