@@ -4,6 +4,14 @@ import SwiftUI
 /// The value is completion of today's prescribed training sets, never a
 /// synthetic recovery/readiness score. Existing Health signals remain separate.
 struct IMUNThemeProgressView: View {
+    // This view MUST observe the selected preset itself. Reading the
+    // UserDefaults-backed IMUNStyle.preset alone does not invalidate SwiftUI
+    // when someone switches from Rally to another theme while this page lives.
+    @AppStorage("hcDesignPreset") private var designPresetName = "techno"
+    private var theme: IMUNPreset {
+        IMUNPreset(rawValue: designPresetName) ?? .techno
+    }
+
     let completed: Int
     let planned: Int
     var compact: Bool = false
@@ -19,7 +27,7 @@ struct IMUNThemeProgressView: View {
 
     var body: some View {
         Group {
-            switch IMUNStyle.preset {
+            switch theme {
             case .rally: rally
             case .heritage: heritage
             case .retro: retro
@@ -33,7 +41,7 @@ struct IMUNThemeProgressView: View {
         .frame(width: compact ? 104 : nil,
                height: compact ? 97 : 184)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(done) of \(planned) planned workout sets completed")
+        .accessibilityLabel("\(theme.title) · \(done) of \(planned) planned workout sets completed")
     }
 
     // The car follows a real fraction of prescribed set completion. This is
@@ -247,7 +255,7 @@ struct IMUNThemeProgressView: View {
                                           weight: .bold, design: .monospaced))
                             .foregroundStyle(ink)
                         Spacer()
-                        Image(systemName: "flag.fill")
+                        Image(systemName: "mappin.circle.fill")
                             .foregroundStyle(accent)
                     }
                 }
