@@ -1204,6 +1204,13 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
            [0, 1, 2, 5, 10].contains(cadence) {
             UserDefaults.standard.set(cadence, forKey: "hcRunCueMinutes")
         }
+        if let data = context[HCPayload.workoutUndos] as? Data,
+           let corrections = try? decoder.decode([HCWorkoutUndo].self, from: data) {
+            DispatchQueue.main.async {
+                self.cloudUndoRecords = HCWorkoutUndo.merged(
+                    local: self.cloudUndoRecords, cloud: corrections)
+            }
+        }
         if let data = context[HCPayload.schedule] as? Data,
            let snapshot = try? decoder.decode(HCWatchSchedule.self, from: data) {
             if Thread.isMainThread {
@@ -1247,6 +1254,9 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
             } else if kind == HCPayload.completedRun,
                       let run = try? decoder.decode(HCRunFinished.self, from: bytes) {
                 inFlight.insert(run.id)
+            } else if kind == HCPayload.workoutUndo,
+                      let undo = try? decoder.decode(HCWorkoutUndo.self, from: bytes) {
+                inFlight.insert(undo.id)
             }
         }
         var newTransfers = 0
@@ -1268,6 +1278,23 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
                 }, errorHandler: { _ in /* reliable background transfer remains */ })
             }
             queuedIDs.insert(entry.id)
+            newTransfers += 1
+        }
+        for undo in undoRecords where !confirmedIDs.contains(undo.id) &&
+            (!queuedIDs.contains(undo.id) ||
+             (forceResend && !inFlight.contains(undo.id))) {
+            guard let data = try? encoder.encode(undo) else { continue }
+            let packet: [String: Any] = [
+                HCPayload.kind: HCPayload.workoutUndo, HCPayload.data: data
+            ]
+            session.transferUserInfo(packet)
+            if session.isReachable {
+                session.sendMessage(packet, replyHandler: { [weak self] response in
+                    guard response["saved"] as? Bool == true else { return }
+                    DispatchQueue.main.async { self?.markConfirmed(undo.id) }
+                }, errorHandler: { _ in })
+            }
+            queuedIDs.insert(undo.id)
             newTransfers += 1
         }
         for run in completedRuns where !confirmedIDs.contains(run.id) &&
@@ -1384,6 +1411,14 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
                     "runID": self.runPlan?.id ?? "",
                     "runSignature": self.runPlan?.syncSignature ?? ""
                 ])
+            }
+            return
+        }
+        if userInfo[HCPayload.kind] as? String == HCPayload.workoutUndo,
+           let bytes = userInfo[HCPayload.data] as? Data,
+           let item = try? decoder.decode(HCWorkoutUndo.self, from: bytes) {
+            DispatchQueue.main.async {
+                self.appendUndo(item, forwardToPhone: false)
             }
             return
         }
