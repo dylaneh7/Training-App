@@ -485,6 +485,141 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
         retryPendingWorkout()
     }
 
+    /// Edit the prescribed workout, not completed exercise records.
+    /// The same saveEditedWorkout pipeline persists offline, queues cloud
+    /// save and publishes the revised plan to iMun Watch.
+    @discardableResult
+    func applyCoachWorkoutEdit(_ edit: IMUNCoachWorkoutEdit) -> String? {
+        guard signedIn, let plan = workout,
+              plan.id == edit.workoutID,
+              plan.date == HCPlanBuilder.dateString(Date()),
+              !plan.isPreview,
+              !edit.expectedSignature.isEmpty,
+              plan.coachEditSignature == edit.expectedSignature else {
+            status = "Workout changed since Coach prepared the edit. Review the latest plan again."
+            return nil
+        }
+        guard (1...12).contains(edit.sets),
+              (1...30).contains(edit.repMin),
+              (edit.repMin...40).contains(edit.repMax),
+              (15...360).contains(edit.restSeconds),
+              edit.restSeconds.isMultiple(of: 15),
+              edit.suggestedWeightLb.map({ $0.isFinite &&
+                  (0...1500).contains($0) }) ?? true else {
+            status = "Review sets, reps, rest and any suggested weight before saving."
+            return nil
+        }
+        var exercises = plan.exercises
+        let located = edit.exerciseID.flatMap { id in
+            exercises.firstIndex(where: { $0.id == id })
+        }
+        let completed = completedSets(for: plan)
+        let hasLog = edit.exerciseID.map { id in
+            completed.contains(where: { $0.exerciseID == id })
+        } ?? false
+        let isActive = edit.exerciseID == phoneSetExerciseID &&
+                       phoneSetStartedAt != nil
+        let name = edit.newName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let updatedName = String(name.prefix(80))
+
+        switch edit.operation {
+        case .update:
+            guard let index = located else {
+                status = "Choose an exercise from the current workout."
+                return nil
+            }
+            let old = exercises[index]
+            let completedCount = completed.filter { $0.exerciseID == old.id }.count
+            guard edit.sets >= completedCount else {
+                status = "Cannot prescribe fewer sets than have already been recorded."
+                return nil
+            }
+            var revised = HCExercise(
+                id: old.id, name: old.name, originalName: old.originalName,
+                exerciseIndex: old.exerciseIndex,
+                prescribedSets: edit.sets, repMin: edit.repMin,
+                repMax: edit.repMax,
+                suggestedWeightLb: edit.suggestedWeightLb,
+                restSeconds: edit.restSeconds)
+            revised.instructions = old.instructions
+            exercises[index] = revised
+        case .add:
+            let nextIndex = (exercises.map(\.exerciseIndex).max() ?? -1) + 1
+            guard !updatedName.isEmpty, exercises.count < 35,
+                  nextIndex <= 40,
+                  !exercises.contains(where: {
+                      $0.name.localizedCaseInsensitiveCompare(updatedName) == .orderedSame
+                  }) else {
+                status = "Select a different exercise or check the plan's exercise limit."
+                return nil
+            }
+            var created = HCExercise(
+                id: UUID().uuidString, name: updatedName,
+                originalName: updatedName, exerciseIndex: nextIndex,
+                prescribedSets: edit.sets, repMin: edit.repMin,
+                repMax: edit.repMax,
+                suggestedWeightLb: edit.suggestedWeightLb,
+                restSeconds: edit.restSeconds)
+            created.instructions = edit.newInstructions
+            exercises.append(created)
+        case .replace:
+            guard let index = located, !hasLog, !isActive,
+                  !updatedName.isEmpty else {
+                status = "Choose an exercise with no completed or active sets to replace."
+                return nil
+            }
+            let old = exercises[index]
+            var replacement = HCExercise(
+                id: old.id, name: updatedName,
+                originalName: updatedName,
+                exerciseIndex: old.exerciseIndex,
+                prescribedSets: edit.sets, repMin: edit.repMin,
+                repMax: edit.repMax,
+                suggestedWeightLb: edit.suggestedWeightLb,
+                restSeconds: edit.restSeconds)
+            replacement.instructions = edit.newInstructions
+            exercises[index] = replacement
+        case .remove:
+            guard let index = located, !hasLog, !isActive else {
+                status = "Can't remove an exercise with completed or active sets."
+                return nil
+            }
+            exercises.remove(at: index)
+        case .moveUp, .moveDown:
+            guard let index = located else {
+                status = "Choose an exercise to reorder."
+                return nil
+            }
+            let next = index + (edit.operation == .moveUp ? -1 : 1)
+            guard exercises.indices.contains(next) else {
+                status = "The exercise is already at that end of the workout."
+                return nil
+            }
+            exercises.swapAt(index, next)
+        }
+
+        guard exercises != plan.exercises else {
+            status = "No prescription change to save."
+            return nil
+        }
+        let editedPlan = HCWorkout(
+            id: plan.id, date: plan.date, sessionKey: plan.sessionKey,
+            title: plan.title, exercises: exercises, isPreview: false)
+        saveEditedWorkout(editedPlan)
+        let label = edit.operation == .add ? updatedName :
+            (located.map { plan.exercises[$0].name } ?? "exercise")
+        let summary: String
+        switch edit.operation {
+        case .update: summary = "Updated \(label)'s sets, reps, rest and load targets"
+        case .add: summary = "Added \(label) to today's workout"
+        case .replace: summary = "Replaced \(label) with \(updatedName)"
+        case .remove: summary = "Removed \(label) from today's prescription"
+        case .moveUp: summary = "Moved \(label) earlier in the workout"
+        case .moveDown: summary = "Moved \(label) later in the workout"
+        }
+        return summary + ". The plan is saved locally and queued for Watch/cloud sync."
+    }
+
     func retryPendingWorkout() {
         guard signedIn, !savingPlan, let toSave = pendingEditedWorkout else { return }
         savingPlan = true
