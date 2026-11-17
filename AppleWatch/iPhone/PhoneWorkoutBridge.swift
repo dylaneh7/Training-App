@@ -543,6 +543,11 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
             targetDistanceMiles: nil, isCompleted: false,
             structuredSteps: [step])
         locallyCreatedRun = created
+        // An explicit custom run replaces any previous Tredict preference
+        // for today; don't let a later provider refresh reinterpret it.
+        preferredTredictRuns.removeValue(forKey: day)
+        preferredTredictRunID = nil
+        save(preferredTredictRuns, name: "imun-selected-tredict-plans.json")
         save(created, name: "imun-local-running-plan.json")
         runPlan = created
         mergeRunHistory()
@@ -600,6 +605,10 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
 
     private func enrichedRunPlan(_ original: HCRunPlan?) -> HCRunPlan? {
         let today = HCPlanBuilder.dateString(Date())
+        if let original, original.id.hasPrefix("imun-local-"),
+           preferredTredictRuns[today] == nil {
+            return original
+        }
         let candidates = tredictScheduledRuns.filter {
             $0.date == today && $0.unsupportedReason == nil && !$0.steps.isEmpty
         }
