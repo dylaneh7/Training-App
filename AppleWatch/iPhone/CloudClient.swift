@@ -102,6 +102,27 @@ actor HCCloudClient {
         )
     }
 
+    /// Distinct mode from the conversational Coach. The backend returns an
+    /// action *proposal* in JSON; never executes a model-generated command.
+    func classifyIMUNCoachAction(request: String, context: String) async throws -> String {
+        let credentials = try await authorizedToken()
+        let data = try await send(
+            path: "/functions/v1/imun-ai-coach",
+            method: "POST",
+            json: [
+                "mode": "proposeAction",
+                "question": String(request.prefix(800)),
+                "context": String(context.prefix(2200)),
+                "shareRecovery": false
+            ],
+            bearer: credentials.access)
+        let object = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+        guard let reply = object?["reply"] as? String else {
+            throw HCCloudError.malformedResponse
+        }
+        return reply
+    }
+
     func askIMUNCoach(question: String, context: String,
                       shareRecovery: Bool) async throws -> String {
         let authenticated = try await authorizedToken()
