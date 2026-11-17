@@ -129,7 +129,7 @@ actor HCCloudClient {
         let data = try await send(path: "/functions/v1/imun-ai-coach",
                                   method: "POST",
                                   json: ["question": String(question.prefix(1500)),
-                                         "context": String(context.prefix(4500)),
+                                         "context": String(context.prefix(24_000)),
                                          "shareRecovery": shareRecovery],
                                   bearer: authenticated.access)
         guard let output = try JSONSerialization.jsonObject(with: data) as? [String: Any],
