@@ -30,6 +30,7 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
     @Published private(set) var performanceHistory: [HCPerformanceSet] = []
     @Published private(set) var status = "Preparing Health Coach…"
     @Published private(set) var watchSyncStatus = "Waiting for Watch connection"
+    @Published private(set) var cloudWorkoutStatus = "Cloud schedule not published yet"
     @Published private(set) var watchConnectionDetails = "Connection not checked"
     @Published private(set) var designCloudStatus = "Appearance stored on iPhone"
     @Published private(set) var watchLastAcknowledgedAt: Date?
@@ -38,6 +39,9 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
     // If the OS temporarily reports the companion missing, never throw away
     // the user's requested delivery. Re-check on pairing/reachability changes.
     private var watchDeliveryWaitingForRegistration = false
+    private var lastPublishedCloudScheduleKey: Data?
+    private var pendingCloudSchedule: (schedule: HCWatchSchedule, key: Data)?
+    private var cloudScheduleUploadInProgress = false
     @Published private(set) var signedIn = false
     @Published private(set) var loading = false
     @Published private(set) var savingPlan = false
@@ -835,6 +839,51 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
         return context
     }
 
+    /// Publish the complete dated schedule even when WatchConnectivity says
+    /// "not reachable" or doesn't recognize a developer-installed Watch app.
+    /// A single serialized queue prevents older plans from winning races.
+    private func publishTodayToCloud() {
+        guard signedIn, confirmedScheduleDate == HCPlanBuilder.dateString(Date()) else { return }
+        let snapshot = HCWatchSchedule(
+            date: confirmedScheduleDate!,
+            workout: workout?.date == confirmedScheduleDate ? workout : nil,
+            runPlan: runPlan?.date == confirmedScheduleDate ? runPlan : nil,
+            generatedAt: Date(), state: "ready")
+        // A generated timestamp changes on every refresh; exclude it from
+        // the content key so the minute polling doesn't hammer the backend.
+        let normalized = HCWatchSchedule(
+            date: snapshot.date, workout: snapshot.workout,
+            runPlan: snapshot.runPlan,
+            generatedAt: Date(timeIntervalSince1970: 0), state: snapshot.state)
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        guard let key = try? encoder.encode(normalized) else {
+            cloudWorkoutStatus = "Could not encode today's cloud schedule"
+            return
+        }
+        if lastPublishedCloudScheduleKey == key { return }
+        if let pendingCloudSchedule, pendingCloudSchedule.key == key { return }
+        pendingCloudSchedule = (snapshot, key)
+        guard !cloudScheduleUploadInProgress else { return }
+        cloudScheduleUploadInProgress = true
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            while let next = self.pendingCloudSchedule {
+                self.pendingCloudSchedule = nil
+                do {
+                    try await self.cloud.publishWatchSchedule(next.schedule)
+                    self.lastPublishedCloudScheduleKey = next.key
+                    self.cloudWorkoutStatus = "Cloud has today's run and strength schedule"
+                } catch {
+                    self.cloudWorkoutStatus =
+                        "Cloud schedule upload failed: " + error.localizedDescription
+                    break
+                }
+            }
+            self.cloudScheduleUploadInProgress = false
+        }
+    }
+
     /// Report WatchConnectivity's actual state rather than assuming a Watch
     /// seen by Bluetooth or on the wrist is recognized as THIS app's companion.
     /// Call from Settings and from activation/watch-state callbacks.
@@ -859,6 +908,9 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
     /// Live messages get a reply; manual sends fall back to a reliable background
     /// transfer. All forms carry the same date-scoped schedule snapshot.
     func sendToWatch(forceQueue: Bool = false) {
+        // Cloud is a separate, reliable route; never guard it with a live
+        // WCSession installation/reachability diagnostic.
+        publishTodayToCloud()
         guard WCSession.isSupported() else {
             watchSyncStatus = "Watch connectivity unavailable on this iPhone"
             return
