@@ -415,6 +415,7 @@ private struct PremiumStrengthPage: View {
     @State private var movingSession: HCPlannedSession?
     @AppStorage("hcAggressiveProgression") private var aggressive = true
     @State private var showEditor = false
+    @State private var confirmUndoWorkout = false
     @State private var showNew = false
     @State private var newTitle = "Full Body Strength"
 
@@ -482,6 +483,10 @@ private struct PremiumStrengthPage: View {
                             } else {
                                 HCOutlineButton(title: "Finish workout", icon: "stop.fill") {
                                     coach.finishPhoneWorkout()
+                                }
+                                HCOutlineButton(title: "Undo Workout",
+                                                icon: "arrow.uturn.backward") {
+                                    confirmUndoWorkout = true
                                 }
                             }
                             HStack(spacing: 10) {
@@ -557,6 +562,15 @@ private struct PremiumStrengthPage: View {
         .sheet(isPresented: $showEditor) {
             PremiumWorkoutEditor()
                 .environmentObject(coach)
+        }
+        .confirmationDialog("Undo Workout?", isPresented: $confirmUndoWorkout,
+                            titleVisibility: .visible) {
+            Button("Undo Workout", role: .destructive) {
+                coach.undoPhoneWorkout()
+            }
+            Button("Keep Workout", role: .cancel) {}
+        } message: {
+            Text("This reverses the active session and its logged sets. Your prescribed workout stays available.")
         }
         .alert("New training session", isPresented: $showNew) {
             TextField("Workout title", text: $newTitle)
@@ -839,6 +853,12 @@ private struct PremiumExerciseSession: View {
                                 coach.logFromPhone(exercise: ex, weightLb: hasWeight ? weight : nil,
                                                    reps: reps, rir: Double(rir))
                             }
+                            if let last = completed.max(by: { $0.completedAt < $1.completedAt }) {
+                                HCOutlineButton(title: "Undo Set",
+                                                icon: "arrow.uturn.backward") {
+                                    coach.undoSet(last.id)
+                                }
+                            }
                         }
                     }
                     HCSectionTitle(title: "Set history", detail: "Recorded this session")
@@ -852,6 +872,17 @@ private struct PremiumExerciseSession: View {
                                 Spacer()
                                 Text("\(set.weightLb?.formatted() ?? "—") lb × \(set.reps)")
                                     .font(HCDesign.metric(17))
+                                Button {
+                                    coach.undoSet(set.id)
+                                } label: {
+                                    Image(systemName: "arrow.uturn.backward")
+                                        .font(.system(size: 13, weight: .semibold))
+                                        .foregroundStyle(HCDesign.secondary)
+                                        .frame(width: 36, height: 40)
+                                }
+                                .buttonStyle(.plain)
+                                .accessibilityLabel("Undo Set \(set.index)")
+
                             }
                         }
                     }
