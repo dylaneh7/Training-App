@@ -574,6 +574,7 @@ struct ExerciseLibraryPicker: View {
 private struct RunHome: View {
     @EnvironmentObject private var coach: PhoneWorkoutBridge
     @Binding var date: Date
+    @State private var showStructuredRun = false
 
     private var selectedRun: HCProgressRun? {
         coach.runHistory.first { $0.date == HCPlanBuilder.dateString(date) }
@@ -599,8 +600,8 @@ private struct RunHome: View {
                     Text("No running workout scheduled for this date.")
                         .foregroundStyle(.secondary)
                 }
-                Button("Send Today's Run to Apple Watch") {
-                    coach.sendToWatch()
+                Button("Build & Send Interval Run to Apple Watch") {
+                    showStructuredRun = true
                 }.disabled(coach.runPlan == nil)
             }
             if let run=selectedRun {
@@ -655,6 +656,11 @@ private struct RunHome: View {
             }
         }
         .navigationTitle("Run")
+        .sheet(isPresented: $showStructuredRun) {
+            if let plan = coach.runPlan {
+                IMUNStructuredRunEditor(plan: plan)
+            }
+        }
     }
 }
 

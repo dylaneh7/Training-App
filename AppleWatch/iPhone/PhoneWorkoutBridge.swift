@@ -22,6 +22,8 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
     // Apple Health running results stay on device unless user elects to share them.
     private var importedHealthRuns: [HCProgressRun] = []
     private var remoteRunHistory: [HCProgressRun] = []
+    private var tredictScheduledRuns: [HCTredictPlannedRun] = []
+    private var manuallyCompletedRunKeys = Set<String>()
     @Published private(set) var recoveryHistory: [HCRecoveryDatum] = []
     @Published private(set) var performanceHistory: [HCPerformanceSet] = []
     @Published private(set) var status = "Preparing Health Coach…"
@@ -122,6 +124,7 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
         importedHealthRuns = read("apple-health-imported-runs.json") ?? []
         runHistory = importedHealthRuns
         completedWatchRuns = read("health-coach-native-runs.json") ?? []
+        manuallyCompletedRunKeys = Set(read("imun-manually-completed-runs.json") ?? [String]())
         uploadedIDs = Set(read("uploaded-watch-set-ids.json") ?? [])
         pendingEditedWorkout = read("pending-edited-workout.json")
         phoneSessionStartedAt = read("iphone-session-start.json")
@@ -246,7 +249,7 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
                     }
                     self.confirmedScheduleDate = dateText
                     self.workout = active
-                    self.runPlan = run
+                    self.runPlan = self.enrichedRunPlan(run)
                     self.plannedSessions = HCPlanBuilder.upcomingWithRotation(from: snapshot.planner)
                     self.cloudTrainingActivities = activities
                     self.mergeHistoricalSources()
@@ -324,10 +327,11 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
                         : baseline.map { self.smartTargets($0,
                                                 history: self.performanceHistory,
                                                 preserveExisting: published != nil) }
-                    self.runPlan = HCPlanBuilder.run(for: Date(), planner: snapshot.planner)
+                    self.runPlan = self.enrichedRunPlan(HCPlanBuilder.run(for: Date(), planner: snapshot.planner))
                     self.plannedSessions = HCPlanBuilder.upcomingWithRotation(from: snapshot.planner)
                     self.save(self.plannedSessions, name: "imun-planned-workouts.json")
                     self.confirmedScheduleDate = day
+                    self.mergeRunHistory() // Preserve a completed run across calendar polls.
                     let manualDelivery = forceWatchDelivery || self.sendAfterCalendarRefresh
                     self.sendAfterCalendarRefresh = false
                     self.sendToWatch(forceQueue: manualDelivery)
@@ -467,6 +471,90 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
         }
     }
 
+    /// The iPhone's current running plan is the same plan sent to iMun Watch.
+    /// Don't guess which workout to use if multiple Tredict programs overlap.
+    func updateTredictScheduledRuns(_ runs: [HCTredictPlannedRun]) {
+        tredictScheduledRuns = runs
+        runPlan = enrichedRunPlan(runPlan)
+        mergeRunHistory()
+        if confirmedScheduleDate == HCPlanBuilder.dateString(Date()) { sendToWatch() }
+    }
+
+    private func relevantWords(_ title: String) -> Set<String> {
+        let ignored: Set<String> = [
+            "run", "running", "minutes", "minute", "min", "mins", "mile",
+            "miles", "mi", "km", "mon", "tue", "wed", "thu", "fri", "sat", "sun",
+            "today", "workout", "session"
+        ]
+        return Set(title.lowercased().split(whereSeparator: {
+            !$0.isLetter && !$0.isNumber
+        }).map(String.init).filter {
+            !ignored.contains($0) && $0.range(of: #"^w\d+$"#,
+                                                options: .regularExpression) == nil
+        })
+    }
+
+    private func enrichedRunPlan(_ original: HCRunPlan?) -> HCRunPlan? {
+        let today = HCPlanBuilder.dateString(Date())
+        let candidates = tredictScheduledRuns.filter {
+            $0.date == today && $0.unsupportedReason == nil && !$0.steps.isEmpty
+        }
+        let run: HCTredictPlannedRun?
+        if let original {
+            let words = relevantWords(original.title)
+            let matching = candidates.filter {
+                let other = relevantWords($0.title)
+                return !words.isEmpty && words.isSubset(of: other)
+            }
+            run = matching.count == 1 ? matching.first : nil
+        } else {
+            // Never select one program arbitrarily when calendars overlap.
+            run = candidates.count == 1 ? candidates.first : nil
+        }
+        guard let run else { return original }
+        let steps = run.steps.map { item -> HCRunStep in
+            let kind: String
+            switch item.phase {
+            case .warmup: kind = "warmup"
+            case .work: kind = "work"
+            case .recovery: kind = "recovery"
+            case .cooldown: kind = "cooldown"
+            }
+            let seconds: Double?
+            let distance: Double?
+            switch item.duration {
+            case .seconds(let value): seconds = value; distance = nil
+            case .meters(let value): seconds = nil; distance = value
+            case .open: seconds = nil; distance = nil
+            }
+            return HCRunStep(title: item.label, phase: kind, seconds: seconds,
+                             distanceMeters: distance,
+                             minBPM: item.heartRate?.lowerBound,
+                             maxBPM: item.heartRate?.upperBound)
+        }
+        if var original {
+            original.structuredSteps = steps
+            return original
+        }
+        let distance = steps.compactMap(\.distanceMeters).reduce(0, +)
+        return HCRunPlan(id: "tredict:" + run.id, date: run.date, title: run.title,
+                         notes: run.notes, targetDistanceMiles: distance > 0
+                         ? distance / 1609.344 : nil,
+                         isCompleted: run.hasExecutedActivity, structuredSteps: steps)
+    }
+
+    /// Recorded HealthKit data is preferred. This explicit fallback tracks a
+    /// user's reported completion without inventing sensor data or a fake run.
+    func setRunManuallyCompleted(_ completed: Bool) {
+        guard let plan = runPlan, plan.date == HCPlanBuilder.dateString(Date()) else { return }
+        let key = plan.date + ":" + plan.id
+        if completed { manuallyCompletedRunKeys.insert(key) }
+        else { manuallyCompletedRunKeys.remove(key) }
+        save(Array(manuallyCompletedRunKeys), name: "imun-manually-completed-runs.json")
+        mergeRunHistory()
+        sendToWatch()
+    }
+
     /// No private Tredict credential or raw data ever leaves the iPhone.
     /// Parsed measurements are combined with the other on-device histories.
     func updateTredictSnapshot(_ snapshot: HCTredictSnapshot) {
@@ -524,7 +612,18 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
     }
 
     private func mergeRunHistory() {
-        let all = (importedHealthRuns + tredictSnapshot.runs + remoteRunHistory).sorted {
+        let localWatchRuns: [HCProgressRun] = completedWatchRuns.map { finished in
+            var item = HCProgressRun(
+                id: "imun-watch:" + finished.id.uuidString,
+                date: finished.date, title: "iMun Watch Run",
+                source: "iMun Watch", distanceMeters: finished.distanceMeters,
+                durationSeconds: max(0, finished.endedAt.timeIntervalSince(finished.startedAt)),
+                averageBPM: finished.averageHeartRate, splits: finished.splits)
+            item.startedAt = finished.startedAt
+            item.endedAt = finished.endedAt
+            return item
+        }
+        let all = (importedHealthRuns + localWatchRuns + tredictSnapshot.runs + remoteRunHistory).sorted {
             ($0.startedAt ?? HCPlanBuilder.startOfDate($0.date) ?? .distantPast) >
             ($1.startedAt ?? HCPlanBuilder.startOfDate($1.date) ?? .distantPast)
         }
@@ -548,12 +647,21 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
             if !same { unique.append(candidate) }
         }
         runHistory = unique
-        if let plan = runPlan, !plan.isCompleted,
-           unique.contains(where: { $0.date == plan.date }) {
-            runPlan = HCRunPlan(id: plan.id, date: plan.date,
-                                title: plan.title, notes: plan.notes,
-                                targetDistanceMiles: plan.targetDistanceMiles,
-                                isCompleted: true)
+        if var plan = runPlan {
+            let exactID = plan.date + ":" + plan.id
+            let fromRun = unique.contains(where: { $0.date == plan.date })
+            let fromWatch = completedWatchRuns.contains {
+                $0.planID == plan.id && $0.date == plan.date
+            }
+            let done = plan.isCompleted || fromRun || fromWatch ||
+                manuallyCompletedRunKeys.contains(exactID)
+            if plan.isCompleted != done {
+                plan = HCRunPlan(id: plan.id, date: plan.date,
+                                 title: plan.title, notes: plan.notes,
+                                 targetDistanceMiles: plan.targetDistanceMiles,
+                                 isCompleted: done, structuredSteps: plan.structuredSteps)
+                runPlan = plan
+            }
         }
     }
 
@@ -969,6 +1077,8 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
         save(completedWatchRuns,name:"health-coach-native-runs.json")
         updatePendingCount()
         status = "Run saved locally"
+        mergeRunHistory()
+        sendToWatch()
         retryPendingCloudSets()
     }
 

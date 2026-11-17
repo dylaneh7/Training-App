@@ -103,7 +103,7 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
         selectedGuidedSet = load("guided-set-selection.json")
         queuedNextGuidedSet = load("queued-guided-set.json")
         if let s: HCTrainingClock = load("running-clock.json") { runClock = s }
-        if let s: HCRunPlan = load("run-plan.json") { runPlan = s }
+        if let s: HCRunPlan = load("run-plan.json"), s.date == Self.today() { runPlan = s }
         if let s: [HCProgressRun] = load("run-history.json") { runHistory = s }
         if let s: [HCRunFinished] = load("completed-runs.json") { completedRuns = s }
 
@@ -701,7 +701,7 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
         dateFormatter.timeZone = .current
         let result = HCRunFinished(
             id: UUID(),
-            planID: runPlan?.id,
+            planID: clock.workoutID == "unscheduled-run" ? nil : clock.workoutID,
             date: dateFormatter.string(from: clock.startedAt),
             startedAt: clock.startedAt,
             endedAt: now,
@@ -723,6 +723,13 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
         finished.splits=splits
         completedRuns.append(finished)
         save(completedRuns, name: "completed-runs.json")
+        if var plan = runPlan, plan.id == clock.workoutID && plan.date == finished.date {
+            plan = HCRunPlan(id: plan.id, date: plan.date, title: plan.title,
+                             notes: plan.notes, targetDistanceMiles: plan.targetDistanceMiles,
+                             isCompleted: true, structuredSteps: plan.structuredSteps)
+            runPlan = plan
+            save(plan, name: "run-plan.json")
+        }
         sendPending()
     }
 
@@ -790,6 +797,7 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
         latestSchedule = nil
         runPlan = nil
         hasScheduledLift = false
+        try? FileManager.default.removeItem(at: directory.appendingPathComponent("run-plan.json"))
         // Preserve an in-progress workout until the user finishes it.
         if liftClock?.isActive != true {
             workout = .unscheduled(date: today)
@@ -817,6 +825,8 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
         scheduleUpdatedAt = schedule.generatedAt
         if schedule.state == "ready" {
             runPlan = schedule.runPlan?.date == schedule.date ? schedule.runPlan : nil
+            if let runPlan { save(runPlan, name: "run-plan.json") }
+            else { try? FileManager.default.removeItem(at: directory.appendingPathComponent("run-plan.json")) }
             hasScheduledLift = schedule.workout?.date == schedule.date
             if liftClock?.isActive == true && workout.id != schedule.workout?.id {
                 // Do not interrupt a recording when another device edits the plan.
@@ -833,6 +843,7 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
         } else if schedule.state == "signedOut" {
             hasScheduledLift = false
             runPlan = nil
+            try? FileManager.default.removeItem(at: directory.appendingPathComponent("run-plan.json"))
             if liftClock?.isActive != true { workout = .unscheduled(date: schedule.date) }
             status = "Sign in on your iPhone to view the training plan."
         } else {
@@ -1126,7 +1137,13 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
     }
 
     func sessionReachabilityDidChange(_ session: WCSession) {
-        DispatchQueue.main.async { self.checkPhoneConnection() }
+        DispatchQueue.main.async {
+            self.checkPhoneConnection()
+            guard session.activationState == .activated, session.isReachable else { return }
+            // Build 28: retry queued sets/runs and request latest dated plan.
+            self.sendPending(forceResend: true)
+            self.requestCurrentSchedule()
+        }
     }
 
     func session(_ session: WCSession, didReceiveApplicationContext context: [String: Any]) {

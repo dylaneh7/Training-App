@@ -5,6 +5,26 @@
 	};
 	objectVersion = 56;
 	objects = {
+		000000000000000000000092 = {
+			isa = PBXFileReference;
+			lastKnownFileType = "sourcecode.swift";
+			path = "TredictWorkoutSchedule.swift";
+			sourceTree = "<group>";
+		};
+		000000000000000000000093 = {
+			isa = PBXBuildFile;
+			fileRef = 000000000000000000000092;
+		};
+		000000000000000000000090 = {
+			isa = PBXFileReference;
+			lastKnownFileType = "sourcecode.swift";
+			path = "IMUNStructuredRun.swift";
+			sourceTree = "<group>";
+		};
+		000000000000000000000091 = {
+			isa = PBXBuildFile;
+			fileRef = 000000000000000000000090;
+		};
 		000000000000000000000080 = {
 			isa = PBXFileReference;
 			lastKnownFileType = "sourcecode.swift";
@@ -222,6 +242,8 @@
 				000000000000000000000047,
 				00000000000000000000004B,
 				000000000000000000000053,
+				000000000000000000000090,
+				000000000000000000000092,
 			);
 			path = iPhone;
 			sourceTree = "<group>";
@@ -389,6 +411,8 @@
 				000000000000000000000064,
 				000000000000000000000071,
 				000000000000000000000081,
+				000000000000000000000091,
+				000000000000000000000093,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

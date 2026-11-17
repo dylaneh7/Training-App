@@ -1228,7 +1228,32 @@ private final class IMUNRunCueCoach: ObservableObject {
         return "\(rounded / 60) minutes \(rounded % 60) seconds per mile"
     }
 
-    private func phase(for elapsed: Double) -> (String, String) {
+    private func phase(for elapsed: Double, plan: HCRunPlan?) -> (String, String) {
+        // Prescribed intervals always override the old optional sample timer.
+        // Do not turn an Easy 40-minute run into a made-up 5 x 3/2 session.
+        if let plan {
+            if let steps = plan.structuredSteps, !steps.isEmpty {
+                var elapsedBeforeStep = 0.0
+                for (index, step) in steps.enumerated() {
+                    let heartRate: String = {
+                        guard let low = step.minBPM, let high = step.maxBPM else { return "" }
+                        return " · heart rate \(low) to \(high)"
+                    }()
+                    let label = step.title + heartRate
+                    guard let seconds = step.seconds, seconds > 0 else {
+                        // A distance/open step must never advance on a guessed timer.
+                        return ("planned-\(index)", label)
+                    }
+                    if elapsed < elapsedBeforeStep + seconds {
+                        return ("planned-\(index)", label)
+                    }
+                    elapsedBeforeStep += seconds
+                }
+                return ("planned-finished", "Planned intervals finished")
+            }
+            return ("planned", plan.title)
+        }
+        // A genuine unscheduled run may optionally use the legacy sample timer.
         guard UserDefaults.standard.bool(forKey: "hcRunIntervals") else {
             return ("free", "Free run")
         }
@@ -1262,7 +1287,7 @@ private final class IMUNRunCueCoach: ObservableObject {
         }
         guard !clock.isPaused else { return }
         let elapsed = clock.duration()
-        let next = phase(for: elapsed)
+        let next = phase(for: elapsed, plan: store.runPlan)
         stage = next.1
         if next.0 != previousPhase {
             previousPhase = next.0
@@ -1330,6 +1355,28 @@ private struct WatchRunScreen: View {
                                 .font(WTheme.label(12))
                                 .foregroundStyle(WTheme.lime)
                         }
+                        if let steps = plan.structuredSteps, !steps.isEmpty {
+                            ForEach(Array(steps.enumerated()), id: \.offset) { indexed in
+                                let step = indexed.element
+                                let time: String = {
+                                    if let seconds = step.seconds {
+                                        return "\(Int(seconds / 60)) min"
+                                    }
+                                    if let distance = step.distanceMeters {
+                                        return String(format: "%.2f mi", distance / 1609.344)
+                                    }
+                                    return "Open"
+                                }()
+                                let hr: String = {
+                                    guard let low = step.minBPM, let high = step.maxBPM
+                                    else { return "" }
+                                    return " · \(low)–\(high) bpm"
+                                }()
+                                Text("\(step.title) · \(time)\(hr)")
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(WTheme.muted)
+                            }
+                        }
                         if !plan.notes.isEmpty {
                             Text(plan.notes)
                                 .font(.system(size: 12))
@@ -1349,7 +1396,8 @@ private struct WatchRunScreen: View {
                 TimelineView(.periodic(from: .now, by: 1)) { tick in
                     VStack(alignment: .leading, spacing: 12) {
                         HStack {
-                            Text(cueCoach.stage.uppercased())
+                            Text((store.runClock?.isActive == true
+                              ? cueCoach.stage : (store.runPlan?.title ?? "Free run")).uppercased())
                                 .font(WTheme.label(11))
                                 .foregroundStyle(WTheme.aqua)
                             Spacer()
