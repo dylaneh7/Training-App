@@ -370,6 +370,8 @@ private struct PremiumTrainingPage: View {
             }
         }
         .hcPage()
+        .navigationTitle("Training")
+        .navigationBarTitleDisplayMode(.inline)
     }
 }
 
@@ -1653,6 +1655,7 @@ private struct PremiumProgressPage: View {
     @EnvironmentObject private var coach: PhoneWorkoutBridge
     @State private var selectedExercise = ""
     @State private var movingSession: HCPlannedSession?
+    @State private var showAllUpcomingSessions = false
     // Chart points are rebuilt only when source histories/selection change,
     // never repeatedly while a user scrolls through the training cards.
     @State private var cachedExerciseNames: [String] = []
@@ -1728,14 +1731,82 @@ private struct PremiumProgressPage: View {
                                     coach.runHistory.compactMap(\.distanceMeters).reduce(0,+) / 1609.344),
                                   tint: HCDesign.electric)
                 }
-                HCSectionTitle(title: "Upcoming workouts", detail: "Tap to reschedule")
+                HCSectionTitle(title: "Exercise progression", detail: "Recorded weight")
+                HCCard {
+                    VStack(alignment: .leading, spacing: 16) {
+                        if names.isEmpty {
+                            if coach.loading {
+                                IMUNLoadingPlaceholder(lines: 3, height: 140)
+                            } else {
+                                Text("Your actual logged strength history will appear after sync.")
+                                    .font(.subheadline).foregroundStyle(HCDesign.secondary)
+                            }
+                        } else {
+                            Picker("Exercise", selection: $selectedExercise) {
+                                Text("Select movement").tag("")
+                                ForEach(names, id: \.self) { Text($0).tag($0) }
+                            }
+                            .tint(HCDesign.aqua)
+                            if !strengthPoints.isEmpty {
+                                Chart(strengthPoints) { point in
+                                    LineMark(x: .value("Date", point.date),
+                                             y: .value("Weight", point.value))
+                                        .interpolationMethod(.catmullRom)
+                                        .foregroundStyle(HCDesign.electric)
+                                    PointMark(x: .value("Date", point.date),
+                                              y: .value("Weight", point.value))
+                                        .foregroundStyle(HCDesign.electric)
+                                }
+                                .chartYAxisLabel("lb")
+                                .frame(height: 205)
+                            }
+                        }
+                        Text("Equipment-specific loads are kept separate. Dumbbell weights are per implement.")
+                            .font(.caption2).foregroundStyle(HCDesign.secondary)
+                    }
+                }
+                HCSectionTitle(title: "Running volume")
+                HCCard {
+                    if runPoints.isEmpty {
+                        if coach.loading {
+                            IMUNLoadingPlaceholder(lines: 3, height: 110)
+                        } else {
+                            Text("No measured running distances yet.")
+                                .foregroundStyle(HCDesign.secondary)
+                        }
+                    } else {
+                        Chart(runPoints) { p in
+                            BarMark(x: .value("Date", p.date, unit: .day),
+                                    y: .value("Miles", p.value))
+                                .foregroundStyle(HCDesign.aqua.gradient)
+                                .cornerRadius(4)
+                        }
+                        .frame(height: 210)
+                    }
+                }
+                HStack(alignment: .firstTextBaseline) {
+                    HCSectionTitle(title: "Upcoming workouts", detail: "Tap to reschedule")
+                    Spacer(minLength: 8)
+                    if upcoming.count > 3 {
+                        Button(showAllUpcomingSessions ? "Show less" : "See all \(upcoming.count)") {
+                            withAnimation(.easeOut(duration: 0.18)) {
+                                showAllUpcomingSessions.toggle()
+                            }
+                        }
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(HCDesign.electric)
+                        .buttonStyle(.plain)
+                        .accessibilityLabel(showAllUpcomingSessions ?
+                            "Show next three workouts" : "See all upcoming workouts")
+                    }
+                }
                 if upcoming.isEmpty {
                     HCCard {
                         Text("No upcoming sessions in your connected calendar. Add workouts through Command Center.")
                             .font(.subheadline).foregroundStyle(HCDesign.secondary)
                     }
                 } else {
-                    ForEach(upcoming) { entry in
+                    ForEach(showAllUpcomingSessions ? upcoming : Array(upcoming.prefix(3))) { entry in
                         HCCard {
                             VStack(alignment: .leading, spacing: 9) {
                                 HStack {
@@ -1842,51 +1913,6 @@ private struct PremiumProgressPage: View {
                     }
                 }
                 .buttonStyle(.plain)
-                HCSectionTitle(title: "Exercise progression", detail: "Recorded weight")
-                HCCard {
-                    VStack(alignment: .leading, spacing: 16) {
-                        if names.isEmpty {
-                            Text("Your actual logged strength history will appear after sync.")
-                                .font(.subheadline).foregroundStyle(HCDesign.secondary)
-                        } else {
-                            Picker("Exercise", selection: $selectedExercise) {
-                                Text("Select movement").tag("")
-                                ForEach(names, id: \.self) { Text($0).tag($0) }
-                            }
-                            .tint(HCDesign.aqua)
-                            if !strengthPoints.isEmpty {
-                                Chart(strengthPoints) { point in
-                                    LineMark(x: .value("Date", point.date),
-                                             y: .value("Weight", point.value))
-                                        .interpolationMethod(.catmullRom)
-                                        .foregroundStyle(HCDesign.electric)
-                                    PointMark(x: .value("Date", point.date),
-                                              y: .value("Weight", point.value))
-                                        .foregroundStyle(HCDesign.electric)
-                                }
-                                .chartYAxisLabel("lb")
-                                .frame(height: 205)
-                            }
-                        }
-                        Text("Equipment-specific loads are kept separate. Dumbbell weights are per implement.")
-                            .font(.caption2).foregroundStyle(HCDesign.secondary)
-                    }
-                }
-                HCSectionTitle(title: "Running volume")
-                HCCard {
-                    if runPoints.isEmpty {
-                        Text("No measured running distances yet.")
-                            .foregroundStyle(HCDesign.secondary)
-                    } else {
-                        Chart(runPoints) { p in
-                            BarMark(x: .value("Date", p.date, unit: .day),
-                                    y: .value("Miles", p.value))
-                                .foregroundStyle(HCDesign.aqua.gradient)
-                                .cornerRadius(4)
-                        }
-                        .frame(height: 210)
-                    }
-                }
                 Spacer(minLength: 30)
             }
             .padding(18)
@@ -1894,6 +1920,7 @@ private struct PremiumProgressPage: View {
         .scrollIndicators(.hidden)
         .hcPage()
         .navigationBarTitleDisplayMode(.inline)
+        .navigationTitle("Progress")
         .sheet(item: $movingSession) { entry in
             IMUNMoveWorkoutSheet(entry: entry)
                 .environmentObject(coach)
