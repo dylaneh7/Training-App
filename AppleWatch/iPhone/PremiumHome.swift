@@ -23,6 +23,184 @@ private enum IMUNTrainingActivity: String, CaseIterable, Identifiable {
     }
 }
 
+// MARK: - Today: one factual, source-attributed command center
+private struct IMUNTodayPage: View {
+    @EnvironmentObject private var coach: PhoneWorkoutBridge
+    @ObservedObject var appleHealth: HCAppleHealthReader
+    @AppStorage("hcSelectedTab") private var selectedTab = "today"
+    @AppStorage("hcTrainingActivity") private var activity = "weightlifting"
+    @AppStorage("hcPreferredHealthSource") private var preferredSource = "Auto"
+
+    private var today: String { HCPlanBuilder.dateString(Date()) }
+    private var lift: HCWorkout? {
+        guard let w = coach.workout, w.date == today, !w.exercises.isEmpty else { return nil }
+        return w
+    }
+    private var run: HCRunPlan? {
+        guard let r = coach.runPlan, r.date == today, !r.isCompleted else { return nil }
+        return r
+    }
+    private func metric(_ words: [String]) -> HCHealthMetric? {
+        let candidates = appleHealth.metrics.filter { m in
+            words.contains { m.name.localizedCaseInsensitiveContains($0) } &&
+                (preferredSource == "Auto" ||
+                 m.source.localizedCaseInsensitiveContains(preferredSource))
+        }
+        return candidates.sorted { $0.date > $1.date }.first
+    }
+    private var sleep: HCHealthMetric? { metric(["Total asleep", "Sleep"]) }
+    private var hrv: HCHealthMetric? { metric(["HRV", "Heart rate variability"]) }
+    private var resting: HCHealthMetric? { metric(["Resting heart"]) }
+
+    private var sessionSummary: String {
+        if let lift, let run { return "Strength: \(lift.title) · Run: \(run.title)" }
+        if let lift { return "Strength: " + lift.title }
+        if let run { return "Run: " + run.title }
+        return coach.loading ? "Updating today's calendar…" : "No session scheduled today."
+    }
+    private var healthSummary: String {
+        let available = [
+            sleep.map { "sleep \($0.value) (\($0.source))" },
+            hrv.map { "HRV \($0.value) (\($0.source))" },
+            resting.map { "resting HR \($0.value) (\($0.source))" }
+        ].compactMap { $0 }
+        return available.isEmpty ? "No recent authorized Health readings loaded." :
+            available.joined(separator: " · ")
+    }
+
+    var body: some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 18) {
+                HStack {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("IMUN / TODAY")
+                            .font(HCDesign.label(10)).tracking(1.2)
+                            .foregroundStyle(HCDesign.electric)
+                        Text("Make today count.")
+                            .font(HCDesign.display(29))
+                            .foregroundStyle(HCDesign.ink)
+                    }
+                    Spacer(minLength: 8)
+                    Text(Date().formatted(.dateTime.month(.abbreviated).day()))
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(HCDesign.secondary)
+                }
+                HCCard(accent: HCDesign.electric) {
+                    VStack(alignment: .leading, spacing: 12) {
+                        HCAccentTag(title: "TODAY'S TRAINING")
+                        Text(sessionSummary)
+                            .font(HCDesign.display(21))
+                            .foregroundStyle(HCDesign.ink)
+                            .fixedSize(horizontal: false, vertical: true)
+                        if let lift {
+                            HCMetricBlock(label: "Working sets",
+                                          value: "\(coach.completedSets(for: lift).count)/\(lift.prescribedSetCount)")
+                        }
+                        HStack(spacing: 10) {
+                            if lift != nil {
+                                Button {
+                                    activity = "weightlifting"
+                                    if coach.phoneSessionStartedAt == nil {
+                                        coach.startPhoneWorkout()
+                                    }
+                                    selectedTab = "training"
+                                } label: {
+                                    Label(coach.phoneSessionStartedAt == nil ?
+                                          "Start workout" : "Resume workout",
+                                          systemImage: "play.fill")
+                                        .frame(maxWidth: .infinity)
+                                }
+                                .buttonStyle(.borderedProminent)
+                                .tint(HCDesign.electric)
+                            }
+                            if run != nil {
+                                Button {
+                                    activity = "run"
+                                    selectedTab = "training"
+                                } label: {
+                                    Label("Open run", systemImage: "figure.run")
+                                }
+                                .buttonStyle(.bordered)
+                                .tint(HCDesign.electric)
+                            }
+                            if lift == nil && run == nil {
+                                Button("Open Training") { selectedTab = "training" }
+                                    .buttonStyle(.bordered)
+                                    .tint(HCDesign.electric)
+                            }
+                        }
+                    }
+                }
+                HCSectionTitle(title: "Your recovery", detail: "Latest source readings")
+                if appleHealth.loading && appleHealth.metrics.isEmpty {
+                    IMUNLoadingPlaceholder(lines: 3, height: 118)
+                } else {
+                    HStack(alignment: .top, spacing: 9) {
+                        IMUNTodaysHealthStat(label: "Sleep", metric: sleep)
+                        IMUNTodaysHealthStat(label: "HRV", metric: hrv)
+                        IMUNTodaysHealthStat(label: "Resting HR", metric: resting)
+                    }
+                }
+                Button {
+                    selectedTab = "health"
+                } label: {
+                    Label("View Health details", systemImage: "arrow.up.right")
+                        .font(.system(size: 12, weight: .semibold))
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(HCDesign.electric)
+                HCCard {
+                    VStack(alignment: .leading, spacing: 10) {
+                        HStack(spacing: 8) {
+                            IMUNIsaiahMark(size: 32)
+                            Text("IsAIah / DAILY BRIEF")
+                                .font(HCDesign.label(11))
+                        }
+                        Text(sessionSummary)
+                            .font(.system(size: 13, weight: .semibold))
+                        Text(healthSummary)
+                            .font(.system(size: 12))
+                            .foregroundStyle(HCDesign.secondary)
+                        Text("On-device summary of real records; not an AI-generated readiness score.")
+                            .font(.system(size: 10))
+                            .foregroundStyle(HCDesign.secondary)
+                    }
+                }
+                Spacer(minLength: 95)
+            }
+            .padding(.horizontal, 18)
+            .padding(.top, 17)
+        }
+        .scrollIndicators(.hidden)
+        .hcPage()
+        .navigationTitle("Today")
+        .navigationBarTitleDisplayMode(.inline)
+        .onAppear { appleHealth.refreshIfAuthorized() }
+    }
+}
+
+private struct IMUNTodaysHealthStat: View {
+    let label: String
+    let metric: HCHealthMetric?
+    var body: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            Text(label.uppercased())
+                .font(HCDesign.label(9))
+                .foregroundStyle(HCDesign.secondary)
+            Text(metric?.value ?? "—")
+                .font(.system(size: 17, weight: .semibold))
+                .monospacedDigit().lineLimit(1).minimumScaleFactor(0.55)
+            Text(metric.map { $0.source + " · " + $0.date } ?? "No reading")
+                .font(.system(size: 9))
+                .foregroundStyle(HCDesign.secondary)
+                .lineLimit(2)
+        }
+        .frame(maxWidth: .infinity, minHeight: 76, alignment: .leading)
+        .padding(10)
+        .background(HCDesign.card, in: RoundedRectangle(cornerRadius: 12))
+    }
+}
+
 // MARK: - Health Coach 2.0 navigation
 
 struct PremiumHomeView: View {
