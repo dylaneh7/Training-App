@@ -910,15 +910,20 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
                         guard let self else { return }
                         let accepted = reply["received"] as? Bool == true &&
                             reply["scheduleState"] as? String == scheduled.state &&
-                            reply["workoutID"] as? String == (scheduled.workout?.id ?? "")
+                            reply["workoutID"] as? String == (scheduled.workout?.id ?? "") &&
+                            reply["runID"] as? String == (scheduled.runPlan?.id ?? "") &&
+                            reply["runSignature"] as? String == (scheduled.runPlan?.syncSignature ?? "")
                         if accepted {
                             self.watchLastAcknowledgedAt = Date()
                             if scheduled.state != "ready" {
                                 self.watchSyncStatus = "Watch connected · waiting for today's workout"
+                            } else if let run = scheduled.runPlan {
+                                self.watchSyncStatus = "Watch matches today's run: " + run.title
                             } else if let lift = scheduled.workout {
-                                self.watchSyncStatus = "Watch loaded: " + lift.title
+                                self.watchSyncStatus = "Watch loaded strength: " + lift.title +
+                                    " · no run scheduled today"
                             } else {
-                                self.watchSyncStatus = "Watch confirmed no lift scheduled today"
+                                self.watchSyncStatus = "Watch confirmed no training scheduled today"
                             }
                         } else if forceQueue {
                             self.queueWatchDelivery(packet)
@@ -1288,11 +1293,22 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
                       self.confirmedScheduleDate == today,
                       userInfo["scheduleState"] as? String == "ready",
                       userInfo["workoutID"] as? String ==
-                          (self.workout?.date == today ? self.workout?.id ?? "" : "") else { return }
+                          (self.workout?.date == today ? self.workout?.id ?? "" : ""),
+                      userInfo["runID"] as? String ==
+                          (self.runPlan?.date == today ? self.runPlan?.id ?? "" : ""),
+                      userInfo["runSignature"] as? String ==
+                          (self.runPlan?.date == today ? self.runPlan?.syncSignature ?? "" : "") else {
+                    self.watchSyncStatus = "Watch received an older or different run · resync needed"
+                    return
+                }
                 self.watchLastAcknowledgedAt = Date()
-                self.watchSyncStatus = self.workout.map {
-                    "Watch loaded: " + $0.title
-                } ?? "Watch confirmed no lift scheduled today"
+                if let run = self.runPlan, run.date == today {
+                    self.watchSyncStatus = "Watch matches today's run: " + run.title
+                } else {
+                    self.watchSyncStatus = self.workout.map {
+                        "Watch loaded strength: " + $0.title
+                    } ?? "Watch confirmed no training scheduled today"
+                }
             }
             return
         }
