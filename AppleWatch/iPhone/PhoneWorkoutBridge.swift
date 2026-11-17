@@ -1027,13 +1027,51 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
                 lines.append(summary)
             }
         }
-        for entry in performanceHistory.prefix(10) {
-            lines.append("Strength history: \(entry.date) \(entry.exercise) \(String(format: "%.1f", entry.weightLb)) lb x \(entry.reps)")
+        // Include enough actual session history to answer trends and PR queries.
+        // Derived running pace uses measured distance and elapsed time only.
+        let windows: [(String, Int, Int)] = [
+            ("Recent 30 days", 0, 30), ("Previous 30 days", 30, 60)
+        ]
+        for (label, lower, upper) in windows {
+            let measured = runHistory.filter { run in
+                guard let day = HCPlanBuilder.startOfDate(run.date) else { return false }
+                let days = Calendar.current.dateComponents([.day], from: day, to: Date()).day ?? 999
+                return days >= lower && days < upper &&
+                    (run.distanceMeters ?? 0) > 0 && (run.durationSeconds ?? 0) > 0
+            }
+            let miles = measured.reduce(0.0) { $0 + ($1.distanceMeters ?? 0) / 1609.344 }
+            let duration = measured.reduce(0.0) { $0 + ($1.durationSeconds ?? 0) }
+            lines.append(miles > 0
+                ? String(format: "%@: %d measured runs, %.1f miles, %.2f min/mi distance-weighted pace",
+                         label, measured.count, miles, duration / 60 / miles)
+                : label + ": no measured pace records available")
         }
-        for run in runHistory.prefix(8) {
-            let distance = run.distanceMeters.map { String(format: "%.2f mi", $0 / 1609.344) }
-                ?? "distance unknown"
-            lines.append("Run: \(run.date) \(run.title), \(distance), source \(run.source)")
+        let personalRecords = Dictionary(grouping: performanceHistory, by: \.exercise)
+            .compactMap { name, sets -> (String, Double)? in
+                guard let maxLoad = sets.map(\.weightLb).max() else { return nil }
+                return (name, maxLoad)
+            }.sorted { $0.0 < $1.0 }
+        for (name, value) in personalRecords.prefix(25) {
+            lines.append("Heaviest recorded load for " + name + ": " +
+                         String(format: "%.1f lb", value) +
+                         ". Actual recorded set, not estimated 1RM.")
+        }
+        for entry in performanceHistory.sorted(by: { $0.date > $1.date }).prefix(55) {
+            lines.append("Strength set: \(entry.date) \(entry.exercise) " +
+                         String(format: "%.1f lb × %d reps", entry.weightLb, entry.reps))
+        }
+        for run in runHistory.sorted(by: { $0.date > $1.date }).prefix(24) {
+            let distance = run.distanceMeters.map {
+                String(format: "%.2f mi", $0 / 1609.344)
+            } ?? "distance unavailable"
+            let pace: String
+            if let meters = run.distanceMeters, let seconds = run.durationSeconds,
+               meters > 0, seconds > 0 {
+                pace = String(format: "%.2f min/mi", seconds / 60 / (meters / 1609.344))
+            } else {
+                pace = "pace unavailable"
+            }
+            lines.append("Measured run \(run.date) \(run.title): \(distance), \(pace), source \(run.source)")
         }
         if shareRecovery {
             // All loaded Health-screen cards, even those not scrolled into view.
