@@ -68,6 +68,7 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
     private var confirmedIDs: Set<UUID> = []
     private var latestSchedule: HCWatchSchedule?
     private var hasReceivedPhoneScheduleToday = false
+    private var loadingCloudSchedule = false
     private var latestAppliedPhoneScheduleAt: Date?
     private let cloud = HCWatchCloudFallback()
     private var cloudUploadedIDs: Set<UUID> = []
@@ -158,40 +159,51 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
     }
 
     func refreshCloudWorkout() {
-        guard cloudSignedIn else { cloudStatus = "Sign in on Watch first"; return }
+        guard cloudSignedIn else {
+            cloudStatus = "Sign in to iMun cloud on Watch to load the workout"
+            return
+        }
+        guard !loadingCloudSchedule else { return }
+        loadingCloudSchedule = true
         let day = Self.today()
-        cloudStatus = "Downloading today's plan…"
+        cloudStatus = "Downloading today's strength and running plans…"
         Task { [weak self] in
             guard let self else { return }
             do {
-                let published = try await cloud.fetchPublishedWorkout(date: day)
+                // New complete plan (includes no-lift days with scheduled runs).
+                // An older strength-only row remains a compatibility fallback.
+                let complete = try await cloud.fetchPublishedSchedule(date: day)
+                let legacy = complete == nil
+                    ? try await cloud.fetchPublishedWorkout(date: day) : nil
                 DispatchQueue.main.async {
+                    self.loadingCloudSchedule = false
                     guard day == Self.today() else { return }
-                    // The direct cloud endpoint only publishes strength plans.
-                    // Never overwrite an iPhone-confirmed running schedule with
-                    // a fresh cloud timestamp and stale/missing running data.
-                    if self.hasReceivedPhoneScheduleToday ||
-                       (self.latestSchedule?.date == day &&
-                        self.latestSchedule?.state == "ready" &&
-                        self.latestSchedule?.runPlan != nil) {
-                        self.cloudStatus = "iPhone running plan preserved · cloud strength available"
+                    if self.hasReceivedPhoneScheduleToday {
+                        self.cloudStatus = "Phone plan already current · cloud available as backup"
                         self.refreshCloudSets()
                         return
                     }
-                    guard let published else {
-                        self.cloudStatus = "No workout published for today yet · open iMun on iPhone once"
-                        return
+                    if let complete {
+                        self.applySchedule(complete)
+                        self.cloudStatus = complete.runPlan != nil
+                            ? "Cloud running and strength plan loaded"
+                            : "Cloud training schedule loaded"
+                        self.refreshCloudSets()
+                    } else if let legacy {
+                        self.applySchedule(HCWatchSchedule(
+                            date: day, workout: legacy,
+                            runPlan: self.runPlan?.date == day ? self.runPlan : nil,
+                            generatedAt: Date(), state: "ready"))
+                        self.cloudStatus = "Legacy strength workout loaded · iPhone has not published a full plan"
+                        self.refreshCloudSets()
+                    } else {
+                        self.cloudStatus = "No schedule published for today · open iMun on iPhone"
                     }
-                    self.applySchedule(HCWatchSchedule(
-                        date: day, workout: published,
-                        runPlan: self.runPlan?.date == day ? self.runPlan : nil,
-                        generatedAt: Date(), state: "ready"))
-                    self.refreshCloudSets()
-                    self.cloudStatus = "Today's workout downloaded directly from cloud"
                 }
             } catch {
                 DispatchQueue.main.async {
-                    self.cloudStatus = "Cloud download failed: " + error.localizedDescription
+                    self.loadingCloudSchedule = false
+                    self.cloudStatus = "Cloud schedule download failed: " + error.localizedDescription
                 }
             }
         }
@@ -763,9 +775,10 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
             return
         }
         phoneConnectionStatus =
-            "iPhone app recognized: " +
-            (connection.isCompanionAppInstalled ? "Yes" : "No") +
-            " · Live reachable: " + (connection.isReachable ? "Yes" : "No")
+            "Companion registration: " +
+            (connection.isCompanionAppInstalled ? "Recognized" : "Not confirmed") +
+            " · Live messaging: " + (connection.isReachable ? "Available" : "Unavailable") +
+            " · Cloud schedule works independently"
     }
 
     /// A real round-trip probe avoids interpreting a boolean as a successful
@@ -808,6 +821,8 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
         scheduleState = "loading"
         scheduleUpdatedAt = nil
         latestSchedule = nil
+        hasReceivedPhoneScheduleToday = false
+        latestAppliedPhoneScheduleAt = nil
         runPlan = nil
         hasScheduledLift = false
         try? FileManager.default.removeItem(at: directory.appendingPathComponent("run-plan.json"))
@@ -1420,6 +1435,29 @@ private actor HCWatchCloudFallback {
         guard let rows = try JSONSerialization.jsonObject(with: data)
                 as? [[String: Any]] else { throw HCWatchCloudError.malformed }
         return rows.first?["design"] as? [String: Any]
+    }
+
+    /// The same versioned daily schedule that iMun shows on iPhone.
+    /// This is independent of WatchConnectivity's foreground reachability.
+    func fetchPublishedSchedule(date: String) async throws -> HCWatchSchedule? {
+        let session = try await authorized()
+        let data = try await request(
+            path: "/rest/v1/health_coach_watch_schedules",
+            query: [
+                URLQueryItem(name: "select", value: "schedule"),
+                URLQueryItem(name: "user_id", value: "eq." + session.userID),
+                URLQueryItem(name: "workout_date", value: "eq." + date),
+                URLQueryItem(name: "limit", value: "1")
+            ], bearer: session.access)
+        guard let rows = try JSONSerialization.jsonObject(with: data) as? [[String: Any]]
+        else { throw HCWatchCloudError.malformed }
+        guard let raw = rows.first?["schedule"] as? [String: Any] else { return nil }
+        let bytes = try JSONSerialization.data(withJSONObject: raw)
+        let snapshot = try JSONDecoder().decode(HCWatchSchedule.self, from: bytes)
+        guard snapshot.date == date, snapshot.state == "ready" else {
+            throw HCWatchCloudError.malformed
+        }
+        return snapshot
     }
 
     func fetchPublishedWorkout(date: String) async throws -> HCWorkout? {
