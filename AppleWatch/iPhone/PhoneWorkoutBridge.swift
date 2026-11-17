@@ -598,6 +598,24 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
             exercises.swapAt(index, next)
         }
 
+        // The Watch and exercise editor both rely on exerciseIndex as well
+        // as array order. Keep them consistent after a move or removal while
+        // preserving stable exercise IDs and all historical logged sets.
+        if edit.operation == .moveUp || edit.operation == .moveDown ||
+           edit.operation == .remove {
+            exercises = exercises.enumerated().map { index, exercise in
+                var normalized = HCExercise(
+                    id: exercise.id, name: exercise.name,
+                    originalName: exercise.originalName, exerciseIndex: index,
+                    prescribedSets: exercise.prescribedSets,
+                    repMin: exercise.repMin, repMax: exercise.repMax,
+                    suggestedWeightLb: exercise.suggestedWeightLb,
+                    restSeconds: exercise.restSeconds)
+                normalized.instructions = exercise.instructions
+                return normalized
+            }
+        }
+
         guard exercises != plan.exercises else {
             status = "No prescription change to save."
             return nil
