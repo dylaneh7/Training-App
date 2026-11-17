@@ -418,6 +418,33 @@ actor HCCloudClient {
         return HCSetReconciliation.decodeCloudRows(rows, workout: workout)
     }
 
+    /// Read only signed-in athlete's undone set/session windows. Raw records
+    /// are never used in progress after these corrections have arrived.
+    func fetchWorkoutUndos(for workout: HCWorkout) async throws -> [HCWorkoutUndo] {
+        let rows = try await readRows("health_coach_workout_undos",
+            fields: "id,kind,set_id,workout_date,session_key,window_started_at,window_ended_at,created_at",
+            otherQuery: [
+                URLQueryItem(name: "workout_date", value: "eq." + workout.date),
+                URLQueryItem(name: "session_key", value: "eq." + workout.sessionKey)
+            ], limit: 500)
+        return HCWorkoutUndo.decodeCloudRows(rows)
+    }
+
+    /// Idempotent user-scoped undo RPC. It atomically records a correction
+    /// and removes matching server sets; the DB blocks late retransmissions.
+    func recordWorkoutUndo(_ correction: HCWorkoutUndo) async throws {
+        let credentials = try await authorizedToken()
+        let response = try await send(path: "/rest/v1/rpc/imun_undo_workout_record",
+                                      method: "POST",
+                                      json: correction.apiPayload,
+                                      bearer: credentials.access)
+        guard let confirmed = (try? JSONSerialization.jsonObject(
+            with: response, options: .fragmentsAllowed)) as? Bool,
+              confirmed else {
+            throw HCCloudError.malformedResponse
+        }
+    }
+
     func fetchWatchPerformance(before: String) async throws -> [HCPerformanceSet] {
         let rows = try await readRows("health_coach_watch_sets",
             fields: "exercise_name,weight_lb,reps,rir,workout_date",
