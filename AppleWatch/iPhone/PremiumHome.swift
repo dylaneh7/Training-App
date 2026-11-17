@@ -27,6 +27,7 @@ private enum IMUNTrainingActivity: String, CaseIterable, Identifiable {
 private struct IMUNTodayPage: View {
     @EnvironmentObject private var coach: PhoneWorkoutBridge
     @ObservedObject var appleHealth: HCAppleHealthReader
+    let openCoach: () -> Void
     @AppStorage("hcSelectedTab") private var selectedTab = "today"
     @AppStorage("hcTrainingActivity") private var activity = "weightlifting"
     @AppStorage("hcPreferredHealthSource") private var preferredSource = "Auto"
@@ -131,6 +132,7 @@ private struct IMUNTodayPage: View {
                         }
                     }
                 }
+                IMUNEitanTodayCard(openCoach: openCoach)
                 HCSectionTitle(title: "Your recovery", detail: "Latest source readings")
                 if appleHealth.loading && appleHealth.metrics.isEmpty {
                     IMUNLoadingPlaceholder(lines: 3, height: 118)
@@ -176,6 +178,100 @@ private struct IMUNTodayPage: View {
         .navigationTitle("Today")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear { appleHealth.refreshIfAuthorized() }
+    }
+}
+
+/// Proactive on-device IsAIah guidance; prompts appear only in the app,
+/// never as a surprise remote Health-data share or automatic plan mutation.
+private struct IMUNEitanTodayCard: View {
+    @EnvironmentObject private var coach: PhoneWorkoutBridge
+    @AppStorage("hcEitanEnabled") private var showEitan = true
+    @AppStorage("hcEitanUseHealth") private var healthEnabled = true
+    @AppStorage("hcEitanCoachingEnabled") private var coachingEnabled = true
+    @AppStorage("hcEitanNudgeDismissedDay") private var dismissedDay = ""
+    let openCoach: () -> Void
+
+    var body: some View {
+        if showEitan {
+            HCCard(accent: HCDesign.electric) {
+                VStack(alignment: .leading, spacing: 11) {
+                    HStack {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("EITAN / " + (healthEnabled ? "BODY WELLNESS" : "TRAINING"))
+                                .font(HCDesign.label(10))
+                                .tracking(1)
+                                .foregroundStyle(HCDesign.electric)
+                            Text("Enduring · Steadfast")
+                                .font(.system(size: 12))
+                                .foregroundStyle(HCDesign.secondary)
+                        }
+                        Spacer()
+                        Text(healthEnabled
+                             ? (coach.eitanSnapshot?.value.map(String.init) ?? "—") + " / 100"
+                             : "TRAINING-ONLY")
+                            .font(HCDesign.display(24))
+                            .monospacedDigit()
+                            .foregroundStyle(HCDesign.ink)
+                            .minimumScaleFactor(0.65)
+                            .lineLimit(1)
+                    }
+                    if healthEnabled {
+                        if let snapshot = coach.eitanSnapshot,
+                           snapshot.date == HCPlanBuilder.dateString(Date()) {
+                            Text(snapshot.coverage)
+                                .font(.system(size: 11))
+                                .foregroundStyle(HCDesign.secondary)
+                            if coachingEnabled {
+                                if snapshot.needsRecoveryConversation &&
+                                   dismissedDay != snapshot.date {
+                                    HStack(spacing: 8) {
+                                        Image(systemName: "moon.zzz.fill")
+                                            .foregroundStyle(HCDesign.electric)
+                                        Text("IsAIah · Recovery check-in")
+                                            .font(.system(size: 13, weight: .semibold))
+                                        Spacer()
+                                        Button("Dismiss") { dismissedDay = snapshot.date }
+                                            .font(.system(size: 11))
+                                    }
+                                }
+                                if dismissedDay != snapshot.date || !snapshot.needsRecoveryConversation {
+                                    Text(snapshot.coaching)
+                                        .font(.system(size: 12))
+                                        .foregroundStyle(HCDesign.ink)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                    if snapshot.value != nil {
+                                        Button {
+                                            openCoach()
+                                        } label: {
+                                            Label("Discuss today's training with IsAIah",
+                                                  systemImage: "bubble.left.and.text.bubble.right")
+                                                .font(.system(size: 12, weight: .semibold))
+                                        }
+                                        .buttonStyle(.bordered)
+                                        .tint(HCDesign.electric)
+                                    }
+                                }
+                            } else {
+                                Text(snapshot.status)
+                                    .font(.system(size: 12))
+                                    .foregroundStyle(HCDesign.secondary)
+                            }
+                        } else {
+                            Text("EITAN needs comparable, authorized Health measurements to establish a personal baseline.")
+                                .font(.system(size: 12))
+                                .foregroundStyle(HCDesign.secondary)
+                        }
+                    } else {
+                        Text("Health measurements are excluded from EITAN. Training momentum remains available on Apple Watch.")
+                            .font(.system(size: 12))
+                            .foregroundStyle(HCDesign.secondary)
+                    }
+                    Text("Personal trends and coaching suggestions are informational, not medical diagnoses.")
+                        .font(.system(size: 10))
+                        .foregroundStyle(HCDesign.secondary)
+                }
+            }
+        }
     }
 }
 
@@ -298,6 +394,10 @@ struct PremiumHomeView: View {
     @AppStorage("hcDesignCustomGeometry") private var designCustomGeometry = false
     @AppStorage("hcWidgetShareHealth") private var shareWidgetHealth = false
     @AppStorage("hcLiveActivitiesEnabled") private var enableLiveActivities = true
+    @AppStorage("hcEitanEnabled") private var eitanEnabled = true
+    @AppStorage("hcEitanUseHealth") private var eitanUseHealth = true
+    @AppStorage("hcEitanCoachingEnabled") private var eitanCoachingEnabled = true
+    @AppStorage("hcPreferredHealthSource") private var eitanSource = "Auto"
     @Environment(\.scenePhase) private var scenePhase
     private let scheduleRefresh = Timer.publish(every: 60, on: .main, in: .common).autoconnect()
     // Network polling should never be a 15-second render interruption on Health/Progress.
@@ -356,6 +456,15 @@ struct PremiumHomeView: View {
         isIsaiahPresented = true
     }
 
+    private func updateEitan() {
+        guard eitanEnabled && eitanUseHealth else {
+            coach.updateEitan(nil)
+            return
+        }
+        coach.updateEitan(IMUNEitanWellnessEngine.evaluate(
+            health: appleHealth, coach: coach, preferredSource: eitanSource))
+    }
+
     private func publishWidgets() {
         IMUNWidgetPublisher.publish(coach: coach,
                                     health: appleHealth,
@@ -368,7 +477,7 @@ struct PremiumHomeView: View {
 
     var body: some View {
         TabView(selection: $selectedTab) {
-            NavigationStack { IMUNTodayPage(appleHealth: appleHealth) }
+            NavigationStack { IMUNTodayPage(appleHealth: appleHealth, openCoach: presentIsaiah) }
                 .tabItem { Label("Today", systemImage: "sun.max.fill") }
                 .tag("today")
             NavigationStack { PremiumTrainingPage() }
@@ -431,8 +540,30 @@ struct PremiumHomeView: View {
             }
         }
         .onReceive(appleHealth.$metrics) { _ in
-            DispatchQueue.main.async { publishWidgets() }
+            DispatchQueue.main.async {
+                publishWidgets()
+                updateEitan()
+            }
         }
+        .onReceive(appleHealth.$metricHistory) { _ in
+            DispatchQueue.main.async { updateEitan() }
+        }
+        .onReceive(coach.$recoveryHistory) { _ in
+            DispatchQueue.main.async { updateEitan() }
+        }
+        .onReceive(coach.$trainingActivities) { _ in
+            DispatchQueue.main.async { updateEitan() }
+        }
+        .onChange(of: eitanEnabled) { _, _ in
+            updateEitan()
+            coach.sendToWatch()
+        }
+        .onChange(of: eitanUseHealth) { _, _ in
+            updateEitan()
+            coach.sendToWatch()
+        }
+        .onChange(of: eitanCoachingEnabled) { _, _ in coach.sendToWatch() }
+        .onChange(of: eitanSource) { _, _ in updateEitan() }
         .onChange(of: shareWidgetHealth) { _, _ in publishWidgets() }
         .onChange(of: enableLiveActivities) { _, _ in updateLiveWorkout() }
         .onChange(of: selectedTab) { _, tab in
@@ -491,6 +622,7 @@ struct PremiumHomeView: View {
             if tredictPlans.connected { tredictPlans.refresh() }
             publishWidgets()
             updateLiveWorkout()
+            updateEitan()
         }
     }
 
@@ -4423,6 +4555,9 @@ private struct PremiumCoachConversation: View {
 // All original settings and integrations remain available through the Coach gear.
 private struct PremiumSettingsPage: View {
     @EnvironmentObject private var coach: PhoneWorkoutBridge
+    @AppStorage("hcEitanEnabled") private var eitanEnabled = true
+    @AppStorage("hcEitanUseHealth") private var eitanUseHealth = true
+    @AppStorage("hcEitanCoachingEnabled") private var eitanCoachingEnabled = true
     @EnvironmentObject private var tredict: HCTredictImporter
     @State private var tredictToken = ""
     @AppStorage("hcAggressiveProgression") private var aggressive = true
@@ -4496,6 +4631,47 @@ private struct PremiumSettingsPage: View {
                         .tint(HCDesign.electric)
                         Text("Movement changes use conservative estimates, confidence labels, and your subsequent actual performance.")
                             .font(.caption2).foregroundStyle(HCDesign.secondary)
+                    }
+                }
+                HCSectionTitle(title: "EITAN", detail: "Wellness & adaptive coaching")
+                HCCard {
+                    VStack(alignment: .leading, spacing: 13) {
+                        Toggle(isOn: $eitanEnabled) {
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text("Show EITAN").font(.system(size: 14, weight: .semibold))
+                                Text("Display the EITAN score and its explanation on Apple Watch and Today.")
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(HCDesign.secondary)
+                            }
+                        }
+                        .tint(HCDesign.electric)
+                        if eitanEnabled {
+                            Divider()
+                            Toggle(isOn: $eitanUseHealth) {
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text("Use Health data for EITAN")
+                                        .font(.system(size: 14, weight: .semibold))
+                                    Text("On: personal wellness trends from authorized measurements. Off: training momentum only; no Health readings enter EITAN.")
+                                        .font(.system(size: 11))
+                                        .foregroundStyle(HCDesign.secondary)
+                                }
+                            }
+                            .tint(HCDesign.electric)
+                            Divider()
+                            Toggle(isOn: $eitanCoachingEnabled) {
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text("Adaptive IsAIah suggestions")
+                                        .font(.system(size: 14, weight: .semibold))
+                                    Text("Offer recovery or progression guidance. Three consecutive lower-wellness days trigger an optional plan-review prompt. No automatic workout edits.")
+                                        .font(.system(size: 11))
+                                        .foregroundStyle(HCDesign.secondary)
+                                }
+                            }
+                            .tint(HCDesign.electric)
+                            Text("Score calculations stay on your devices. IsAIah receives Health readings only if you separately opt in when sending a chat message.")
+                                .font(.system(size: 11))
+                                .foregroundStyle(HCDesign.secondary)
+                        }
                     }
                 }
                 HCSectionTitle(title: "Home & Lock Screen", detail: "Widgets and live workouts")
