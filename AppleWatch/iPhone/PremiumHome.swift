@@ -850,7 +850,10 @@ private struct PremiumStrengthPage: View {
                                coach.phoneSessionStartedAt == nil {
                                 IMUNThemeCompletionCallout()
                             } else if coach.phoneSessionStartedAt == nil {
-                                HCFilledButton(title: "START WORKOUT", icon: "play.fill") {
+                                HCFilledButton(
+                                    title: coach.activeWatchStartedAt != nil ?
+                                        "CONTINUE FROM WATCH" : "START WORKOUT",
+                                    icon: "play.fill") {
                                     coach.startPhoneWorkout()
                                 }
                             } else {
