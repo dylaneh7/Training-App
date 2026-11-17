@@ -482,10 +482,34 @@ private struct IMUNEitanExplanation: View {
                             .background(WTheme.panel,
                                         in: RoundedRectangle(cornerRadius: 12))
                         }
-                        Text(wellness.coaching)
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundStyle(WTheme.aqua)
-                            .fixedSize(horizontal: false, vertical: true)
+                        if let strategy = wellness.coachingPlan {
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text("ISAIah · " + strategy.title.uppercased())
+                                    .font(.system(size: 11, weight: .semibold))
+                                    .foregroundStyle(WTheme.lime)
+                                Text("\(strategy.recordedTrainingStreak) recorded training days in a row · \(strategy.recentHardDays) high-effort days this week")
+                                    .font(.system(size: 10))
+                                    .foregroundStyle(WTheme.muted)
+                                Text(strategy.message)
+                                    .font(.system(size: 10))
+                                    .foregroundStyle(WTheme.aqua)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                ForEach(strategy.cues.prefix(2), id: \.self) { cue in
+                                    Text("• " + cue)
+                                        .font(.system(size: 10))
+                                        .foregroundStyle(IMUNStyle.palette.ink)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                }
+                                Text("Evidence: " + strategy.confidence)
+                                    .font(.system(size: 9))
+                                    .foregroundStyle(WTheme.muted)
+                            }
+                        } else {
+                            Text(wellness.coaching)
+                                .font(.system(size: 11, weight: .medium))
+                                .foregroundStyle(WTheme.aqua)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
                     } else {
                         Text("Open iMun on iPhone to sync authorized Health measurements. EITAN needs comparable readings to show a wellness score.")
                             .font(.system(size: 11))
