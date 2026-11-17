@@ -37,6 +37,57 @@ struct HCWorkoutUndo: Codable, Identifiable, Hashable {
 }
 
 
+extension HCWorkoutUndo {
+    var apiPayload: [String: Any] {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return [
+            "p_id": id.uuidString.lowercased(),
+            "p_kind": kind,
+            "p_set_id": setID.map { $0.uuidString.lowercased() as Any } ?? NSNull(),
+            "p_date": workoutDate,
+            "p_session_key": sessionKey,
+            "p_started_at": startedAt.map { formatter.string(from: $0) as Any } ?? NSNull(),
+            "p_ended_at": endedAt.map { formatter.string(from: $0) as Any } ?? NSNull()
+        ]
+    }
+
+    static func decodeCloudRows(_ rows: [[String: Any]]) -> [HCWorkoutUndo] {
+        let clock = ISO8601DateFormatter()
+        clock.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let basic = ISO8601DateFormatter()
+        basic.formatOptions = [.withInternetDateTime]
+        func parse(_ raw: String?) -> Date? {
+            guard let raw else { return nil }
+            return clock.date(from: raw) ?? basic.date(from: raw)
+        }
+        return rows.compactMap { row in
+            guard let idString = row["id"] as? String,
+                  let id = UUID(uuidString: idString),
+                  let kind = row["kind"] as? String,
+                  kind == "set" || kind == "workout",
+                  let date = row["workout_date"] as? String,
+                  let key = row["session_key"] as? String,
+                  let created = parse(row["created_at"] as? String)
+            else { return nil }
+            return HCWorkoutUndo(
+                id: id, kind: kind,
+                setID: (row["set_id"] as? String).flatMap(UUID.init(uuidString:)),
+                workoutDate: date, sessionKey: key,
+                startedAt: parse(row["window_started_at"] as? String),
+                endedAt: parse(row["window_ended_at"] as? String),
+                createdAt: created)
+        }
+    }
+
+    static func merged(local: [HCWorkoutUndo], cloud: [HCWorkoutUndo])
+        -> [HCWorkoutUndo] {
+        var byID = Dictionary(uniqueKeysWithValues: cloud.map { ($0.id, $0) })
+        for entry in local { byID[entry.id] = entry }
+        return byID.values.sorted { $0.createdAt < $1.createdAt }
+    }
+}
+
 /// The source of truth for progress is a dated exercise/set slot, NOT the
 /// device on which a recording started. Every raw record retains its UUID,
 /// source, and timestamps for history/export; only the progress presentation
