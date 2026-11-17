@@ -1411,8 +1411,9 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
                 DispatchQueue.main.async { _ = self.applyEitanPacket(context) }
             }
         }
-        if let data = context["hcRecoverySnapshot"] as? Data,
-           let reading = try? decoder.decode(HCRecoveryDatum.self, from: data) {
+        if let data = context["hcRecoverySnapshot"] as? Data {
+            let reading = data.isEmpty ? nil :
+                (try? decoder.decode(HCRecoveryDatum.self, from: data))
             DispatchQueue.main.async { self.recoverySummary = reading }
         }
         if let data = context[HCPayload.runHistory] as? Data,
