@@ -226,9 +226,10 @@ struct WatchWorkoutView: View {
                                 .tracking(3)
                                 .foregroundStyle(WTheme.aqua)
                             Text("Make it\ncount.")
-                                .font(.system(size: 22, weight: .heavy, design: .rounded))
+                                .font(.system(size: 22, weight: .heavy,
+                                              design: IMUNStyle.headingDesign))
                                 .tracking(-0.6)
-                                .foregroundStyle(.white)
+                                .foregroundStyle(IMUNStyle.palette.ink)
                             Text(Date().formatted(.dateTime.weekday(.abbreviated).day()))
                                 .font(WTheme.label(10)).foregroundStyle(WTheme.muted)
                         }
@@ -942,9 +943,7 @@ private struct WatchGuidedSession: View {
             Text("NEXT SET AUTO-STARTS")
                 .font(WTheme.label(9))
                 .foregroundStyle(WTheme.muted)
-            Text(wClock(seconds))
-                .font(WTheme.metric(52))
-                .foregroundStyle(WTheme.lime)
+            IMUNThemeTimerFace(seconds: seconds, countsDown: true, compact: true)
             Button {
                 store.skipRest()
                 readyHapticSent = true
