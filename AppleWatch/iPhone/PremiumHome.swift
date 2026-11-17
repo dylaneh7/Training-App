@@ -105,8 +105,8 @@ private struct IMUNTodayPage: View {
                                     }
                                     selectedTab = "training"
                                 } label: {
-                                    Label(coach.phoneSessionStartedAt == nil ?
-                                          "Start workout" : "Resume workout",
+                                    Label(coach.isWorkoutActive ?
+                                          "Resume workout" : "Start workout",
                                           systemImage: "play.fill")
                                         .frame(maxWidth: .infinity)
                                 }
@@ -212,13 +212,15 @@ private struct IMUNActiveWorkoutMiniBar: View {
                     } else {
                         Text(coach.cloudPendingCount > 0 ?
                              "\(coach.cloudPendingCount) changes awaiting sync" :
-                             "Tap to return to your active session")
+                             (coach.phoneSessionStartedAt == nil ?
+                              "Active on Apple Watch · tap to continue" :
+                              "Tap to return to your active session"))
                             .font(.system(size: 10))
                             .foregroundStyle(HCDesign.secondary)
                     }
                 }
                 Spacer(minLength: 4)
-                if let started = coach.phoneSessionStartedAt {
+                if let started = coach.activeWorkoutStartedAt {
                     TimelineView(.periodic(from: .now, by: 1)) { now in
                         Text(hcDuration(now.date.timeIntervalSince(started)))
                             .font(.system(size: 12, weight: .semibold, design: .monospaced))
@@ -388,7 +390,7 @@ struct PremiumHomeView: View {
         .environmentObject(tredictImporter)
         .environmentObject(tredictPlans)
         .overlay(alignment: .bottom) {
-            if coach.phoneSessionStartedAt != nil {
+            if coach.isWorkoutActive {
                 IMUNActiveWorkoutMiniBar()
                     .padding(.horizontal, 14)
                     .padding(.bottom, 72)
@@ -398,7 +400,7 @@ struct PremiumHomeView: View {
         .overlay(alignment: .bottomTrailing) {
             IMUNIsaiahLauncherButton(glow: HCDesign.electric, action: presentIsaiah)
                 .padding(.trailing, 18)
-                .padding(.bottom, coach.phoneSessionStartedAt == nil ? 70 : 147)
+                .padding(.bottom, coach.isWorkoutActive ? 147 : 70)
         }
         .sheet(isPresented: $isIsaiahPresented) {
             NavigationStack {
