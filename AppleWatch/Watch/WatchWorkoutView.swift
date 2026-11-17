@@ -211,6 +211,9 @@ struct WatchWorkoutView: View {
     @AppStorage("hcDesignShape") private var visualShape = "rounded"
     @AppStorage("hcDesignFont") private var visualFont = "standard"
     @Environment(\.scenePhase) private var scenePhase
+    // Low-rate foreground refresh: no continuous iPhone connection required.
+    private let progressPulse = Timer.publish(
+        every: 15, on: .main, in: .common).autoconnect()
 
     var body: some View {
         NavigationStack {
@@ -231,9 +234,7 @@ struct WatchWorkoutView: View {
                         }
                         Spacer(minLength: 0)
                         WProgressHalo(
-                            completed: store.sets.filter {
-                                $0.workoutID == store.workout.id
-                            }.count,
+                            completed: store.guidedCompletedSets,
                             planned: store.hasScheduledLift ?
                                 store.workout.prescribedSetCount : 0)
                     }
@@ -365,6 +366,10 @@ struct WatchWorkoutView: View {
                             .font(.system(size: 10))
                             .foregroundStyle(WTheme.muted)
                             .fixedSize(horizontal: false, vertical: true)
+                        Text(store.progressSyncStatus)
+                            .font(.system(size: 10))
+                            .foregroundStyle(WTheme.muted)
+                            .fixedSize(horizontal: false, vertical: true)
                         Text(store.status)
                             .font(.system(size: 10))
                             .foregroundStyle(WTheme.muted)
@@ -452,6 +457,12 @@ struct WatchWorkoutView: View {
             store.requestCurrentSchedule()
             if store.cloudSignedIn {
                 store.refreshCloudWorkout()
+                store.refreshCloudSets()
+            }
+        }
+        .onReceive(progressPulse) { _ in
+            if scenePhase == .active && store.cloudSignedIn {
+                store.refreshCloudSets()
             }
         }
         .onChange(of: scenePhase) { _, phase in
@@ -560,7 +571,7 @@ private struct WatchStrengthReady: View {
                 Text(store.workout.title)
                     .font(.system(size: 22, weight: .heavy, design: .rounded))
                     .fixedSize(horizontal: false, vertical: true)
-                Text("\(store.workout.exercises.count) movements · \(store.workout.prescribedSetCount) sets")
+                Text("\(store.workout.exercises.count) movements · \(store.guidedCompletedSets)/\(store.workout.prescribedSetCount) sets complete")
                     .font(.system(size: 12)).foregroundStyle(WTheme.muted)
                 if let first = store.guidedExercise ?? store.workout.exercises.first {
                     VStack(alignment: .leading, spacing: 6) {
@@ -578,14 +589,23 @@ private struct WatchStrengthReady: View {
                     Text("No exercises are scheduled. Build a strength plan on iPhone, then sync.")
                         .font(.system(size: 12)).foregroundStyle(WTheme.muted)
                 }
-                WPrimary(title: "START WORKOUT", symbol: "play.fill") {
-                    store.startLifting()
-                    if store.liftClock?.isActive == true {
-                        health.start(kind: .strength)
-                        wHaptic(.start)
+                if store.guidedAllFinished {
+                    Text("ALL PRESCRIBED SETS COMPLETE")
+                        .font(WTheme.label(11))
+                        .foregroundStyle(WTheme.lime)
+                    Text("Completed sets on your iPhone and Watch count together. Raw set logs remain available on each device.")
+                        .font(.system(size: 11))
+                        .foregroundStyle(WTheme.muted)
+                } else {
+                    WPrimary(title: "START WORKOUT", symbol: "play.fill") {
+                        store.startLifting()
+                        if store.liftClock?.isActive == true {
+                            health.start(kind: .strength)
+                            wHaptic(.start)
+                        }
                     }
+                    .disabled(store.workout.exercises.isEmpty || store.runClock?.isActive == true)
                 }
-                .disabled(store.workout.exercises.isEmpty || store.runClock?.isActive == true)
                 Text(store.workout.isPreview
                      ? "Preview plan · Sync from the iPhone for your real workout."
                      : "Start once, then follow each set. You can change exercises anytime.")
