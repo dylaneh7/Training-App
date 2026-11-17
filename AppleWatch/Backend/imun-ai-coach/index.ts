@@ -49,7 +49,7 @@ export default {
     try { body = await req.json(); }
     catch { return Response.json({ error: "Invalid request" }, { status: 400, headers }); }
     const question = typeof body?.question === "string" ? body.question.trim().slice(0, 1500) : "";
-    const context = typeof body?.context === "string" ? body.context.slice(0, 4500) : "";
+    const context = typeof body?.context === "string" ? body.context.slice(0, 24000) : "";
     const includesRecovery = body?.shareRecovery === true;
     const actionMode = body?.mode === "proposeAction";
     if (question.length < 2 || question.length > 1500) {
