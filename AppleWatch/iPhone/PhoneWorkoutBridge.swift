@@ -1431,9 +1431,9 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
     }
 
     private func updatePendingCount() {
-        cloudPendingCount = loggedSets.filter {
-            !uploadedIDs.contains($0.id) &&
-            !combinedUndoRecords.contains(where: { undo in undo.applies(to: $0) })
+        cloudPendingCount = loggedSets.filter { entry in
+            !uploadedIDs.contains(entry.id) &&
+            !combinedUndoRecords.contains(where: { undo in undo.applies(to: entry) })
         }.count +
             completedWatchRuns.filter { !uploadedIDs.contains($0.id) }.count +
             undoRecords.filter { !uploadedUndoIDs.contains($0.id) }.count
@@ -1638,6 +1638,14 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
                     }
                     return
                 }
+            case HCPayload.workoutUndo:
+                if let item = try? decoder.decode(HCWorkoutUndo.self, from: payload) {
+                    DispatchQueue.main.async {
+                        self.appendUndo(item, forwardToWatch: false)
+                        replyHandler(["saved": true])
+                    }
+                    return
+                }
             default: break
             }
         }
@@ -1734,6 +1742,11 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
             DispatchQueue.main.async {
                 self.acceptRun(item)
                 self.confirmWatchRecord(item.id)
+            }
+        case HCPayload.workoutUndo:
+            guard let item = try? decoder.decode(HCWorkoutUndo.self, from: payload) else { return }
+            DispatchQueue.main.async {
+                self.appendUndo(item, forwardToWatch: false)
             }
         default: break
         }
