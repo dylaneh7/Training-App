@@ -394,6 +394,10 @@ private struct IMUNEitanHomeTile: View {
                             .frame(maxWidth: .infinity, alignment: .leading)
                         }
                     }
+                    Text("PRIMARY · " + (wellness.primaryWearable ?? "Automatic"))
+                        .font(.system(size: 8, weight: .medium))
+                        .foregroundStyle(WTheme.muted)
+                        .lineLimit(1)
                     Text(wellness.status)
                         .font(.system(size: 10, weight: .medium))
                         .foregroundStyle(WTheme.aqua)
@@ -461,6 +465,9 @@ private struct IMUNEitanExplanation: View {
                     .minimumScaleFactor(0.7)
                 if useHealth {
                     if let wellness {
+                        Text("PRIMARY WEARABLE · " + (wellness.primaryWearable ?? "Automatic"))
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(WTheme.aqua)
                         Text(wellness.coverage)
                             .font(.system(size: 10))
                             .foregroundStyle(WTheme.muted)
