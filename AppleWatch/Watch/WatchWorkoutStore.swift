@@ -43,6 +43,8 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
     @Published private(set) var runHistory: [HCProgressRun] = []
     @Published private(set) var recoverySummary: HCRecoveryDatum?
     @Published private(set) var eitanSnapshot: HCEitanSnapshot?
+    @Published private(set) var eitanSyncStatus = "Waiting for iPhone EITAN sync"
+    @Published private(set) var eitanLastReceivedAt: Date?
     @Published private(set) var sets: [HCLoggedSet] = []
     // Preserve all original records locally; cloud history is read-only.
     @Published private(set) var cloudSets: [HCLoggedSet] = []
@@ -118,6 +120,12 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
         if let s: HCRunPlan = load("run-plan.json"), s.date == Self.today() { runPlan = s }
         if let s: [HCProgressRun] = load("run-history.json") { runHistory = s }
         if let s: [HCRunFinished] = load("completed-runs.json") { completedRuns = s }
+        if let saved: HCEitanSnapshot = load("eitan-snapshot.json"),
+           saved.date == Self.today(),
+           (UserDefaults.standard.object(forKey: "hcEitanUseHealth") as? Bool ?? true) {
+            eitanSnapshot = saved
+            eitanSyncStatus = "Showing last synced iPhone EITAN"
+        }
 
         if WCSession.isSupported() {
             WCSession.default.delegate = self
@@ -1202,6 +1210,98 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
         }
     }
 
+    /// EITAN is independent of the workout schedule. The timestamp protects
+    /// newer privacy preferences and scores against late queued packets.
+    @discardableResult
+    private func applyEitanPacket(_ packet: [String: Any]) -> Bool {
+        guard let stamp = packet[HCPayload.eitanStamp] as? Double,
+              stamp.isFinite, stamp > 0,
+              let bytes = packet[HCPayload.eitanSnapshot] as? Data else {
+            return false
+        }
+        let previous = UserDefaults.standard.double(forKey: "hcEitanReceivedTimestamp")
+        if stamp < previous { return true } // Ignore older data without retry loops.
+        let reading: HCEitanSnapshot?
+        if bytes.isEmpty {
+            reading = nil
+        } else {
+            guard let decoded = try? decoder.decode(HCEitanSnapshot.self, from: bytes),
+                  decoded.date == Self.today() else {
+                eitanSyncStatus = "EITAN snapshot is outdated or unreadable"
+                return false
+            }
+            reading = decoded
+        }
+        for key in ["hcEitanEnabled", "hcEitanUseHealth",
+                    "hcEitanCoachingEnabled"] {
+            if let enabled = packet[key] as? Bool {
+                UserDefaults.standard.set(enabled, forKey: key)
+            }
+        }
+        UserDefaults.standard.set(stamp, forKey: "hcEitanReceivedTimestamp")
+        eitanSnapshot = reading
+        if let reading {
+            save(reading, name: "eitan-snapshot.json")
+        } else {
+            try? FileManager.default.removeItem(
+                at: directory.appendingPathComponent("eitan-snapshot.json"))
+        }
+        eitanLastReceivedAt = Date()
+        if (packet["hcEitanEnabled"] as? Bool ?? true) == false {
+            eitanSyncStatus = "EITAN display is off in iPhone Settings"
+        } else if (packet["hcEitanUseHealth"] as? Bool ?? true) == false {
+            eitanSyncStatus = "EITAN training-only mode synced"
+        } else if reading != nil {
+            eitanSyncStatus = reading?.value == nil
+                ? "EITAN synced · building personal baseline"
+                : "EITAN score synced from iPhone"
+        } else {
+            eitanSyncStatus = "Connected · waiting for iPhone Health readings"
+        }
+        return true
+    }
+
+    private func queueEitanRequest(_ session: WCSession) {
+        let pending = session.outstandingUserInfoTransfers.contains {
+            ($0.userInfo[HCPayload.kind] as? String) == HCPayload.eitanRequest
+        }
+        if !pending {
+            session.transferUserInfo([HCPayload.kind: HCPayload.eitanRequest])
+        }
+        eitanSyncStatus = "EITAN refresh queued · open iMun on iPhone"
+    }
+
+    func requestEitanSync() {
+        guard WCSession.isSupported() else {
+            eitanSyncStatus = "EITAN sync unsupported on this Watch"
+            return
+        }
+        let session = WCSession.default
+        guard session.activationState == .activated else {
+            eitanSyncStatus = "Connecting EITAN to iPhone…"
+            session.activate()
+            return
+        }
+        guard session.isReachable else {
+            queueEitanRequest(session)
+            return
+        }
+        eitanSyncStatus = "Requesting latest EITAN from iPhone…"
+        session.sendMessage([HCPayload.kind: HCPayload.eitanRequest],
+            replyHandler: { [weak self] response in
+                DispatchQueue.main.async {
+                    guard let self else { return }
+                    if !self.applyEitanPacket(response) {
+                        self.eitanSyncStatus = "EITAN response invalid · try again"
+                    }
+                }
+            }, errorHandler: { [weak self] _ in
+                DispatchQueue.main.async {
+                    self?.queueEitanRequest(session)
+                }
+            })
+    }
+
     private func applyContext(_ context: [String: Any]) {
         // A Watch can keep its own design, particularly when the cloud route
         // works but WatchConnectivity does not. Only accept explicit opt-in.
@@ -1281,18 +1381,13 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
                 }
             }
         }
-        for key in ["hcEitanEnabled", "hcEitanUseHealth",
-                    "hcEitanCoachingEnabled"] {
-            if let enabled = context[key] as? Bool {
-                UserDefaults.standard.set(enabled, forKey: key)
+        // Newer EITAN packets win even if old workout contexts arrive late.
+        if context[HCPayload.eitanStamp] != nil {
+            if Thread.isMainThread {
+                _ = applyEitanPacket(context)
+            } else {
+                DispatchQueue.main.async { _ = self.applyEitanPacket(context) }
             }
-        }
-        // Clearing the score on opt-out is just as important as avoiding a
-        // fresh transfer. No stale sensitive data remains in the Watch view.
-        if let payload = context["hcEitanSnapshot"] as? Data {
-            let newSnapshot = payload.isEmpty ? nil :
-                (try? decoder.decode(HCEitanSnapshot.self, from: payload))
-            DispatchQueue.main.async { self.eitanSnapshot = newSnapshot }
         }
         if let data = context["hcRecoverySnapshot"] as? Data,
            let reading = try? decoder.decode(HCRecoveryDatum.self, from: data) {
@@ -1405,6 +1500,7 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
                 let manual = self.pendingManualScheduleRequest
                 self.pendingManualScheduleRequest = false
                 self.requestCurrentSchedule(manual: manual)
+                self.requestEitanSync()
             }
         } else if let error {
             DispatchQueue.main.async { self.status = error.localizedDescription }
@@ -1423,6 +1519,7 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
                     active: self.liftClock?.isActive == true)
             }
             self.requestCurrentSchedule()
+            self.requestEitanSync()
         }
     }
 
@@ -1449,6 +1546,15 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
 
     func session(_ session: WCSession, didReceiveMessage message: [String: Any],
                  replyHandler: @escaping ([String: Any]) -> Void) {
+        if message[HCPayload.kind] as? String == HCPayload.eitanSync {
+            DispatchQueue.main.async {
+                let accepted = self.applyEitanPacket(message)
+                replyHandler(["eitanReceived": accepted,
+                              HCPayload.eitanStamp:
+                                message[HCPayload.eitanStamp] as? Double ?? 0])
+            }
+            return
+        }
         guard message[HCPayload.kind] as? String == HCPayload.pushSchedule,
               let bytes = message[HCPayload.schedule] as? Data,
               let incoming = try? decoder.decode(HCWatchSchedule.self, from: bytes),
@@ -1471,6 +1577,17 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
     }
 
     func session(_ session: WCSession, didReceiveUserInfo userInfo: [String: Any] = [:]) {
+        if userInfo[HCPayload.kind] as? String == HCPayload.eitanSync {
+            DispatchQueue.main.async {
+                guard self.applyEitanPacket(userInfo) else { return }
+                session.transferUserInfo([
+                    HCPayload.kind: HCPayload.eitanReceipt,
+                    HCPayload.eitanStamp:
+                        userInfo[HCPayload.eitanStamp] as? Double ?? 0
+                ])
+            }
+            return
+        }
         if userInfo[HCPayload.kind] as? String == HCPayload.pushSchedule {
             guard let bytes = userInfo[HCPayload.schedule] as? Data,
                   let incoming = try? decoder.decode(HCWatchSchedule.self, from: bytes),

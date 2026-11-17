@@ -521,6 +521,26 @@ private struct IMUNEitanExplanation: View {
                     .font(.system(size: 10))
                     .foregroundStyle(WTheme.muted)
                     .fixedSize(horizontal: false, vertical: true)
+                Text(store.eitanSyncStatus)
+                    .font(.system(size: 10))
+                    .foregroundStyle(WTheme.aqua)
+                    .fixedSize(horizontal: false, vertical: true)
+                if let received = store.eitanLastReceivedAt {
+                    Text("Last received " +
+                         received.formatted(date: .omitted, time: .shortened))
+                        .font(.system(size: 10))
+                        .foregroundStyle(WTheme.muted)
+                }
+                Button {
+                    store.requestEitanSync()
+                } label: {
+                    Label("SYNC EITAN FROM IPHONE",
+                          systemImage: "arrow.triangle.2.circlepath")
+                        .font(.system(size: 11, weight: .semibold))
+                        .frame(maxWidth: .infinity, minHeight: 40)
+                }
+                .buttonStyle(.bordered)
+                .tint(WTheme.lime)
                 Text("Change EITAN and Health preferences in iPhone Settings.")
                     .font(.system(size: 10))
                     .foregroundStyle(WTheme.aqua)
@@ -1570,6 +1590,15 @@ private struct WatchPreferences: View {
                     .font(.caption2).foregroundStyle(WTheme.muted)
             }
             Section("CONNECTIVITY & DIAGNOSTICS") {
+                Text(store.eitanSyncStatus)
+                    .font(.system(size: 10))
+                    .foregroundStyle(WTheme.aqua)
+                    .fixedSize(horizontal: false, vertical: true)
+                Button {
+                    store.requestEitanSync()
+                } label: {
+                    Label("Sync EITAN score", systemImage: "arrow.triangle.2.circlepath")
+                }
                 Button {
                     store.checkPhoneConnection()
                 } label: {
