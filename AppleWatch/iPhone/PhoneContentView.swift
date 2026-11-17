@@ -22,7 +22,7 @@ struct PhoneContentView: View {
                 .tabItem { Label("Recovery", systemImage: "heart.text.square.fill") }
 
             NavigationStack { CoachSettingsHome() }
-                .tabItem { Label("Coach", systemImage: "bubble.left.and.text.bubble.right") }
+                .tabItem { Label("IsAIah", systemImage: "bubble.left.and.text.bubble.right") }
         }
         .tint(.teal)
         .onChange(of: selectedDate) { _, date in coach.refresh(date: date) }
