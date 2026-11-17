@@ -14,7 +14,7 @@ Coach's conversational view now recognizes and previews:
 - Change visual themes, motivation source, rest-timer override, Watch haptics, running voice cues and auto-lap settings
 - Switch between Strength and Running and navigate Training, Progress, Health, Coach or Settings
 
-Every mutation requires a review card and Confirm Action. An ordinary AI reply is never executable code. App state and user-owned workout IDs are validated again when confirming. The first-stage command parser is deliberately deterministic; it does **not** implement arbitrary open-ended AI tool execution, full app automation or unsupervised changes. Unrecognized requests continue to the regular Coach AI service.
+Every mutation requires a review card and Confirm Action. An ordinary AI reply is never executable code. App state and user-owned workout IDs are validated again when confirming. Common commands are recognized locally. When wording is more conversational, the signed-in Coach AI can return a strictly validated JSON **suggestion** from the same allowlist. A model response never contains executable instructions and still requires explicit user approval. If the model cannot classify an action, the ordinary Coach answer is shown. This is not unrestricted AI tool execution or unsupervised full-app automation.
 
 ### Create today's run and export it to Apple Workout
 - Training → Running offers **Create Today's Run** when there is no running plan.
