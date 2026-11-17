@@ -93,6 +93,54 @@ enum IMUNCoachActionInterpreter {
         let value = request.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
         guard !value.isEmpty else { return nil }
 
+        // Prescription edits are a first-class capability, not an answer
+        // about how to use the manual editor. No guessed exercise IDs.
+        let exerciseMatches = workout?.exercises.filter {
+            value.contains($0.name.lowercased())
+        } ?? []
+        let matchedExercise = exerciseMatches.count == 1 ?
+            exerciseMatches.first : nil
+        let hasExerciseIntent = containsAny(value,
+            ["exercise", "movement", "sets", "reps", "rest", "weight",
+             "bench", "squat", "deadlift", "press", "curl", "row"]) ||
+             matchedExercise != nil
+        let isCalendarReschedule = containsAny(value,
+            ["reschedule", "tomorrow", "next week", "move my workout",
+             "shift my workout", "move today's workout"])
+        if workout != nil && !isCalendarReschedule &&
+           containsAny(value,
+            ["edit ", "adjust ", "modify ", "change ", "increase ",
+             "decrease ", "reduce ", "add ", "remove ", "delete ",
+             "replace ", "swap ", "reorder ", "move ", "update ", "set "]) &&
+           (hasExerciseIntent || containsAny(value,
+              ["edit my workout", "edit today's workout", "edit workout",
+               "change my workout", "modify my workout"])) {
+            let operation: IMUNCoachExerciseOperation
+            if containsAny(value, ["remove ", "delete "]) { operation = .remove }
+            else if containsAny(value, ["swap ", "replace "]) { operation = .replace }
+            else if containsAny(value, ["add ", "insert "]) { operation = .add }
+            else if containsAny(value, ["move ", "reorder "]) {
+                operation = containsAny(value, ["down", "later", "last"]) ?
+                    .moveDown : .moveUp
+            } else { operation = .update }
+            let targets = extractTargets(value)
+            let candidateName: String? = {
+                if let matchedExercise { return matchedExercise.name }
+                guard operation == .add || operation == .replace else { return nil }
+                return capture(value,
+                    pattern: #"(?:add|insert|replace|swap)\s+(?:an?\s+)?(?:exercise\s+)?([a-z][a-z0-9 '\-]{1,75}?)(?:\s+(?:to|with|for|at|into|in)\b|\s+\d|\s*$)"#,
+                    group: 1)?.trimmingCharacters(in: .whitespacesAndNewlines)
+            }()
+            return proposal(.editStrength, "Edit today's strength workout",
+                "Select an exercise and review the exact change before saving. Prescribed targets can change; completed set records are preserved.",
+                workoutID: workout?.id,
+                workoutEdit: IMUNCoachWorkoutEditHint(
+                    operation: operation, exerciseName: candidateName,
+                    sets: targets.sets, repMin: targets.repMin,
+                    repMax: targets.repMax, restSeconds: targets.rest,
+                    weightLb: targets.weight))
+        }
+
         let move = containsAny(value, ["move ", "reschedule ", "shift "]) &&
             containsAny(value, ["workout", "session", "run", "lift", "training"])
         if move {
@@ -396,6 +444,64 @@ enum IMUNCoachActionInterpreter {
         }
     }
 
+    private static func capture(_ text: String, pattern: String, group: Int) -> String? {
+        guard let expression = try? NSRegularExpression(pattern: pattern,
+                                                         options: .caseInsensitive) else { return nil }
+        let source = text as NSString
+        guard let match = expression.firstMatch(in: text, options: [],
+                    range: NSRange(location: 0, length: source.length)),
+              group < match.numberOfRanges,
+              match.range(at: group).location != NSNotFound else { return nil }
+        return source.substring(with: match.range(at: group))
+    }
+
+    private static func extractTargets(_ text: String)
+        -> (sets: Int?, repMin: Int?, repMax: Int?, rest: Int?, weight: Double?) {
+        var sets = capture(text, pattern: #"\b(\d{1,2})\s*sets?\b"#,
+                           group: 1).flatMap(Int.init)
+        var low = capture(text, pattern:
+            #"\b(\d{1,2})\s*(?:to|-|–)\s*\d{1,2}\s*reps?\b"#,
+            group: 1).flatMap(Int.init)
+        var high = capture(text, pattern:
+            #"\b\d{1,2}\s*(?:to|-|–)\s*(\d{1,2})\s*reps?\b"#,
+            group: 1).flatMap(Int.init)
+        if low == nil {
+            low = capture(text, pattern: #"\b(\d{1,2})\s*reps?\b"#,
+                          group: 1).flatMap(Int.init)
+            high = low
+        }
+        // Common shorthand: 4×8–10 or 3x12.
+        if let shorthand = capture(text,
+            pattern: #"\b(\d{1,2})\s*[x×]\s*\d{1,2}"#,
+            group: 1).flatMap(Int.init) {
+            sets = sets ?? shorthand
+            low = low ?? capture(text,
+                pattern: #"\b\d{1,2}\s*[x×]\s*(\d{1,2})"#,
+                group: 1).flatMap(Int.init)
+            high = high ?? capture(text,
+                pattern: #"\b\d{1,2}\s*[x×]\s*\d{1,2}\s*[-–]\s*(\d{1,2})"#,
+                group: 1).flatMap(Int.init) ?? low
+        }
+        var rest = capture(text, pattern:
+            #"\b(\d{1,3})\s*(?:seconds?|secs?)\s*(?:of\s+)?rest\b"#,
+            group: 1).flatMap(Int.init)
+        rest = rest ?? capture(text, pattern:
+            #"\brest\s*(?:for\s*)?(\d{1,3})\s*(?:seconds?|secs?)\b"#,
+            group: 1).flatMap(Int.init)
+        if rest == nil, let minutes = capture(text, pattern:
+            #"\b(\d{1,2})\s*(?:minutes?|mins?)\s*(?:of\s+)?rest\b"#,
+            group: 1).flatMap(Int.init) { rest = minutes * 60 }
+        let weight = capture(text,
+            pattern: #"\b(\d{1,4}(?:\.\d+)?)\s*(?:lb|lbs|pounds?)\b"#,
+            group: 1).flatMap(Double.init)
+        return ((sets ?? 0) >= 1 && (sets ?? 0) <= 12 ? sets : nil,
+                (low ?? 0) >= 1 && (low ?? 0) <= 30 ? low : nil,
+                (high ?? 0) >= 1 && (high ?? 0) <= 40 ? high : nil,
+                (rest ?? 0) >= 15 && (rest ?? 0) <= 360 &&
+                (rest ?? 0).isMultiple(of: 15) ? rest : nil,
+                (weight ?? -1) >= 0 && (weight ?? -1) <= 1500 ? weight : nil)
+    }
+
     private static func containsAny(_ input: String, _ terms: [String]) -> Bool {
         terms.contains { input.contains($0) }
     }
@@ -404,11 +510,13 @@ enum IMUNCoachActionInterpreter {
                                  _ title: String, _ explanation: String,
                                  workoutID: String? = nil, date: Date? = nil,
                                  theme: String? = nil,
-                                 parameter: String? = nil) -> IMUNCoachActionProposal {
+                                 parameter: String? = nil,
+                                 workoutEdit: IMUNCoachWorkoutEditHint? = nil)
+        -> IMUNCoachActionProposal {
         IMUNCoachActionProposal(kind: kind, title: title, explanation: explanation,
                                 suggestedWorkoutID: workoutID,
                                 suggestedDate: date, themeID: theme,
-                                parameter: parameter)
+                                parameter: parameter, workoutEdit: workoutEdit)
     }
 
     private static func namedWorkout(_ input: String) -> String? {
