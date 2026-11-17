@@ -66,3 +66,40 @@ let saturdaySnapshot = HCWatchSchedule(date: "2026-11-14", workout: sampleSaturd
 check(saturdaySnapshot.date != decodedRest.date,
       "Yesterday's snapshot must not be treated as today's plan")
 print("Dated schedule and rest-day serialization tests passed.")
+
+
+// EITAN wearable attribution regression checks. These run in the same Swift
+// smoke-test binary as the existing workout progression tests; no HealthKit
+// permissions are needed to verify strict provider provenance.
+check(HCEitanWearableSource.accepts("WHOOP", preferred: "WHOOP"),
+      "WHOOP data should be accepted when WHOOP is primary")
+check(HCEitanWearableSource.accepts("WHOOP Inc.", preferred: "WHOOP"),
+      "WHOOP app source variations should match")
+check(!HCEitanWearableSource.accepts("Dylan's Apple Watch", preferred: "WHOOP"),
+      "WHOOP primary must not silently use Apple Watch heart or HRV readings")
+check(!HCEitanWearableSource.accepts("Garmin via Tredict", preferred: "WHOOP"),
+      "Historical Garmin via Tredict must not be WHOOP recovery")
+check(!HCEitanWearableSource.accepts("Tredict Personal API", preferred: "Auto"),
+      "Tredict historical recovery must not be used as current wearable physiology")
+check(HCEitanWearableSource.accepts("Apple Watch", preferred: "Apple Watch"),
+      "Apple Watch users must retain their own measurements")
+check(!HCEitanWearableSource.accepts("WHOOP", preferred: "Apple Watch"),
+      "Apple Watch preference must exclude WHOOP physiology")
+check(HCEitanWearableSource.accepts("Garmin Connect", preferred: "Garmin"),
+      "Garmin primary should use actual Garmin Health source measurements")
+check(!HCEitanWearableSource.accepts("Garmin via Tredict", preferred: "Garmin"),
+      "Garmin primary must not use Tredict's archived recovery as a fresh feed")
+check(HCEitanWearableSource.accepts("WHOOP", preferred: "Auto"),
+      "Automatic mode should accept current WHOOP HealthKit data")
+
+var whoopScore = HCEitanSnapshot(
+    date: "2026-11-17", value: 74, factors: [], status: "Challenge",
+    coaching: "Controlled challenge", consecutiveLowDays: 0,
+    sourceCount: 1, coverage: "WHOOP primary")
+whoopScore.primaryWearable = "WHOOP"
+let encodedEitan = try JSONEncoder().encode(whoopScore)
+let decodedEitan = try JSONDecoder().decode(HCEitanSnapshot.self,
+                                            from: encodedEitan)
+check(decodedEitan.primaryWearable == "WHOOP" && decodedEitan.value == 74,
+      "Watch EITAN snapshot must preserve primary wearable and wellness score")
+print("EITAN primary wearable source and Watch snapshot regression tests passed.")
