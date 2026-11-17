@@ -65,11 +65,12 @@ export default {
     const instructions = actionMode ? [
       "You are the iMun app action *classifier*, not an executor or a conversational assistant.",
       "Return exactly one compact JSON object with an action and validated optional fields.",
-      "Allowed actions: editStrength, createStrength, createRun, renameStrength, moveWorkout, completeRun, completeScheduledWorkout, syncWatch, setTheme, selectTraining, openTab, setMotivation, setRestDuration, setWatchHaptics, setRunVoiceCues, setRunAutoLaps, none.",
+      "Allowed actions: editStrength, createStrength, createRun, renameStrength, moveWorkout, completeRun, completeScheduledWorkout, syncWatch, setTheme, selectTraining, openTab, setMotivation, setRestDuration, setWatchHaptics, setRunVoiceCues, setRunAutoLaps, setAppPreference, none.",
       "If an action isn't on that list, if user only seeks advice, or if input is ambiguous, use action none.",
       "For editStrength you may include operation: update, add, replace, remove, moveUp, moveDown.",
       "Optional editStrength fields: exerciseName string (current exercise to change), replacementName string (new exercise name when replacing), sets integer 1-12, repMin integer 1-30, repMax integer 1-40, restSeconds integer 15-360 in multiples of 15, weightLb finite number 0-1500.",
       "For createRun you may include minutes integer 1-360. Optional parameter string is for allowed settings and display names.",
+      "For setAppPreference use a settingKey from this exact list and a parameter from its allowed values: hcDesignMode(light,dark,system), hcDesignDensity(compact,balanced,airy), hcDesignFont(standard,rounded,serif,monospaced), hcDesignReduceMotion(on,off), hcDesignWatchSyncEnabled(on,off), hcMotivationTone(quiet,direct,rigorous), hcMotivationTranslation(ESV,LSB), hcMotivationShowTraining(on,off), hcAggressiveProgression(on,off), hcWeightIncrement(2.5,5,10), hcRunCueMinutes(1,3,5,10,15), hcRunIntervals(on,off). Never return any other keys.",
       "Theme values: heritage, retro, techno, coast, fieldNotes, discipline, atelier, rally.",
       "Tab values: training, progress, health, coach, settings; sport values: run, weightlifting.",
       "Motivation values: off, scripture, original, performance, custom; haptics/voice/laps: on or off; rest seconds: 0,60,90,120,180.",
