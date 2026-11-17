@@ -2304,6 +2304,48 @@ private struct HCHealthSummaryStat: View {
     }
 }
 
+/// The top of Health shows real source-specific readings, not synthetic
+/// readiness or combined WHOOP/Apple Watch measurements.
+private struct HCHealthQuickMetric: View {
+    let title: String
+    let reading: HCRecoverySignal?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            Text(title.uppercased())
+                .font(.system(size: 10, weight: .semibold))
+                .tracking(0.65)
+                .foregroundStyle(HCDesign.secondary)
+            Text(reading?.formattedValue ?? "—")
+                .font(.system(size: 22, weight: .semibold))
+                .monospacedDigit()
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
+                .foregroundStyle(HCDesign.ink)
+            Text(reading.map {
+                HCMetricFamily.sourceName($0.source) + " · " + $0.date
+            } ?? "No reading available")
+                .font(.system(size: 10))
+                .foregroundStyle(HCDesign.secondary)
+                .lineLimit(2)
+        }
+        .frame(maxWidth: .infinity, minHeight: 80, alignment: .leading)
+        .padding(12)
+        .background(HCDesign.card, in: RoundedRectangle(cornerRadius: 13))
+        .overlay {
+            RoundedRectangle(cornerRadius: 13)
+                .strokeBorder(HCDesign.outline.opacity(0.4), lineWidth: 1)
+        }
+        .accessibilityElement(children: .combine)
+    }
+}
+
+private struct HCHealthCategoryGroup: Identifiable {
+    let name: String
+    let families: [HCMetricFamily]
+    var id: String { name }
+}
+
 private struct PremiumRecoveryPage: View {
     @EnvironmentObject private var coach: PhoneWorkoutBridge
     @ObservedObject var appleHealth: HCAppleHealthReader
