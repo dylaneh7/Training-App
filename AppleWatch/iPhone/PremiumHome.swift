@@ -74,6 +74,11 @@ struct PremiumHomeView: View {
         .environmentObject(tredictImporter)
         .environmentObject(tredictPlans)
         .onReceive(tredictPlans.$runs) { coach.updateTredictScheduledRuns($0) }
+        .onReceive(tredictPlans.$lastSentTodayRunID) { id in
+            guard let id,
+                  let selected = tredictPlans.runs.first(where: { $0.id == id }) else { return }
+            coach.useTredictRunAsToday(selected)
+        }
         .onReceive(tredictImporter.$snapshot) { snapshot in
             if snapshot.lastSync != nil {
                 coach.updateTredictSnapshot(snapshot)
