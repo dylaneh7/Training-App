@@ -103,3 +103,25 @@ let decodedEitan = try JSONDecoder().decode(HCEitanSnapshot.self,
 check(decodedEitan.primaryWearable == "WHOOP" && decodedEitan.value == 74,
       "Watch EITAN snapshot must preserve primary wearable and wellness score")
 print("EITAN primary wearable source and Watch snapshot regression tests passed.")
+
+
+// Build 47 EITAN transport diagnostics: "received but baseline missing" and
+// "no packet" are different states. The serialization must preserve that
+// distinction across the iPhone/Watch boundary.
+var insufficient = HCEitanSnapshot(
+    date: "2026-11-17", value: nil, factors: [],
+    status: "Building your personal baseline",
+    coaching: "More readings required", consecutiveLowDays: 0,
+    sourceCount: 0, coverage: "WHOOP source · insufficient baseline")
+insufficient.primaryWearable = "WHOOP"
+let encodedInsufficient = try JSONEncoder().encode(insufficient)
+let decodedInsufficient = try JSONDecoder().decode(
+    HCEitanSnapshot.self, from: encodedInsufficient)
+check(decodedInsufficient.value == nil,
+      "No physiological baseline must remain nil on Watch, not zero")
+check(decodedInsufficient.primaryWearable == "WHOOP",
+      "A missing score must retain primary wearable provenance")
+check(HCPayload.eitanStamp != HCPayload.schedule &&
+      HCPayload.eitanSnapshot != HCPayload.schedule,
+      "EITAN snapshot and schedule must keep separate dictionary keys")
+print("EITAN nil-baseline, source attribution and packet-key regression checks passed.")
