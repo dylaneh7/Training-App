@@ -2753,6 +2753,8 @@ private struct PremiumCoachConversation: View {
     @State private var actionEditRestSeconds = 120
     @State private var actionEditWeightText = ""
     @State private var actionWorkoutSignature = ""
+    @State private var actionPreferenceKey = "hcDesignMode"
+    @State private var actionPreferenceValue = "system"
 
     private var context: String {
         turns.suffix(6).map { turn in
@@ -2927,6 +2929,8 @@ private struct PremiumCoachConversation: View {
                         editRepMax: $actionEditRepMax,
                         editRestSeconds: $actionEditRestSeconds,
                         editWeightText: $actionEditWeightText,
+                        preferenceKey: $actionPreferenceKey,
+                        preferenceValue: $actionPreferenceValue,
                         onSelectEditExercise: { id in
                             populateEditFields(for: id, hint: nil)
                         },
@@ -3147,6 +3151,10 @@ private struct PremiumCoachConversation: View {
             return action.parameter.map {
                 ["off", "scripture", "original", "performance", "custom"].contains($0)
             } ?? false
+        case .setAppPreference:
+            guard let preference = IMUNCoachPreference.byID(actionPreferenceKey)
+            else { return false }
+            return preference.choices.contains(actionPreferenceValue)
         case .setWatchHaptics, .setRunVoiceCues, .setRunAutoLaps:
             return action.parameter == "on" || action.parameter == "off"
         case .selectTraining:
@@ -3249,6 +3257,17 @@ private struct PremiumCoachConversation: View {
             guard let source = action.parameter else { return }
             motivationSource = source
             reply = "Updated motivation to \(source). It remains separate from your visual theme."
+        case .setAppPreference:
+            guard let result = IMUNCoachPreference.apply(
+                id: actionPreferenceKey, value: actionPreferenceValue) else {
+                errorMessage = "That setting is not available or the value is invalid."
+                return
+            }
+            if actionPreferenceKey.hasPrefix("hcDesign") {
+                coach.publishDesignToCloud()
+            }
+            coach.sendToWatch()
+            reply = result
         case .setRestDuration:
             guard let value = action.parameter.flatMap(Int.init) else { return }
             restSeconds = value
@@ -3293,6 +3312,13 @@ private struct PremiumCoachConversation: View {
             (proposed.parameter ?? "Custom Strength Workout")
         actionRunMinutes = Int(proposed.parameter ?? "") ?? 40
         actionRunHasHR = false
+        actionPreferenceKey = proposed.settingKey ?? "hcDesignMode"
+        actionPreferenceValue = IMUNCoachPreference.byID(actionPreferenceKey)
+            .flatMap { setting in
+                proposed.parameter.flatMap { requested in
+                    setting.choices.contains(requested) ? requested : nil
+                } ?? setting.choices.first
+            } ?? "system"
         prepareEditFields(proposed)
         isSending = false
         errorMessage = nil
