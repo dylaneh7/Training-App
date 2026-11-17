@@ -396,7 +396,7 @@ final class HCTredictWatchPlanSync: ObservableObject {
 /// Training-tab surface for selecting exactly which Tredict sessions to add.
 /// Multiple parallel Tredict plans can overlap, so nothing is auto-selected.
 struct IMUNTredictWorkoutCard: View {
-    @StateObject private var calendar = HCTredictWatchPlanSync()
+    @EnvironmentObject private var calendar: HCTredictWatchPlanSync
     @State private var selected = Set<String>()
 
     var body: some View {
