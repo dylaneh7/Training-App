@@ -63,9 +63,16 @@ enum IMUNWidgetPublisher {
 enum IMUNLiveWorkoutController {
     private static var lastState = ""
 
-    static func synchronize(coach: PhoneWorkoutBridge) {
-        guard ActivityAuthorizationInfo().areActivitiesEnabled else { return }
+    static func synchronize(coach: PhoneWorkoutBridge, enabled: Bool) {
         let active = Activity<IMUNWorkoutActivityAttributes>.activities
+        if !enabled {
+            lastState = ""
+            for activity in active {
+                Task { await activity.end(nil, dismissalPolicy: .immediate) }
+            }
+            return
+        }
+        guard ActivityAuthorizationInfo().areActivitiesEnabled else { return }
         guard let started = coach.phoneSessionStartedAt else {
             lastState = ""
             for activity in active {
