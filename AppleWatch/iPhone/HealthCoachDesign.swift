@@ -155,10 +155,15 @@ struct HCMetricGauge: View {
     var symbol: String = "waveform.path"
 
     var body: some View {
-        HStack(spacing: 16) {
-            HCProgressRing(progress: progress, value: value,
-                           subtitle: title, tint: tint, diameter: 98)
-            VStack(alignment: .leading, spacing: 10) {
+        // Large units such as "breaths/min" must not be clipped inside a
+        // 98-pt gauge. Keep the measured number prominent; put its unit below.
+        let words = value.split(separator: " ", maxSplits: 1).map(String.init)
+        let number = words.first ?? value
+        let unit = words.count > 1 ? words[1] : title
+        return HStack(spacing: 13) {
+            HCProgressRing(progress: progress, value: number,
+                           subtitle: unit, tint: tint, diameter: 98)
+            VStack(alignment: .leading, spacing: 9) {
                 Label(title.uppercased(), systemImage: symbol)
                     .font(HCDesign.label(10))
                     .tracking(0.8)
@@ -240,8 +245,12 @@ struct HCProgressRing: View {
                     .lineLimit(1)
                     .foregroundStyle(HCDesign.ink)
                 Text(subtitle.uppercased())
-                    .font(HCDesign.label(9))
-                    .tracking(1.1)
+                    .font(HCDesign.label(8))
+                    .tracking(0.2)
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.66)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: diameter - 15)
                     .foregroundStyle(HCDesign.secondary)
             }
         }
