@@ -37,15 +37,14 @@ both iPhone and watchOS CI checks are successful and the branch is merged to mai
 - Existing validated action catalog, review-before-apply, undo set/workout,
   local conversation persistence, and theme-aware UI are preserved.
 
-## Phase 44 — VYRMUN identity for Watch Home
+## Phase 44 — EITAN identity for Watch Home
 - Watch opening tile is full-width rather than cramped beside a sets graphic.
-- **VYRMUN** (veer-moon) is an original iMun brand name, not a historical Hebrew word:
-  inspired by `imun` (training) and `emunah` (faithfulness / steadfastness).
-- Watch subtitle: **Steadiness in motion**. The detail screen explains the name,
+- **EITAN** (ay-TAHN; אֵיתָן) is a genuine Biblical Hebrew word associated with endurance, firmness and strength. It is an iMun score name, not the literal Hebrew word for readiness.
+- Watch subtitle: **TRAINING MOMENTUM**. The detail screen explains the authentic Hebrew name,
   measured components, reference targets, and what happens when data is missing.
 - Score is a descriptive activity-momentum indicator, not a medical readiness
   prediction; it never counts missing Health readings as zero.
-- [ ] Watch Home VYRMUN typography fits smallest supported display
+- [ ] Watch Home EITAN typography fits smallest supported display
 - [ ] Score details explain each component and source; no bogus ready/not-ready claim
 
 ## Phase 44 — Widgets and premium iOS integration
