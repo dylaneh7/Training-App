@@ -398,12 +398,14 @@ private struct IMUNEitanHomeTile: View {
                         .font(.system(size: 8, weight: .medium))
                         .foregroundStyle(WTheme.muted)
                         .lineLimit(1)
-                    Text(wellness.status)
+                    Text(wellness.value == nil ?
+                         "Synced · personal wellness baseline incomplete" :
+                         wellness.status)
                         .font(.system(size: 10, weight: .medium))
                         .foregroundStyle(WTheme.aqua)
                         .lineLimit(2)
                 } else {
-                    Text("Sync iPhone Health to build your personal baseline")
+                    Text("No iPhone EITAN snapshot · tap to see connection details")
                         .font(.system(size: 10))
                         .foregroundStyle(WTheme.muted)
                         .fixedSize(horizontal: false, vertical: true)
