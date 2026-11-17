@@ -370,7 +370,9 @@ private struct PremiumTrainingPage: View {
             }
         }
         .hcPage()
-        .navigationTitle("Training")
+        // Match the other tabs: large in-content title scrolls away; the
+        // native compact title replaces it once Training has collapsed.
+        .navigationTitle(headerCollapsed ? "Training" : "")
         .navigationBarTitleDisplayMode(.inline)
     }
 }
@@ -2326,6 +2328,10 @@ private struct HCHealthQuickMetric: View {
             Text(reading?.formattedValue ?? "—")
                 .font(.system(size: 22, weight: .semibold))
                 .monospacedDigit()
+                .contentTransition(.numericText())
+                .animation(IMUNStyle.animationsEnabled ?
+                           .easeOut(duration: 0.16) : nil,
+                           value: reading?.formattedValue ?? "—")
                 .lineLimit(1)
                 .minimumScaleFactor(0.75)
                 .foregroundStyle(HCDesign.ink)
