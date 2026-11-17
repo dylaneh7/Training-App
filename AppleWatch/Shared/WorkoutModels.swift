@@ -205,6 +205,29 @@ struct HCRecoveryDatum: Codable, Identifiable {
 }
 
 
+/// Stable choice shared by EITAN, the optional IsAIah Health context,
+/// and the Watch. Tredict remains a workout/history provider, not a current
+/// primary wearable for physiological scoring. Never silently substitute
+/// Apple Watch HRV when WHOOP is selected and WHOOP HRV is unavailable.
+enum HCEitanWearableSource {
+    static let choices = ["Auto", "WHOOP", "Apple Watch", "Garmin"]
+
+    static func accepts(_ source: String, preferred: String) -> Bool {
+        let name = source.lowercased()
+        // Archived Tredict/Garmin biometrics are not current wearable data.
+        if name.contains("tredict") { return false }
+        switch preferred {
+        case "WHOOP": return name.contains("whoop")
+        case "Apple Watch":
+            return name.contains("apple watch") ||
+                (name.contains("watch") && !name.contains("whoop") &&
+                 !name.contains("garmin"))
+        case "Garmin": return name.contains("garmin")
+        default: return true
+        }
+    }
+}
+
 /// EITAN: on-device, observational wellness estimate. No raw HealthKit
 /// samples leave the iPhone in this compact WatchConnectivity snapshot.
 struct HCEitanFactor: Codable, Identifiable {
@@ -367,6 +390,7 @@ struct HCEitanSnapshot: Codable {
     let sourceCount: Int
     let coverage: String
     var coachingPlan: HCEitanCoachingPlan? = nil
+    var primaryWearable: String? = nil
 
     var isLow: Bool { (value ?? 100) < 60 }
     var needsRecoveryConversation: Bool {
