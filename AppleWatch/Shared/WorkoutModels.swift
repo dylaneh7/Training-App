@@ -275,9 +275,10 @@ enum HCEitanCoachingPolicy {
             (accumulatingLoad && (repeatedShortSleep || poorSubjective)) ||
             (streak >= 8 && trainingDays >= 6)
         let adapt = !recoveryReview && (
-            multipleProblems >= 1 && (streak >= 5 || poorSubjective ||
-                                      (wellness ?? 100) < 45 && lowDays >= 2 ||
-                                      hardDays >= 4 || lowMotivationWithStress))
+            persistentLow ||
+            (multipleProblems >= 1 && (streak >= 5 || poorSubjective ||
+                                       (wellness ?? 100) < 45 && lowDays >= 2 ||
+                                       hardDays >= 4 || lowMotivationWithStress)))
         let mode = recoveryReview ? "recover" : adapt ? "adapt" : "challenge"
         var reasons: [String] = []
         if streak >= 5 {
@@ -329,7 +330,7 @@ enum HCEitanCoachingPolicy {
             let oneBadNight = (shortSleepNights ?? 0) == 1 && sleepObservations >= 1
             message = oneBadNight
                 ? "One shorter night is not an automatic rest command. Train according to warm-up feel and technique, then prioritize recovery without assuming tomorrow will make up for lost sleep."
-                : "No sustained recovery warning is established. You can pursue the planned stimulus while adjusting to actual effort and technique."
+                : "No sustained recovery warning is established. You can pursue the planned stimulus while adjusting to actual effort, alertness, and technique; reduce intensity if fatigue makes movement unsafe."
             cues = styleName == "cautious" ? [
                 "Follow the plan with consistent technique and controlled progression",
                 "Use RIR or session effort to decide whether to add load",
@@ -369,7 +370,7 @@ struct HCEitanSnapshot: Codable {
 
     var isLow: Bool { (value ?? 100) < 60 }
     var needsRecoveryConversation: Bool {
-        coachingPlan?.needsConversation ?? (consecutiveLowDays >= 3)
+        consecutiveLowDays >= 3 || coachingPlan?.needsConversation == true
     }
 
     // Not a medical or injury-risk prediction. The coach must ask before
