@@ -932,6 +932,29 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
         }
     }
 
+    /// Action proposal only. Workout data stays on the signed-in user's
+    /// authenticated route, and no recovery metrics are sent to this mode.
+    func classifyIMUNCoachAction(request: String) async throws -> String {
+        guard signedIn else { throw HCCloudError.malformedResponse }
+        let today = HCPlanBuilder.dateString(Date())
+        var available: [String] = ["Today: " + today]
+        if let plan = workout, plan.date == today {
+            available.append("Current strength workout: " + plan.title)
+            available.append("Edit permissions: prescribed exercise targets only")
+            for exercise in plan.exercises.prefix(35) {
+                available.append(
+                    "Exercise: " + exercise.name +
+                    ", \(exercise.prescribedSets) sets of \(exercise.repMin)-\(exercise.repMax) reps" +
+                    ", rest \(exercise.restSeconds) sec")
+            }
+        } else { available.append("No editable strength plan loaded for today") }
+        if let run = runPlan, run.date == today {
+            available.append("Running plan: " + run.title)
+        }
+        return try await cloud.classifyIMUNCoachAction(
+            request: request, context: available.joined(separator: "\n"))
+    }
+
     /// No AI context is uploaded until a user explicitly taps Ask Coach.
     /// A Health/Recovery snapshot is transmitted only with the extra opt-in.
     func askIMUNCoach(question: String, shareRecovery: Bool,
