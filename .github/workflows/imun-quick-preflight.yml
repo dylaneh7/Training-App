@@ -1,0 +1,54 @@
+name: iMun quick Swift and Xcode project preflight
+
+on:
+  pull_request:
+    paths:
+      - 'AppleWatch/**'
+      - '.github/workflows/imun-quick-preflight.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: imun-preflight-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  syntax-and-project:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify Swift parser
+        run: swiftc --version
+      - name: Parse all iMun Swift sources
+        run: |
+          set -euo pipefail
+          find AppleWatch/iPhone AppleWatch/Shared AppleWatch/Watch AppleWatch/Widgets -name '*.swift' -print0 |
+            while IFS= read -r -d '' source; do
+              echo "Parsing $source"
+              swiftc -frontend -parse "$source"
+            done
+      - name: Validate native project and plist files
+        run: |
+          python3 - <<'PY'
+          import pathlib, plistlib, re
+          project = pathlib.Path('AppleWatch/HealthCoachNative.xcodeproj/project.pbxproj').read_text()
+          definitions = re.findall(r'^\t\t([A-F0-9]{24}) = \{$', project, re.M)
+          assert len(definitions) == len(set(definitions)), 'Duplicate PBX object'
+          allrefs = set(re.findall(r'\b0000000000000000000000[A-F0-9]{2}\b', project))
+          assert allrefs <= set(definitions), 'Broken PBX references: ' + str(allrefs-set(definitions))
+          assert 'name = IMUNWidgets;' in project
+          assert 'name = "Embed App Extensions";' in project
+          for path in [
+              'AppleWatch/iPhone/Info.plist',
+              'AppleWatch/iPhone/HealthCoachPhone.entitlements',
+              'AppleWatch/Watch/Info.plist',
+              'AppleWatch/Widgets/Info.plist',
+              'AppleWatch/Widgets/IMUNWidgets.entitlements',
+          ]:
+              with open(path, 'rb') as fh:
+                  plistlib.load(fh)
+              print('Valid plist:', path)
+          print('Validated PBX references and configuration')
+          PY
