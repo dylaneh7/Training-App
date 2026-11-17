@@ -939,6 +939,8 @@ struct IMUNCoachActionReviewCard: View {
     @Binding var editRepMax: Int
     @Binding var editRestSeconds: Int
     @Binding var editWeightText: String
+    @Binding var preferenceKey: String
+    @Binding var preferenceValue: String
     let onSelectEditExercise: (String) -> Void
     let canConfirm: Bool
     let onCancel: () -> Void
@@ -982,6 +984,29 @@ struct IMUNCoachActionReviewCard: View {
                     }
                     .tint(HCDesign.aqua)
                 }
+                if action.kind == .setAppPreference {
+                    Picker("App setting", selection: $preferenceKey) {
+                        ForEach(IMUNCoachPreference.all) { setting in
+                            Text(setting.title).tag(setting.id)
+                        }
+                    }
+                    .tint(HCDesign.electric)
+                    .onChange(of: preferenceKey) { _, newKey in
+                        preferenceValue = IMUNCoachPreference.byID(newKey)?
+                            .choices.first ?? ""
+                    }
+                    if let setting = IMUNCoachPreference.byID(preferenceKey) {
+                        Picker("New value", selection: $preferenceValue) {
+                            ForEach(setting.choices, id: \.self) { option in
+                                Text(option.capitalized).tag(option)
+                            }
+                        }
+                        .tint(HCDesign.electric)
+                    }
+                    Text("Only supported appearance, motivation and training preferences are editable here. Health permissions and account data aren't exposed.")
+                        .font(.caption2)
+                        .foregroundStyle(HCDesign.secondary)
+                }
                 if action.kind == .editStrength {
                     IMUNCoachWorkoutEditForm(
                         operation: $editOperation,
@@ -1020,7 +1045,8 @@ struct IMUNCoachActionReviewCard: View {
                    action.kind != .createRun &&
                    action.kind != .createStrength &&
                    action.kind != .renameStrength &&
-                   action.kind != .editStrength {
+                   action.kind != .editStrength &&
+                   action.kind != .setAppPreference {
                     Text("Selected value: \(parameter)")
                         .font(.caption2)
                         .foregroundStyle(HCDesign.secondary)
