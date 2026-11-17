@@ -42,8 +42,8 @@ struct IMUNThemeProgressView: View {
         GeometryReader { geometry in
             let w = geometry.size.width
             let h = geometry.size.height
-            let radiusX = w * 0.38
-            let radiusY = h * 0.34
+            let radiusX = w * 0.41
+            let radiusY = h * 0.35
             let angle = -Double.pi/2 + Double.pi * 2 * fraction
             ZStack {
                 Ellipse()
@@ -56,14 +56,13 @@ struct IMUNThemeProgressView: View {
                             style: StrokeStyle(lineWidth: 1.5, dash: [8, 6]))
                     .padding(.horizontal, w * 0.09)
                     .padding(.vertical, h * 0.15)
-                Ellipse()
-                    .trim(from: 0, to: fraction)
+                // Draw on the SAME horizontal oval as the gray road.
+                // Rotating a non-square SwiftUI Ellipse view deforms its
+                // rendered bounds into the tall vertical oval seen in Build 23.
+                IMUNRallyTrackArc(progress: fraction)
                     .stroke(accent, style: StrokeStyle(
                         lineWidth: compact ? 5 : 9,
                         lineCap: .round))
-                    .rotationEffect(.degrees(-90))
-                    .padding(.horizontal, w * 0.09)
-                    .padding(.vertical, h * 0.15)
                 Image(systemName: "car.side.fill")
                     .font(.system(size: compact ? 15 : 26, weight: .black))
                     .foregroundStyle(accent)
@@ -318,6 +317,36 @@ private struct IMUNWaveShape: Shape {
         path.addLine(to: CGPoint(x: rect.width, y: height))
         path.addLine(to: CGPoint(x: 0, y: height))
         path.closeSubpath()
+        return path
+    }
+}
+
+
+/// A bounded elliptical arc starting at twelve o'clock. Unlike rotating an
+/// Ellipse view, this uses the actual fitted track radii, so 100% completion
+/// draws exactly on top of the horizontal gray road in every aspect ratio.
+private struct IMUNRallyTrackArc: Shape {
+    let progress: Double
+
+    func path(in rect: CGRect) -> Path {
+        let fraction = max(0, min(1, progress))
+        guard fraction > 0, rect.width > 0, rect.height > 0 else {
+            return Path()
+        }
+        let rx = rect.width * 0.41
+        let ry = rect.height * 0.35
+        let cx = rect.midX
+        let cy = rect.midY
+        let steps = max(2, Int(ceil(120 * fraction)))
+        var path = Path()
+        for step in 0...steps {
+            let angle = -Double.pi / 2 +
+                2 * Double.pi * fraction * Double(step) / Double(steps)
+            let point = CGPoint(x: cx + rx * CGFloat(cos(angle)),
+                                y: cy + ry * CGFloat(sin(angle)))
+            if step == 0 { path.move(to: point) }
+            else { path.addLine(to: point) }
+        }
         return path
     }
 }
