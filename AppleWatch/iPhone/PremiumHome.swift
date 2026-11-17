@@ -266,6 +266,28 @@ private struct IMUNEitanTodayCard: View {
                             .font(.system(size: 12))
                             .foregroundStyle(HCDesign.secondary)
                     }
+                    Divider().overlay(HCDesign.outline)
+                    HStack(spacing: 10) {
+                        Image(systemName: coach.eitanWatchAcknowledgedAt == nil
+                            ? "applewatch.slash" : "applewatch")
+                            .foregroundStyle(HCDesign.electric)
+                        Text(coach.eitanWatchSyncStatus)
+                            .font(.system(size: 11))
+                            .foregroundStyle(HCDesign.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Spacer(minLength: 4)
+                        Button {
+                            coach.sendEitanToWatch(forceQueue: true)
+                        } label: {
+                            Label("Sync", systemImage: "arrow.triangle.2.circlepath")
+                                .font(.system(size: 11, weight: .semibold))
+                        }
+                        .buttonStyle(.bordered)
+                        .tint(HCDesign.electric)
+                    }
+                    Text("EITAN is delivered separately from workout syncing. A confirmation means the Watch received the data, even if the personal baseline is still being established.")
+                        .font(.system(size: 10))
+                        .foregroundStyle(HCDesign.secondary)
                     Text("Personal trends and coaching suggestions are informational, not medical diagnoses.")
                         .font(.system(size: 10))
                         .foregroundStyle(HCDesign.secondary)
@@ -561,13 +583,15 @@ struct PremiumHomeView: View {
         }
         .onChange(of: eitanEnabled) { _, _ in
             updateEitan()
-            coach.sendToWatch()
+            coach.sendEitanToWatch(forceQueue: true)
         }
         .onChange(of: eitanUseHealth) { _, _ in
             updateEitan()
-            coach.sendToWatch()
+            coach.sendEitanToWatch(forceQueue: true)
         }
-        .onChange(of: eitanCoachingEnabled) { _, _ in coach.sendToWatch() }
+        .onChange(of: eitanCoachingEnabled) { _, _ in
+            coach.sendEitanToWatch(forceQueue: true)
+        }
         .onChange(of: eitanSource) { _, _ in updateEitan() }
         )
     }
@@ -4709,6 +4733,20 @@ private struct PremiumSettingsPage: View {
                             Text("Score calculations stay on your devices. IsAIah receives Health readings only if you separately opt in when sending a chat message.")
                                 .font(.system(size: 11))
                                 .foregroundStyle(HCDesign.secondary)
+                            Divider()
+                            Text(coach.eitanWatchSyncStatus)
+                                .font(.system(size: 11))
+                                .foregroundStyle(HCDesign.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                            Button {
+                                coach.sendEitanToWatch(forceQueue: true)
+                            } label: {
+                                Label("Sync EITAN to Apple Watch",
+                                      systemImage: "applewatch.radiowaves.left.and.right")
+                                    .font(.system(size: 13, weight: .semibold))
+                            }
+                            .buttonStyle(.bordered)
+                            .tint(HCDesign.electric)
                         }
                     }
                 }
