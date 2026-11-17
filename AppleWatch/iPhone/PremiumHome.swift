@@ -962,7 +962,8 @@ private struct PremiumRunPage: View {
                             VStack(alignment: .leading, spacing: 6) {
                                 Text("PRESCRIBED INTERVALS")
                                     .font(HCDesign.label(11)).foregroundStyle(HCDesign.aqua)
-                                ForEach(Array(steps.enumerated()), id: \.offset) { _, step in
+                                ForEach(Array(steps.enumerated()), id: \.offset) { indexedStep in
+                                    let step = indexedStep.element
                                     let goal = step.seconds.map { "\(Int($0 / 60)) min" }
                                         ?? step.distanceMeters.map {
                                             String(format: "%.2f mi", $0 / 1609.344)
