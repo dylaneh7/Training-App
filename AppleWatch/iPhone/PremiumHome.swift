@@ -2943,166 +2943,53 @@ private struct PremiumCoachConversation: View {
         !question.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
+
+    // Full-height chat with an anchored composer. Scrolling can never bury Send.
     var body: some View {
-        HCCard(accent: HCDesign.aqua) {
-            VStack(alignment: .leading, spacing: 14) {
-                HStack(alignment: .top, spacing: 12) {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("IMUN / COACH")
-                            .font(.system(size: 10, weight: .semibold))
-                            .tracking(1.3)
-                            .foregroundStyle(HCDesign.secondary)
-                        IMUNIsaiahWordmark(size: 22)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 8)
-                            .background(IMUNIsaiahBrand.graphite,
-                                        in: RoundedRectangle(cornerRadius: 10))
-                        Text("Training decisions, made simpler.")
-                            .font(.system(size: 12))
-                            .foregroundStyle(HCDesign.secondary)
-                        Label(launchContext.components(separatedBy: "\n").first ?? "Current screen",
-                              systemImage: "rectangle.on.rectangle")
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundStyle(HCDesign.electric)
-                            .lineLimit(1)
-                    }
-                    Spacer(minLength: 5)
-                    if !turns.isEmpty {
-                        Button {
-                            turns.removeAll()
-                            storedConversation = Data()
-                            errorMessage = nil
-                            composerFocused = false
-                        } label: {
-                            Image(systemName: "square.and.pencil")
-                                .font(.system(size: 17))
-                                .foregroundStyle(HCDesign.secondary)
-                                .frame(width: 36, height: 36)
-                                .contentShape(Rectangle())
+        VStack(spacing: 0) {
+            isaiahBanner
+            ScrollViewReader { proxy in
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 14) {
+                        if turns.isEmpty {
+                            VStack(alignment: .leading, spacing: 12) {
+                                Text("What can I help with?")
+                                    .font(.system(size: 21, weight: .semibold))
+                                    .foregroundStyle(HCDesign.ink)
+                                Text("Ask naturally about this screen, your training or your health.")
+                                    .font(.system(size: 13))
+                                    .foregroundStyle(HCDesign.secondary)
+                                suggestion("Help me understand this screen")
+                                suggestion("Review today's workout")
+                                suggestion("What can you change in iMun?")
+                            }
+                            .padding(.vertical, 14)
                         }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel("Start a new IsAIah conversation")
-                    }
-                }
 
-                if turns.isEmpty {
-                    VStack(alignment: .leading, spacing: 11) {
-                        Text("Start with an action")
-                            .font(.system(size: 15, weight: .semibold))
-                            .foregroundStyle(HCDesign.ink)
-                        Text("Ask naturally. IsAIah previews changes before applying them.")
-                            .font(.system(size: 12))
-                            .foregroundStyle(HCDesign.secondary)
-                        suggestion("Edit today's workout")
-                        suggestion("Move tomorrow's workout to Friday")
-                        suggestion("Create an easy 40-minute run")
-                        suggestion("What can you control in iMun?")
-                    }
-                    .padding(.vertical, 10)
-                } else {
-                    ScrollViewReader { proxy in
-                        ScrollView {
-                            LazyVStack(alignment: .leading, spacing: 13) {
-                                ForEach(turns) { turn in
-                                    HStack(alignment: .top, spacing: 8) {
-                                        if turn.role == "user" {
-                                            Spacer(minLength: 25)
-                                        } else {
-                                            Text("IsAIah")
-                                                .font(.system(size: 9, weight: .semibold))
-                                                .tracking(0.7)
-                                                .foregroundStyle(HCDesign.secondary)
-                                                .frame(width: 47, alignment: .leading)
-                                        }
-                                        Text(turn.text)
-                                            .font(.system(size: 14))
-                                            .foregroundStyle(HCDesign.ink)
-                                            .textSelection(.enabled)
-                                            .padding(.horizontal, 13)
-                                            .padding(.vertical, 11)
-                                            .background(turn.role == "user" ?
-                                                        HCDesign.raised :
-                                                        HCDesign.canvas.opacity(0.65),
-                                                        in: RoundedRectangle(cornerRadius: 10))
-                                        if turn.role != "user" {
-                                            Spacer(minLength: 25)
-                                        }
-                                    }
+                        ForEach(turns) { turn in
+                            HStack(alignment: .bottom, spacing: 9) {
+                                if turn.role == "user" {
+                                    Spacer(minLength: 35)
+                                } else {
+                                    IMUNIsaiahMark(size: 29)
                                 }
-                                if isSending {
-                                    IMUNIsAIahThinking(phase: thinkingPhase)
-                                        .id("isaiah-thinking")
-                                }
-                                Color.clear.frame(height: 1).id("lastCoachMessage")
-                            }
-                            .frame(maxWidth: .infinity)
-                        }
-                        .frame(minHeight: 195, maxHeight: 510)
-                        .scrollDismissesKeyboard(.interactively)
-                        .onChange(of: turns.count) { _, _ in
-                            withAnimation(.easeOut(duration: 0.2)) {
-                                proxy.scrollTo("lastCoachMessage", anchor: .bottom)
+                                Text(turn.text)
+                                    .font(.system(size: 14))
+                                    .foregroundStyle(HCDesign.ink)
+                                    .textSelection(.enabled)
+                                    .padding(.horizontal, 14)
+                                    .padding(.vertical, 12)
+                                    .background(turn.role == "user" ?
+                                                HCDesign.electric.opacity(0.14) :
+                                                HCDesign.card,
+                                                in: RoundedRectangle(cornerRadius: 16))
+                                if turn.role != "user" { Spacer(minLength: 35) }
                             }
                         }
-                        .onChange(of: isSending) { _, _ in
-                            withAnimation(.easeOut(duration: 0.2)) {
-                                proxy.scrollTo("lastCoachMessage", anchor: .bottom)
-                            }
+                        if isSending {
+                            IMUNIsAIahThinking(phase: thinkingPhase)
+                                .id("isaiah-thinking")
                         }
-                    }
-                }
-
-                Divider().overlay(HCDesign.outline)
-
-                VStack(alignment: .leading, spacing: 10) {
-                    HStack(alignment: .bottom, spacing: 10) {
-                        TextField("Message IsAIah", text: $question, axis: .vertical)
-                            .lineLimit(1...6)
-                            .focused($composerFocused)
-                            .submitLabel(.send)
-                            .font(.system(size: 15))
-                            .tint(HCDesign.electric)
-                            .foregroundStyle(HCDesign.ink)
-                            .padding(.vertical, 10)
-                            .onSubmit { if canSend { send() } }
-                            .accessibilityLabel("Message IsAIah")
-                        Button(action: send) {
-                            Image(systemName: "arrow.up")
-                                .font(.system(size: 16, weight: .semibold))
-                                .foregroundStyle(canSend ? HCDesign.onAccent :
-                                                HCDesign.secondary)
-                                .frame(width: 41, height: 41)
-                                .background(canSend ? HCDesign.electric :
-                                            HCDesign.raised,
-                                            in: RoundedRectangle(cornerRadius: 11))
-                        }
-                        .disabled(!canSend)
-                        .buttonStyle(.plain)
-                        .accessibilityLabel(isSending ? "IsAIah is responding" :
-                                            "Send message to IsAIah")
-                    }
-                    .padding(.horizontal, 13)
-                    .padding(.vertical, 4)
-                    .background(HCDesign.canvas,
-                                in: RoundedRectangle(cornerRadius: 15))
-                    .overlay {
-                        RoundedRectangle(cornerRadius: 15)
-                            .strokeBorder(composerFocused ? HCDesign.electric.opacity(0.55) :
-                                          HCDesign.outline.opacity(0.6), lineWidth: 1)
-                    }
-                    HStack {
-                        Label("AI-assisted training", systemImage: "lock.shield")
-                            .font(.system(size: 10))
-                            .foregroundStyle(HCDesign.secondary)
-                        Spacer()
-                        if question.count > 350 {
-                            Text("\(question.count) characters")
-                                .font(.system(size: 10))
-                                .foregroundStyle(HCDesign.secondary)
-                        }
-                    }
-                }
-
                 if let action = pendingAction {
                     IMUNCoachActionReviewCard(
                         action: action,
@@ -3133,55 +3020,157 @@ private struct PremiumCoachConversation: View {
                     )
                 }
 
-                if composerFocused {
-                    Button("Done typing") {
-                        composerFocused = false
+
+                        if !coach.signedIn {
+                            Text("Sign in to message IsAIah.")
+                                .font(.system(size: 12))
+                                .foregroundStyle(HCDesign.caution)
+                        }
+                        if let errorMessage {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("IsAIah couldn't respond.")
+                                    .font(.system(size: 13, weight: .semibold))
+                                    .foregroundStyle(HCDesign.caution)
+                                Text(errorMessage)
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(HCDesign.secondary)
+                            }
+                        }
+                        Color.clear.frame(height: 1).id("lastCoachMessage")
                     }
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(HCDesign.aqua)
-                    .frame(maxWidth: .infinity, alignment: .trailing)
+                    .padding(.horizontal, 17)
+                    .padding(.vertical, 18)
+                    .frame(maxWidth: .infinity)
                 }
-
-                Toggle(isOn: $shareRecovery) {
-                    Text("Use my recovery metrics in answers")
-                        .font(.system(size: 12))
-                        .foregroundStyle(HCDesign.secondary)
-                }
-                .tint(HCDesign.aqua)
-
-                if !coach.signedIn {
-                    Text("Sign in to message IsAIah.")
-                        .font(.system(size: 12))
-                        .foregroundStyle(HCDesign.caution)
-                }
-                if let errorMessage {
-                    VStack(alignment: .leading, spacing: 5) {
-                        Text("IsAIah couldn't respond just now.")
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundStyle(HCDesign.caution)
-                        Text(errorMessage)
-                            .font(.system(size: 11))
-                            .foregroundStyle(HCDesign.secondary)
-                            .textSelection(.enabled)
+                .scrollDismissesKeyboard(.interactively)
+                .onChange(of: turns.count) { _, _ in
+                    withAnimation(.easeOut(duration: 0.2)) {
+                        proxy.scrollTo("lastCoachMessage", anchor: .bottom)
                     }
                 }
-                Text("Your question, current screen context and a short training summary are shared only when you send. Recovery measurements are shared only if you enable the option.")
-                    .font(.system(size: 10))
-                    .foregroundStyle(HCDesign.secondary)
+                .onChange(of: isSending) { _, _ in
+                    withAnimation(.easeOut(duration: 0.2)) {
+                        proxy.scrollTo("lastCoachMessage", anchor: .bottom)
+                    }
+                }
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(HCDesign.canvas.ignoresSafeArea())
+        .safeAreaInset(edge: .bottom, spacing: 0) { composer }
         .onAppear {
             if let decoded = try? JSONDecoder().decode([IMUNCoachTurn].self,
                                                        from: storedConversation) {
                 turns = Array(decoded.suffix(24))
             }
         }
+        .task {
+            try? await Task.sleep(nanoseconds: 350_000_000)
+            composerFocused = true
+        }
         .toolbar {
             ToolbarItemGroup(placement: .keyboard) {
                 Spacer()
                 Button("Done") { composerFocused = false }
-                    .foregroundStyle(HCDesign.aqua)
             }
+        }
+    }
+
+    private var isaiahBanner: some View {
+        VStack(spacing: 12) {
+            HStack(spacing: 13) {
+                IMUNIsaiahMark(size: 73)
+                IMUNIsaiahWordmark(size: 42)
+                Spacer(minLength: 0)
+            }
+            .padding(.top, 10)
+            HStack {
+                Label(launchContext.components(separatedBy: "\n").first ??
+                      "Current iMun screen", systemImage: "rectangle.on.rectangle")
+                    .lineLimit(1)
+                Spacer()
+                if !turns.isEmpty {
+                    Button {
+                        turns.removeAll()
+                        storedConversation = Data()
+                        pendingAction = nil
+                        errorMessage = nil
+                        composerFocused = true
+                    } label: {
+                        Image(systemName: "square.and.pencil")
+                    }
+                    .accessibilityLabel("New IsAIah conversation")
+                }
+            }
+            .font(.system(size: 11, weight: .semibold))
+            .foregroundStyle(HCDesign.electric)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.horizontal, 20)
+        .padding(.bottom, 19)
+        .background(IMUNIsaiahBrand.graphite)
+    }
+
+    private var composer: some View {
+        VStack(spacing: 9) {
+            HStack(alignment: .bottom, spacing: 8) {
+                TextField("Message IsAIah…", text: $question, axis: .vertical)
+                    .lineLimit(1...5)
+                    .focused($composerFocused)
+                    .submitLabel(.send)
+                    .font(.system(size: 15))
+                    .tint(HCDesign.electric)
+                    .foregroundStyle(HCDesign.ink)
+                    .padding(.leading, 14)
+                    .padding(.vertical, 11)
+                    .onSubmit { if canSend { send() } }
+                    .accessibilityLabel("Message IsAIah")
+                Button(action: send) {
+                    Image(systemName: "arrow.up")
+                        .font(.system(size: 17, weight: .bold))
+                        .foregroundStyle(canSend ? Color.white : HCDesign.secondary)
+                        .frame(width: 43, height: 43)
+                        .background(canSend ?
+                                    Color(red: 0.13, green: 0.47, blue: 0.97) :
+                                    HCDesign.raised,
+                                    in: Circle())
+                }
+                .disabled(!canSend)
+                .buttonStyle(.plain)
+                .accessibilityLabel("Send message to IsAIah")
+                .padding(5)
+            }
+            .background(HCDesign.card,
+                        in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 22)
+                    .strokeBorder(HCDesign.outline, lineWidth: 1)
+            }
+            Toggle(isOn: $shareRecovery) {
+                HStack(spacing: 6) {
+                    Image(systemName: "heart.text.square")
+                    Text("Include all loaded Health readings")
+                    Spacer(minLength: 0)
+                    if shareRecovery {
+                        Text("\(appleHealth.metrics.count) readings")
+                            .foregroundStyle(HCDesign.electric)
+                    }
+                }
+                .font(.system(size: 11))
+                .foregroundStyle(HCDesign.secondary)
+            }
+            .tint(HCDesign.electric)
+            Text("Health sharing is optional. Data is sent only with your message.")
+                .font(.system(size: 10))
+                .foregroundStyle(HCDesign.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(.horizontal, 14)
+        .padding(.top, 12)
+        .padding(.bottom, 8)
+        .background(HCDesign.canvas)
+        .overlay(alignment: .top) {
+            Rectangle().fill(HCDesign.outline).frame(height: 1)
         }
     }
 
