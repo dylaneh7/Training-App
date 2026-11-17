@@ -221,11 +221,22 @@ enum HCPayload {
     static let completedRun = "completedRun"
     static let loggedSet = "loggedSet"
     static let workoutUndo = "imunWorkoutUndoV1"
+    static let liftSessionStatus = "imunLiftSessionStatusV1"
     static let workoutUndos = "imunWorkoutUndosV1"
     static let kind = "kind"
     static let data = "payload"
 }
 
+
+/// Informational Watch workout clock, independent of logged-set synchronization.
+/// Only the Watch can declare that its session is active or finished.
+struct HCWatchLiftSessionStatus: Codable {
+    let workoutID: String
+    let workoutDate: String
+    let startedAt: Date?
+    let isActive: Bool
+    let reportedAt: Date
+}
 
 /// Date-scoped, atomic schedule sent by the iPhone to its Watch companion.
 /// An absent workout/run is intentional, never an instruction to keep yesterday's plan.
