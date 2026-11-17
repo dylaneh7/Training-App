@@ -1,34 +1,56 @@
-# iMun Build 31 — Health, Coach actions, wearable preview and theme sections
+# iMun Build 31 — Coach controls, Training, Health, themes and motivation
 
-## This build is a first integration pass, not a WHOOP subscription replacement
+## Included in Build 31
 
-### Health
-- Source-preserving single Sleep card already present; WHOOP and Apple Watch show within **one** card, each with its original source label, measurement date and own baseline. Do not average incompatible sources or generate a WHOOP recovery score from Apple Health.
-- Health signal/trend processing caches results and refreshes on changes to Apple Health metrics, metric history, and recovery history rather than every SwiftUI scroll/layout pass.
-- New optional Bluetooth Heart Rate device card lets the athlete scan for and connect to nearby devices broadcasting the Bluetooth SIG standard 0x180D service and 0x2A37 characteristic. It displays a live BPM only; no unconsented upload, storage, HealthKit writing or background collection is enabled.
-- Turning on WHOOP's Heart Rate Broadcast while an active WHOOP app is available is separate from WHOOP-specific proprietary data pairing. After membership expiration, standard BLE broadcasts may be unavailable: device test required.
+### Coach controls with explicit approval
+Coach's conversational view now recognizes and previews:
+- Move a real, dated calendar workout
+- Mark today's prescribed run complete (user assertion, not an Apple Health recording)
+- Mark any saved calendar strength/run workout complete via an authenticated server function
+- Create a custom strength workout (empty exercise list until the athlete adds movements)
+- Create a timed running workout on an empty day (optional user-supplied BPM limits)
+- Rename today's strength workout while preserving its exercises
+- Refresh the existing iMun Watch workout sync
+- Change visual themes, motivation source, rest-timer override, Watch haptics, running voice cues and auto-lap settings
+- Switch between Strength and Running and navigate Training, Progress, Health, Coach or Settings
 
-### Coach AI as app controller
-- Conversation accepts the following **explicit** user requests and presents a separate confirmation panel:
-  - `Move tomorrow's workout to Friday` — select exact scheduled session and destination; use existing authenticated Command Center move RPC, don't change recorded workout history
-  - `Mark today's run complete` — user assertion only; no fake Apple Health metrics, no fabricated running distance
-  - `Sync today's workout to my Watch` — use existing Build 30 Cloud + WatchConnectivity routes
-  - `Change theme to Heritage` — change only iMun appearance preset
-- Coach's generative replies alone never run arbitrary Swift, SQL or external tools. The preview parses an allowlist, validates selected IDs against current planner state, requires approval, and uses preexisting trusted mutation functions. An unrecognized command remains an ordinary question to the server Coach.
-- This is the **first action registry**. It does not yet support editing/deleting arbitrary workout records, creating historical metrics, changing medical data, purchasing products or full-app control.
+Every mutation requires a review card and Confirm Action. An ordinary AI reply is never executable code. App state and user-owned workout IDs are validated again when confirming. The first-stage command parser is deliberately deterministic; it does **not** implement arbitrary open-ended AI tool execution, full app automation or unsupervised changes. Unrecognized requests continue to the regular Coach AI service.
 
-### Theme identity
-- Heritage, Retro, Techno, Coast, Field Notes, Discipline, Atelier, and Rally now use separate iconography and heading treatments across common section headers. The racing flag is only shown in Rally, not other themes.
-- Existing motivation preferences and user journal remain independent of appearance.
+### Create today's run and export it to Apple Workout
+- Training → Running offers **Create Today's Run** when there is no running plan.
+- Name, prescribed duration (1–360 minutes), optional low/high HR targets are editable.
+- The local run persists through calendar refreshes and is published as part of the existing dated iMun Watch schedule.
+- When opening Apple's structured WorkoutKit editor, typed steps from iMun are preserved instead of becoming "Open" / "Free Run."
+- A created prescription never counts as a completed workout until a recorded or explicitly user-confirmed completion arrives.
 
-### Remaining planned steps
-1. Expand Coach with server-side structured, authenticated tool suggestions for more app features, including session creation, exercise edits, watch workout scheduling and reversible settings changes. Keep separate user confirmation for durable changes.
-2. Explore direct WHOOP 4/5/MG offline protocol interoperability for user-owned hardware separately from the standard BLE heart-rate broadcast. The current independent NOOP project is source-available under PolyForm Noncommercial 1.0.0; **do not copy its implementation into a potentially commercial product without license review or permission**. Published protocol facts can inform an independent implementation. Hardware-specific, physical-device pairing and privacy tests are required.
-3. Device-test the Bluetooth scan, iOS permission prompt, active sensor notifications, dropouts and disconnections.
-4. Continue Health performance checks with large data sets and verify that the combined Sleep card doesn't show redundant sleep cards.
+### Health tab
+- Apple Watch and WHOOP sleep remain **in one source-attributed Sleep card**. No averaging or duplicated Sleep metric cards.
+- The Health tab now caches expensive per-source signals, baseline and trend calculations and refreshes that cache on underlying Apple Health/recovery updates; measurements, values and source labels are unchanged.
+- Recovery score and diagnostic judgments are not invented.
 
-### Build and safety
-- Build 31 uses the same iOS/Watch bundle IDs, mandatory companion installation, Build 30 WatchConnectivity pairing fix, and RLS-protected cloud workout schedule.
-- Xcode build and real-device validation are required before declaring a working release. This environment can't run iOS/watchOS compiler or pair Bluetooth hardware.
-- Do not uninstall iMun to test features: doing so can discard unsent sets, journal entries or local running logs.
-- The Health tab BLE viewer does not diagnose, estimate recovery, or replace medical devices.
+### Themes & motivation
+- Shared section headings have theme-specific typography, symbols, and rules for Heritage, Retro, Techno, Coast, Field Notes, Discipline, Atelier and Rally.
+- The racing flag remains exclusive to Rally.
+- Motivation's source, translation preference and tone are separate from appearance.
+- **Quiet, Direct and Rigorous** actually select different original/performance message sets; Scripture uses ESV/LSB references without embedding licensed translation text.
+- Existing saved messages, notes and personal journal are preserved.
+
+### Existing roadmap steps already implemented
+- Collapsing Training header on scroll, without a redundant global Training refresh button
+- Single Settings tab (the Coach tab is a conversation, not a second Settings screen)
+- Watch-guided strength sets with rest countdown, manual or automatic advance, exercise selection and offline saving
+- Native Apple Workout interval export with time/distance and BPM alerts, plus independently published workout schedule in Build 30
+- Watch and phone synchronization remains unchanged from the working Build 30 release, including original app bundle IDs
+
+## Explicitly excluded
+- WHOOP band direct BLE/hardware integration and expired-membership protocol reverse engineering, deferred at the user's request
+- Unrestricted AI control of all functions, unsafe arbitrary database edits, fabricated workout metrics or unsupervised permanent actions
+
+## Backend
+The private Supabase project has the new `imun_mark_planned_workout_complete` RPC deployed. It is SECURITY INVOKER, uses the signed-in user's RLS-protected planner row, changes only the chosen workout's completed flag and a manual-completion tag, and has EXECUTE granted to `authenticated`, not `anon`. Source SQL: `AppleWatch/Backend/imun_mark_planned_workout_complete.sql`. Unknown workout IDs are rejected; a rolled-back transaction and privilege checks have been performed.
+
+## Release validation
+- Build 31 includes both iOS and watchOS target version increments but does **not** change their mandatory companion pairing or existing cloud transport.
+- GitHub Actions macOS Xcode CI validates source compilation before merging.
+- Actual physical-device testing remains necessary, especially the automatic Apple Workout schedule, watch connectivity, Health performance and final Coach confirmation flows.
+- Do not delete either app during upgrades because unsent set logs and local journal records may be lost.
