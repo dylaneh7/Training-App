@@ -1633,18 +1633,24 @@ final class HCAppleHealthReader: ObservableObject {
     /// and explicitly sends a message. No screen scraping or background upload.
     func isaiahHealthSnapshot(selectedCategory: String,
                               selectedMetric: String,
-                              question: String) -> String {
-        let all = metrics.sorted {
+                              question: String,
+                              primaryWearable: String = "Auto") -> String {
+        let all = metrics.filter {
+            HCEitanWearableSource.accepts($0.source,
+                                          preferred: primaryWearable)
+        }.sorted {
             let a = ($0.category, $0.name, $0.source, $0.date)
             let b = ($1.category, $1.name, $1.source, $1.date)
             return a < b
         }
         guard !all.isEmpty else {
             return loading ? "Apple Health is still loading on this iPhone." :
-                "No authorized Apple Health measurements are currently loaded."
+                "No authorized " + primaryWearable +
+                " measurements are currently loaded. Do not substitute data from another wearable."
         }
 
-        var lines = ["APPLE HEALTH / WHOOP: all \(all.count) loaded metric cards, independent of scrolling.",
+        var lines = ["APPLE HEALTH: \(all.count) source-verified Health metric cards.",
+                     "Primary wearable: " + primaryWearable + ". Do not mix other wearables into physiological trends. Tredict workouts remain a separate training source.",
                      "Selected Health category: " + selectedCategory,
                      "Selected Health metric: " + (selectedMetric.isEmpty ? "none" : selectedMetric),
                      "Values keep their own source, method, unit and recorded date; never merge unlike sources."]
@@ -1669,7 +1675,9 @@ final class HCAppleHealthReader: ObservableObject {
                  name.contains("step"))
         }.map(\.name))
         let histories = Dictionary(grouping: metricHistory.filter {
-            relevant.contains($0.name)
+            relevant.contains($0.name) &&
+            HCEitanWearableSource.accepts($0.source,
+                                         preferred: primaryWearable)
         }, by: { $0.name + " | " + $0.source })
         for name in histories.keys.sorted() {
             let recent = (histories[name] ?? []).sorted { $0.date > $1.date }.prefix(14)
@@ -1678,6 +1686,9 @@ final class HCAppleHealthReader: ObservableObject {
                     recent.map { $0.date + "=" + String(format: "%.2f", $0.value) }
                         .joined(separator: ", "))
             }
+        }
+        if primaryWearable == "WHOOP" {
+            lines.append("Important: WHOOP HRV/RMSSD is not written to Apple Health. No Apple Watch SDNN substitution; use a separately authorized direct WHOOP API source when available.")
         }
         return lines.joined(separator: "\n")
     }
