@@ -2301,8 +2301,6 @@ private struct PremiumRecoveryPage: View {
                     }
                 }
 
-                IMUNLiveHeartRateCard()
-
                 DisclosureGroup(isExpanded: $showHistory) {
                     ForEach(Array(coach.recoveryHistory.prefix(14))) { item in
                         HStack {
