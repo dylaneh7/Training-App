@@ -2519,6 +2519,7 @@ private struct PremiumRecoveryPage: View {
 private struct PremiumCoachPage: View {
     @EnvironmentObject private var coach: PhoneWorkoutBridge
     @State private var movingSession: HCPlannedSession?
+    @State private var showUpcomingSessions = false
 
     private var days: [Date] {
         let start = Calendar.current.startOfDay(for: Date())
@@ -2536,15 +2537,15 @@ private struct PremiumCoachPage: View {
                 VStack(alignment: .leading, spacing: 20) {
                     HStack(alignment: .center) {
                         VStack(alignment: .leading, spacing: 5) {
-                            Text("I M U N  /  PERSONAL COACH")
+                            Text("IMUN / COACH")
                                 .font(HCDesign.label(10))
                                 .tracking(1.5)
                                 .foregroundStyle(HCDesign.aqua)
-                            Text("Your coach.")
+                            Text("IsAIah")
                                 .font(HCDesign.display(32))
                                 .tracking(-1)
                                 .foregroundStyle(HCDesign.ink)
-                            Text("Plan, review and take action.")
+                            Text("Your training. One conversation.")
                                 .font(.system(size: 13))
                                 .foregroundStyle(HCDesign.secondary)
                         }
@@ -2557,7 +2558,8 @@ private struct PremiumCoachPage: View {
                     PremiumCoachConversation()
                         .id("imun-coach-chat")
 
-                    HStack(alignment: .firstTextBaseline) {
+                    DisclosureGroup(isExpanded: $showUpcomingSessions) {
+                        HStack(alignment: .firstTextBaseline) {
                         VStack(alignment: .leading, spacing: 5) {
                             Text("Your next 7 days")
                                 .font(HCDesign.display(24))
@@ -2667,6 +2669,19 @@ private struct PremiumCoachPage: View {
                             .foregroundStyle(HCDesign.aqua)
                     }
 
+                    } label: {
+                        HStack {
+                            Text("Upcoming sessions")
+                                .font(.system(size: 15, weight: .semibold))
+                            Spacer()
+                            Text("\(sessionsThisWeek) PLANNED")
+                                .font(HCDesign.label(10))
+                                .foregroundStyle(HCDesign.secondary)
+                        }
+                    }
+                    .tint(HCDesign.secondary)
+                    .padding(16)
+                    .background(HCDesign.card, in: RoundedRectangle(cornerRadius: 13))
                     Spacer(minLength: 25)
                 }
                 .padding(.horizontal, 18)
@@ -2716,6 +2731,36 @@ private struct IMUNCoachTurn: Identifiable, Codable {
     let text: String
 }
 
+/// Understated, accessible activity indicator for both action planning and
+/// generated answers. Driven by TimelineView; no manual timers to leak.
+private struct IMUNIsAIahThinking: View {
+    let phase: String
+
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 0.42)) { tick in
+            let active = Int(tick.date.timeIntervalSince1970 / 0.42) % 3
+            HStack(spacing: 11) {
+                HStack(spacing: 4) {
+                    ForEach(0..<3, id: \.self) { index in
+                        Circle()
+                            .fill(HCDesign.electric.opacity(index == active ? 1 : 0.22))
+                            .frame(width: 5, height: 5)
+                    }
+                }
+                Text(phase)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(HCDesign.secondary)
+                Spacer(minLength: 0)
+            }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("IsAIah is thinking")
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .background(HCDesign.card, in: RoundedRectangle(cornerRadius: 12))
+    }
+}
+
 // A real conversation surface, not a backend diagnostics panel. Chats remain
 // on the phone. Nothing is transmitted until the athlete chooses Send.
 private struct PremiumCoachConversation: View {
@@ -2726,6 +2771,7 @@ private struct PremiumCoachConversation: View {
     @State private var question = ""
     @State private var turns: [IMUNCoachTurn] = []
     @State private var isSending = false
+    @State private var thinkingPhase = "IsAIah is thinking"
     @State private var errorMessage: String?
     @State private var pendingAction: IMUNCoachActionProposal?
     @State private var selectedActionWorkoutID = ""
@@ -2771,15 +2817,15 @@ private struct PremiumCoachConversation: View {
             VStack(alignment: .leading, spacing: 14) {
                 HStack(alignment: .top, spacing: 12) {
                     VStack(alignment: .leading, spacing: 6) {
-                        Text("COACH / CONTROL CENTER")
+                        Text("IMUN / COACH")
                             .font(.system(size: 10, weight: .semibold))
                             .tracking(1.3)
                             .foregroundStyle(HCDesign.secondary)
-                        Text("Make the next move.")
+                        Text("IsAIah")
                             .font(.system(size: 20, weight: .semibold))
                             .tracking(-0.4)
                             .foregroundStyle(HCDesign.ink)
-                        Text("Plan, adjust, and manage your training.")
+                        Text("Training decisions, made simpler.")
                             .font(.system(size: 12))
                             .foregroundStyle(HCDesign.secondary)
                     }
@@ -2825,11 +2871,11 @@ private struct PremiumCoachConversation: View {
                                         if turn.role == "user" {
                                             Spacer(minLength: 25)
                                         } else {
-                                            Text("COACH")
+                                            Text("IsAIah")
                                                 .font(.system(size: 9, weight: .semibold))
                                                 .tracking(0.7)
                                                 .foregroundStyle(HCDesign.secondary)
-                                                .frame(width: 39, alignment: .leading)
+                                                .frame(width: 47, alignment: .leading)
                                         }
                                         Text(turn.text)
                                             .font(.system(size: 14))
@@ -2847,22 +2893,21 @@ private struct PremiumCoachConversation: View {
                                     }
                                 }
                                 if isSending {
-                                    HStack(spacing: 9) {
-                                        ProgressView().tint(HCDesign.aqua)
-                                        Text("Coach is thinking…")
-                                            .font(.system(size: 12))
-                                            .foregroundStyle(HCDesign.secondary)
-                                        Spacer()
-                                    }
-                                    .padding(.vertical, 8)
+                                    IMUNIsAIahThinking(phase: thinkingPhase)
+                                        .id("isaiah-thinking")
                                 }
                                 Color.clear.frame(height: 1).id("lastCoachMessage")
                             }
                             .frame(maxWidth: .infinity)
                         }
-                        .frame(height: min(370, max(145, CGFloat(turns.count) * 93)))
+                        .frame(minHeight: 195, maxHeight: 510)
                         .scrollDismissesKeyboard(.interactively)
                         .onChange(of: turns.count) { _, _ in
+                            withAnimation(.easeOut(duration: 0.2)) {
+                                proxy.scrollTo("lastCoachMessage", anchor: .bottom)
+                            }
+                        }
+                        .onChange(of: isSending) { _, _ in
                             withAnimation(.easeOut(duration: 0.2)) {
                                 proxy.scrollTo("lastCoachMessage", anchor: .bottom)
                             }
@@ -2872,32 +2917,53 @@ private struct PremiumCoachConversation: View {
 
                 Divider().overlay(HCDesign.outline)
 
-                HStack(alignment: .bottom, spacing: 9) {
-                    TextField("Message your coach…", text: $question, axis: .vertical)
-                        .lineLimit(2...5)
-                        .focused($composerFocused)
-                        .submitLabel(.done)
-                        .font(.system(size: 15))
-                        .tint(HCDesign.aqua)
-                        .foregroundStyle(HCDesign.ink)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 10)
-                        .background(HCDesign.canvas.opacity(0.7),
-                                    in: RoundedRectangle(cornerRadius: 13))
-                        .accessibilityLabel("Ask your coach")
-                    Button {
-                        send()
-                    } label: {
-                        Image(systemName: "arrow.up")
-                            .font(.system(size: 18, weight: .bold))
-                            .foregroundStyle(HCDesign.canvas)
-                            .frame(width: 43, height: 43)
-                            .background(canSend ? HCDesign.aqua : HCDesign.secondary.opacity(0.5),
-                                        in: RoundedRectangle(cornerRadius: 13))
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack(alignment: .bottom, spacing: 10) {
+                        TextField("Message IsAIah", text: $question, axis: .vertical)
+                            .lineLimit(1...6)
+                            .focused($composerFocused)
+                            .submitLabel(.send)
+                            .font(.system(size: 15))
+                            .tint(HCDesign.electric)
+                            .foregroundStyle(HCDesign.ink)
+                            .padding(.vertical, 10)
+                            .onSubmit { if canSend { send() } }
+                            .accessibilityLabel("Message IsAIah")
+                        Button(action: send) {
+                            Image(systemName: "arrow.up")
+                                .font(.system(size: 16, weight: .semibold))
+                                .foregroundStyle(canSend ? HCDesign.onAccent :
+                                                HCDesign.secondary)
+                                .frame(width: 41, height: 41)
+                                .background(canSend ? HCDesign.electric :
+                                            HCDesign.raised,
+                                            in: RoundedRectangle(cornerRadius: 11))
+                        }
+                        .disabled(!canSend)
+                        .buttonStyle(.plain)
+                        .accessibilityLabel(isSending ? "IsAIah is responding" :
+                                            "Send message to IsAIah")
                     }
-                    .disabled(!canSend)
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Send your question")
+                    .padding(.horizontal, 13)
+                    .padding(.vertical, 4)
+                    .background(HCDesign.canvas,
+                                in: RoundedRectangle(cornerRadius: 15))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 15)
+                            .strokeBorder(composerFocused ? HCDesign.electric.opacity(0.55) :
+                                          HCDesign.outline.opacity(0.6), lineWidth: 1)
+                    }
+                    HStack {
+                        Label("AI-assisted training", systemImage: "lock.shield")
+                            .font(.system(size: 10))
+                            .foregroundStyle(HCDesign.secondary)
+                        Spacer()
+                        if question.count > 350 {
+                            Text("\(question.count) characters")
+                                .font(.system(size: 10))
+                                .foregroundStyle(HCDesign.secondary)
+                        }
+                    }
                 }
 
                 if let action = pendingAction {
@@ -2947,13 +3013,13 @@ private struct PremiumCoachConversation: View {
                 .tint(HCDesign.aqua)
 
                 if !coach.signedIn {
-                    Text("Sign in above to ask Coach about your training.")
+                    Text("Sign in to message IsAIah.")
                         .font(.system(size: 12))
                         .foregroundStyle(HCDesign.caution)
                 }
                 if let errorMessage {
                     VStack(alignment: .leading, spacing: 5) {
-                        Text("Coach couldn't answer that just now.")
+                        Text("IsAIah couldn't respond just now.")
                             .font(.system(size: 13, weight: .semibold))
                             .foregroundStyle(HCDesign.caution)
                         Text(errorMessage)
@@ -3343,12 +3409,14 @@ private struct PremiumCoachConversation: View {
         composerFocused = false
         errorMessage = nil
         isSending = true
+        thinkingPhase = "IsAIah is thinking"
         turns.append(IMUNCoachTurn(role: "user", text: questionText))
         persist()
         Task {
             // The service is a language classifier only: it cannot mutate
             // workouts, choose an unvalidated ID, or bypass confirmation.
             if IMUNCoachActionInterpreter.mightNeedModelProposal(questionText) {
+                await MainActor.run { thinkingPhase = "Reviewing your request" }
                 if let classification = try? await coach.classifyIMUNCoachAction(
                     request: questionText),
                    let proposal = IMUNCoachActionInterpreter.proposalFromModel(
@@ -3360,6 +3428,7 @@ private struct PremiumCoachConversation: View {
                     return
                 }
             }
+            await MainActor.run { thinkingPhase = "Composing a response" }
             do {
                 let reply = try await coach.askIMUNCoach(
                     question: questionText,
