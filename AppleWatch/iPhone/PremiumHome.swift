@@ -3084,6 +3084,27 @@ private struct PremiumCoachConversation: View {
         persist()
     }
 
+    private func presentAction(_ proposed: IMUNCoachActionProposal,
+                               for originalRequest: String,
+                               appendUser: Bool) {
+        if appendUser {
+            turns.append(IMUNCoachTurn(role: "user", text: originalRequest))
+        }
+        turns.append(IMUNCoachTurn(
+            role: "assistant",
+            text: "I can prepare that change. Review the exact details below and confirm before iMun applies it."))
+        pendingAction = proposed
+        selectedActionWorkoutID = proposed.suggestedWorkoutID ?? ""
+        actionMoveDate = proposed.suggestedDate ?? Date()
+        actionWorkoutTitle = proposed.kind == .createRun ? "Easy Run" :
+            (proposed.parameter ?? "Custom Strength Workout")
+        actionRunMinutes = Int(proposed.parameter ?? "") ?? 40
+        actionRunHasHR = false
+        isSending = false
+        errorMessage = nil
+        persist()
+    }
+
     private func send() {
         let questionText = question.trimmingCharacters(in: .whitespacesAndNewlines)
         guard canSend else { return }
@@ -3093,18 +3114,7 @@ private struct PremiumCoachConversation: View {
             question = ""
             composerFocused = false
             errorMessage = nil
-            turns.append(IMUNCoachTurn(role: "user", text: questionText))
-            turns.append(IMUNCoachTurn(role: "assistant",
-                                      text: "I found an app action for that request. Review the exact change below before confirming."))
-            pendingAction = proposed
-            selectedActionWorkoutID = proposed.suggestedWorkoutID ?? ""
-            actionMoveDate = proposed.suggestedDate ?? Date()
-            actionWorkoutTitle = (proposed.kind == .createRun
-                ? "Easy Run"
-                : (proposed.parameter ?? "Custom Strength Workout"))
-            actionRunMinutes = Int(proposed.parameter ?? "") ?? 40
-            actionRunHasHR = false
-            persist()
+            presentAction(proposed, for: questionText, appendUser: true)
             return
         }
         let history = context
@@ -3115,6 +3125,22 @@ private struct PremiumCoachConversation: View {
         turns.append(IMUNCoachTurn(role: "user", text: questionText))
         persist()
         Task {
+            // The service is a language classifier only: it cannot mutate
+            // workouts, choose an unvalidated ID, or bypass confirmation.
+            if IMUNCoachActionInterpreter.mightNeedModelProposal(questionText) {
+                if let classification = try? await coach.askIMUNCoach(
+                    question: IMUNCoachActionInterpreter.classificationPrompt(for: questionText),
+                    shareRecovery: false,
+                    recentConversation: ""),
+                   let proposal = IMUNCoachActionInterpreter.proposalFromModel(
+                    classification, sessions: coach.plannedSessions,
+                    workout: coach.workout, run: coach.runPlan) {
+                    await MainActor.run {
+                        presentAction(proposal, for: questionText, appendUser: false)
+                    }
+                    return
+                }
+            }
             do {
                 let reply = try await coach.askIMUNCoach(
                     question: questionText,
