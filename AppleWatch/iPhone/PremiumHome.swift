@@ -1903,6 +1903,7 @@ private struct PremiumProgressPage: View {
     @EnvironmentObject private var coach: PhoneWorkoutBridge
     @AppStorage("hcDesignPreset") private var progressPreset = "techno"
     @State private var selectedExercise = ""
+    @State private var rangeDays = 30
     @State private var movingSession: HCPlannedSession?
     @State private var showAllUpcomingSessions = false
     // Chart points are rebuilt only when source histories/selection change,
@@ -1917,8 +1918,46 @@ private struct PremiumProgressPage: View {
     }
 
     private var names: [String] { cachedExerciseNames }
-    private var strengthPoints: [HCPlotMark] { cachedStrengthPoints }
-    private var runPoints: [HCPlotMark] { cachedRunPoints }
+    private var cutoff: Date {
+        Calendar.current.date(byAdding: .day, value: -rangeDays, to: Date()) ?? .distantPast
+    }
+    private var strengthPoints: [HCPlotMark] {
+        cachedStrengthPoints.filter { $0.date >= cutoff }
+    }
+    private var runPoints: [HCPlotMark] {
+        cachedRunPoints.filter { $0.date >= cutoff }
+    }
+    private var monthlyVolumeLb: Double {
+        coach.performanceHistory.reduce(0) { sum, row in
+            guard let date = HCPlanBuilder.startOfDate(row.date), date >= cutoff else { return sum }
+            return sum + row.weightLb * Double(row.reps)
+        }
+    }
+    private var activeDates: Set<String> {
+        Set(coach.trainingActivities.compactMap { row in
+            guard let date = HCPlanBuilder.startOfDate(row.date), date >= cutoff else { return nil }
+            return row.date
+        })
+    }
+    private var currentStreak: Int {
+        let days = Set(coach.trainingActivities.map(\.date))
+        let calendar = Calendar.current
+        let start = days.contains(HCPlanBuilder.dateString(Date())) ?
+            Date() : (calendar.date(byAdding: .day, value: -1, to: Date()) ?? Date())
+        var count = 0
+        for offset in 0..<180 {
+            guard let day = calendar.date(byAdding: .day, value: -offset, to: start),
+                  days.contains(HCPlanBuilder.dateString(day)) else { break }
+            count += 1
+        }
+        return count
+    }
+    private var runMiles: Double {
+        coach.runHistory.reduce(0) { total, row in
+            guard let date = HCPlanBuilder.startOfDate(row.date), date >= cutoff else { return total }
+            return total + (row.distanceMeters ?? 0) / 1609.344
+        }
+    }
 
     private func rebuildStrengthChart() {
         let available = Array(Set(coach.performanceHistory.map(\.exercise))).sorted()
@@ -1962,6 +2001,30 @@ private struct PremiumProgressPage: View {
                                       tint: HCDesign.ink)
                     }
                 }
+                HStack {
+                    Text("ANALYSIS WINDOW")
+                        .font(HCDesign.label(10))
+                        .foregroundStyle(HCDesign.secondary)
+                    Spacer()
+                    Picker("Range", selection: $rangeDays) {
+                        Text("7D").tag(7)
+                        Text("30D").tag(30)
+                        Text("90D").tag(90)
+                    }
+                    .pickerStyle(.segmented)
+                    .frame(width: 180)
+                }
+                LazyVGrid(columns: [GridItem(.flexible(), spacing: 10),
+                                    GridItem(.flexible(), spacing: 10)], spacing: 10) {
+                    HCCard { HCMetricBlock(label: "Strength volume", value:
+                        String(format: "%.0f lb", monthlyVolumeLb)) }
+                    HCCard { HCMetricBlock(label: "Running distance", value:
+                        String(format: "%.1f mi", runMiles)) }
+                    HCCard { HCMetricBlock(label: "Active days", value:
+                        "\(activeDates.count) / \(rangeDays)") }
+                    HCCard { HCMetricBlock(label: "Current streak", value:
+                        "\(currentStreak) days") }
+                }
                 HCSectionTitle(title: "Exercise progression", detail: "Recorded weight")
                 HCCard {
                     VStack(alignment: .leading, spacing: 16) {
@@ -1978,6 +2041,15 @@ private struct PremiumProgressPage: View {
                                 ForEach(names, id: \.self) { Text($0).tag($0) }
                             }
                             .tint(HCDesign.aqua)
+                            NavigationLink {
+                                IMUNExerciseAnalytics(exercise: selectedExercise.isEmpty ?
+                                    (names.first ?? "") : selectedExercise)
+                            } label: {
+                                Label("Explore exercise history & personal records",
+                                      systemImage: "arrow.up.right")
+                                    .font(.system(size: 12, weight: .semibold))
+                            }
+                            .tint(HCDesign.electric)
                             if !strengthPoints.isEmpty {
                                 Chart(strengthPoints) { point in
                                     LineMark(x: .value("Date", point.date),
@@ -2197,6 +2269,91 @@ private struct PremiumProgressPage: View {
         .onReceive(coach.$runHistory) { _ in
             DispatchQueue.main.async { rebuildRunChart() }
         }
+    }
+}
+
+/// A detailed, exercise-specific record, always computed from actual logged
+/// weights/reps rather than an inferred training max.
+private struct IMUNExerciseAnalytics: View {
+    @EnvironmentObject private var coach: PhoneWorkoutBridge
+    let exercise: String
+    @State private var rangeDays = 90
+
+    private var entries: [HCPerformanceSet] {
+        coach.performanceHistory.filter { $0.exercise == exercise }
+            .sorted { $0.date > $1.date }
+    }
+    private var marks: [HCPlotMark] {
+        let cutoff = Calendar.current.date(byAdding: .day, value: -rangeDays,
+                                           to: Date()) ?? .distantPast
+        return entries.compactMap { row in
+            guard let date = HCPlanBuilder.startOfDate(row.date),
+                  date >= cutoff else { return nil }
+            return HCPlotMark(date: date, value: row.weightLb)
+        }.sorted { $0.date < $1.date }
+    }
+    private var best: Double { entries.map(\.weightLb).max() ?? 0 }
+    private var totalVolume: Double {
+        entries.reduce(0) { $0 + $1.weightLb * Double($1.reps) }
+    }
+
+    var body: some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 16) {
+                PremiumHeader(eyebrow: "STRENGTH / RECORDS", title: exercise,
+                              subtitle: "Actual logged loads and repetitions.")
+                HStack(spacing: 10) {
+                    HCCard {
+                        HCMetricBlock(label: "Heaviest logged",
+                                      value: String(format: "%.1f lb", best))
+                    }
+                    HCCard {
+                        HCMetricBlock(label: "Lifetime volume",
+                                      value: String(format: "%.0f lb", totalVolume))
+                    }
+                }
+                Picker("Time window", selection: $rangeDays) {
+                    Text("7D").tag(7)
+                    Text("30D").tag(30)
+                    Text("90D").tag(90)
+                }
+                .pickerStyle(.segmented)
+                if marks.isEmpty {
+                    HCCard { Text("No recorded sets in this date range.")
+                        .foregroundStyle(HCDesign.secondary) }
+                } else {
+                    HCCard {
+                        Chart(marks) { point in
+                            LineMark(x: .value("Day", point.date),
+                                     y: .value("Weight (lb)", point.value))
+                                .foregroundStyle(HCDesign.electric)
+                            PointMark(x: .value("Day", point.date),
+                                      y: .value("Weight (lb)", point.value))
+                                .foregroundStyle(HCDesign.electric)
+                        }
+                        .frame(height: 215)
+                    }
+                }
+                HCSectionTitle(title: "Logged sets", detail: "\(entries.count) entries")
+                ForEach(Array(entries.prefix(45).enumerated()), id: \.offset) { _, row in
+                    HCCard {
+                        HStack {
+                            Text(row.date)
+                                .font(.system(size: 12, weight: .medium))
+                            Spacer()
+                            Text(String(format: "%.1f lb × %d", row.weightLb, row.reps))
+                                .font(.system(size: 13, weight: .semibold))
+                                .monospacedDigit()
+                        }
+                    }
+                }
+            }
+            .padding(18)
+        }
+        .scrollIndicators(.hidden)
+        .hcPage()
+        .navigationTitle(exercise)
+        .navigationBarTitleDisplayMode(.inline)
     }
 }
 
