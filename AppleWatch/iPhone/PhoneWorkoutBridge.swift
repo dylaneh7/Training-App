@@ -31,6 +31,7 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
     private var manuallyCompletedRunKeys = Set<String>()
     private var locallyCreatedRun: HCRunPlan?
     @Published private(set) var recoveryHistory: [HCRecoveryDatum] = []
+    @Published private(set) var eitanSnapshot: HCEitanSnapshot?
     @Published private(set) var performanceHistory: [HCPerformanceSet] = []
     @Published private(set) var status = "Preparing Health Coach…"
     @Published private(set) var watchSyncStatus = "Waiting for Watch connection"
@@ -895,6 +896,16 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
         recoveryHistory = combined
     }
 
+    /// Recompute locally from authorized data; send only a compact summary
+    /// to the paired Watch. Keep existing workout reconciliation untouched.
+    func updateEitan(_ snapshot: HCEitanSnapshot?) {
+        let previous = eitanSnapshot.flatMap { try? encoder.encode($0) }
+        let incoming = snapshot.flatMap { try? encoder.encode($0) }
+        guard previous != incoming else { return }
+        eitanSnapshot = snapshot
+        sendToWatch()
+    }
+
     /// A matching Apple Health workout marks the planned run complete in the
     /// native interface. Imports remain local (and visible offline).
     func updateHealthRuns(_ imported: [HCProgressRun]) {
@@ -1162,6 +1173,15 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
         context[HCPayload.weightIncrement] = prefs.object(forKey:"hcWeightIncrement") as? Double ?? 5.0
         context[HCPayload.restOverride] = prefs.integer(forKey:"hcRestOverrideSeconds")
         context[HCPayload.watchHaptics] = prefs.object(forKey:"hcWatchHaptics") as? Bool ?? true
+        let eitanEnabled = prefs.object(forKey: "hcEitanEnabled") as? Bool ?? true
+        let useEitanHealth = prefs.object(forKey: "hcEitanUseHealth") as? Bool ?? true
+        context["hcEitanEnabled"] = eitanEnabled
+        context["hcEitanUseHealth"] = useEitanHealth
+        context["hcEitanCoachingEnabled"] = prefs.object(
+            forKey: "hcEitanCoachingEnabled") as? Bool ?? true
+        // An empty Data explicitly clears stale wellness readings if opted out.
+        context["hcEitanSnapshot"] = (eitanEnabled && useEitanHealth
+            ? eitanSnapshot.flatMap { try? encoder.encode($0) } : nil) ?? Data()
         context["hcRunVoiceCues"] = prefs.object(forKey:"hcRunVoiceCues") as? Bool ?? false
         context["hcRunAutoLaps"] = prefs.object(forKey:"hcRunAutoLaps") as? Bool ?? true
         context["hcRunIntervals"] = prefs.object(forKey:"hcRunIntervals") as? Bool ?? false
