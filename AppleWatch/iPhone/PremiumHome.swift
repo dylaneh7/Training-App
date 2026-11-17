@@ -1834,6 +1834,9 @@ private struct PremiumRecoveryPage: View {
     @State private var selectedHealthCategory = "Overview"
     @State private var metricSearch = ""
     @State private var expandedTrends: Set<String> = []
+    // Trends and baselines are expensive; only rebuild when source records
+    // change, rather than every scrolling/layout pass on the Health tab.
+    @State private var cachedSignals: [HCRecoverySignal] = []
 
     private func isSleepSignal(_ signal: HCRecoverySignal) -> Bool {
         let name = signal.label.lowercased()
@@ -1914,6 +1917,10 @@ private struct PremiumRecoveryPage: View {
     }
 
 
+    private func rebuildSignalCache() {
+        cachedSignals = signals
+    }
+
     private var signals: [HCRecoverySignal] {
         var result: [HCRecoverySignal] = []
         let grouped = Dictionary(grouping: coach.recoveryHistory, by: \.source)
@@ -1964,7 +1971,7 @@ private struct PremiumRecoveryPage: View {
     var body: some View {
         // Derive the source-attributed data only once per render, then reuse it
         // for the hero, search, alerts and chart cards.
-        let allSignals = signals
+        let allSignals = cachedSignals
         let visible = filteredSignals(from: allSignals)
         let sleepSources = uniqueSleepSources(visible)
         let remaining = visible.filter { !isSleepSignal($0) }
@@ -2337,7 +2344,13 @@ private struct PremiumRecoveryPage: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbarBackground(HCDesign.canvas, for: .navigationBar)
         .toolbarBackground(.visible, for: .navigationBar)
-        .onAppear { appleHealth.refreshIfAuthorized() }
+        .onAppear {
+            rebuildSignalCache()
+            appleHealth.refreshIfAuthorized()
+        }
+        .onReceive(appleHealth.$metrics) { _ in rebuildSignalCache() }
+        .onReceive(appleHealth.$metricHistory) { _ in rebuildSignalCache() }
+        .onReceive(coach.$recoveryHistory) { _ in rebuildSignalCache() }
     }
 }
 
