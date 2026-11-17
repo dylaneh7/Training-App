@@ -1283,11 +1283,14 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
         // A wellness score is replaceable state, NOT a background event.
         // Do not create transferUserInfo jobs that may repeatedly time out.
         let stored = session.receivedApplicationContext
-        if stored[HCPayload.eitanStamp] != nil {
-            _ = applyEitanPacket(stored)
+        if stored[HCPayload.eitanStamp] != nil,
+           applyEitanPacket(stored) {
+            eitanSyncStatus =
+                "Showing last EITAN received · open iMun on both devices for a fresh sync"
+        } else {
+            eitanSyncStatus =
+                "iPhone not reachable · open iMun on iPhone and Watch to sync EITAN"
         }
-        eitanSyncStatus =
-            "Latest available EITAN shown · open iMun on iPhone and Watch for a live refresh"
     }
 
     func requestEitanSync() {
