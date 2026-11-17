@@ -48,7 +48,7 @@ private struct IMUNTodayPage: View {
         }
         return candidates.sorted { $0.date > $1.date }.first
     }
-    private var sleep: HCHealthMetric? { metric(["Total asleep", "Sleep"]) }
+    private var sleep: HCHealthMetric? { metric(["Total asleep"]) }
     private var hrv: HCHealthMetric? { metric(["HRV", "Heart rate variability"]) }
     private var resting: HCHealthMetric? { metric(["Resting heart"]) }
 
