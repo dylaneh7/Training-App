@@ -210,6 +210,11 @@ struct WatchWorkoutView: View {
     @AppStorage("hcDesignCustomGeometry") private var visualCustom = false
     @AppStorage("hcDesignShape") private var visualShape = "rounded"
     @AppStorage("hcDesignFont") private var visualFont = "standard"
+    @AppStorage("hcDesignCustomPalette") private var visualPalette = false
+    @AppStorage("hcDesignAccentHex") private var visualAccent = "D4324F"
+    @AppStorage("hcDesignBackgroundHex") private var visualBackground = "070C16"
+    @AppStorage("hcDesignSurfaceHex") private var visualSurface = "212831"
+    @AppStorage("hcDesignTextHex") private var visualInk = "F6F3E9"
     @Environment(\.scenePhase) private var scenePhase
     // Low-rate foreground refresh: no continuous iPhone connection required.
     private let progressPulse = Timer.publish(
