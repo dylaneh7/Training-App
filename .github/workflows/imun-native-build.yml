@@ -1,0 +1,48 @@
+name: iMun iOS and watchOS compile
+
+on:
+  pull_request:
+    paths:
+      - "AppleWatch/**"
+      - ".github/workflows/imun-native-build.yml"
+  push:
+    branches: [main]
+    paths:
+      - "AppleWatch/**"
+      - ".github/workflows/imun-native-build.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  native-build:
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Xcode version
+        run: xcodebuild -version
+      - name: Build iPhone app and embedded watch companion
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project AppleWatch/HealthCoachNative.xcodeproj \
+            -scheme HealthCoach \
+            -configuration Debug \
+            -sdk iphonesimulator \
+            -destination 'generic/platform=iOS Simulator' \
+            CODE_SIGNING_ALLOWED=NO \
+            build 2>&1 | tee iphone-build.log
+      - name: Build watchOS app
+        if: success()
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project AppleWatch/HealthCoachNative.xcodeproj \
+            -scheme HealthCoachWatch \
+            -configuration Debug \
+            -sdk watchsimulator \
+            -destination 'generic/platform=watchOS Simulator' \
+            CODE_SIGNING_ALLOWED=NO \
+            build 2>&1 | tee watch-build.log
