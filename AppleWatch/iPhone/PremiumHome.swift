@@ -370,6 +370,10 @@ private struct PremiumTrainingPage: View {
             }
         }
         .hcPage()
+        // Match the other tabs: large in-content title scrolls away; the
+        // native compact title replaces it once Training has collapsed.
+        .navigationTitle(headerCollapsed ? "Training" : "")
+        .navigationBarTitleDisplayMode(.inline)
     }
 }
 
@@ -1651,8 +1655,10 @@ private struct IMUNActivityDetails: View {
 
 private struct PremiumProgressPage: View {
     @EnvironmentObject private var coach: PhoneWorkoutBridge
+    @AppStorage("hcDesignPreset") private var progressPreset = "techno"
     @State private var selectedExercise = ""
     @State private var movingSession: HCPlannedSession?
+    @State private var showAllUpcomingSessions = false
     // Chart points are rebuilt only when source histories/selection change,
     // never repeatedly while a user scrolls through the training cards.
     @State private var cachedExerciseNames: [String] = []
@@ -1710,6 +1716,59 @@ private struct PremiumProgressPage: View {
                                       tint: HCDesign.ink)
                     }
                 }
+                HCSectionTitle(title: "Exercise progression", detail: "Recorded weight")
+                HCCard {
+                    VStack(alignment: .leading, spacing: 16) {
+                        if names.isEmpty {
+                            if coach.loading {
+                                IMUNLoadingPlaceholder(lines: 3, height: 140)
+                            } else {
+                                Text("Your actual logged strength history will appear after sync.")
+                                    .font(.subheadline).foregroundStyle(HCDesign.secondary)
+                            }
+                        } else {
+                            Picker("Exercise", selection: $selectedExercise) {
+                                Text("Select movement").tag("")
+                                ForEach(names, id: \.self) { Text($0).tag($0) }
+                            }
+                            .tint(HCDesign.aqua)
+                            if !strengthPoints.isEmpty {
+                                Chart(strengthPoints) { point in
+                                    LineMark(x: .value("Date", point.date),
+                                             y: .value("Weight", point.value))
+                                        .interpolationMethod(.catmullRom)
+                                        .foregroundStyle(HCDesign.electric)
+                                    PointMark(x: .value("Date", point.date),
+                                              y: .value("Weight", point.value))
+                                        .foregroundStyle(HCDesign.electric)
+                                }
+                                .chartYAxisLabel("lb")
+                                .frame(height: 205)
+                            }
+                        }
+                        Text("Equipment-specific loads are kept separate. Dumbbell weights are per implement.")
+                            .font(.caption2).foregroundStyle(HCDesign.secondary)
+                    }
+                }
+                HCSectionTitle(title: "Running volume")
+                HCCard {
+                    if runPoints.isEmpty {
+                        if coach.loading {
+                            IMUNLoadingPlaceholder(lines: 3, height: 110)
+                        } else {
+                            Text("No measured running distances yet.")
+                                .foregroundStyle(HCDesign.secondary)
+                        }
+                    } else {
+                        Chart(runPoints) { p in
+                            BarMark(x: .value("Date", p.date, unit: .day),
+                                    y: .value("Miles", p.value))
+                                .foregroundStyle(HCDesign.aqua.gradient)
+                                .cornerRadius(4)
+                        }
+                        .frame(height: 210)
+                    }
+                }
                 HCCard(accent: HCDesign.electric) {
                     VStack(alignment: .leading, spacing: 8) {
                         IMUNThemeProgressView(
@@ -1728,14 +1787,39 @@ private struct PremiumProgressPage: View {
                                     coach.runHistory.compactMap(\.distanceMeters).reduce(0,+) / 1609.344),
                                   tint: HCDesign.electric)
                 }
-                HCSectionTitle(title: "Upcoming workouts", detail: "Tap to reschedule")
+                HStack(alignment: .center, spacing: 8) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Upcoming workouts")
+                            .font(.system(size: 18, weight: .semibold,
+                                          design: progressPreset == "heritage" ||
+                                                  progressPreset == "atelier" ?
+                                                  .serif : .default))
+                            .foregroundStyle(HCDesign.ink)
+                        Text("Tap to reschedule")
+                            .font(.system(size: 11))
+                            .foregroundStyle(HCDesign.secondary)
+                    }
+                    Spacer(minLength: 8)
+                    if upcoming.count > 3 {
+                        Button(showAllUpcomingSessions ? "Show less" : "See all \(upcoming.count)") {
+                            withAnimation(.easeOut(duration: 0.18)) {
+                                showAllUpcomingSessions.toggle()
+                            }
+                        }
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(HCDesign.electric)
+                        .buttonStyle(.plain)
+                        .accessibilityLabel(showAllUpcomingSessions ?
+                            "Show next three workouts" : "See all upcoming workouts")
+                    }
+                }
                 if upcoming.isEmpty {
                     HCCard {
                         Text("No upcoming sessions in your connected calendar. Add workouts through Command Center.")
                             .font(.subheadline).foregroundStyle(HCDesign.secondary)
                     }
                 } else {
-                    ForEach(upcoming) { entry in
+                    ForEach(showAllUpcomingSessions ? upcoming : Array(upcoming.prefix(3))) { entry in
                         HCCard {
                             VStack(alignment: .leading, spacing: 9) {
                                 HStack {
@@ -1842,51 +1926,6 @@ private struct PremiumProgressPage: View {
                     }
                 }
                 .buttonStyle(.plain)
-                HCSectionTitle(title: "Exercise progression", detail: "Recorded weight")
-                HCCard {
-                    VStack(alignment: .leading, spacing: 16) {
-                        if names.isEmpty {
-                            Text("Your actual logged strength history will appear after sync.")
-                                .font(.subheadline).foregroundStyle(HCDesign.secondary)
-                        } else {
-                            Picker("Exercise", selection: $selectedExercise) {
-                                Text("Select movement").tag("")
-                                ForEach(names, id: \.self) { Text($0).tag($0) }
-                            }
-                            .tint(HCDesign.aqua)
-                            if !strengthPoints.isEmpty {
-                                Chart(strengthPoints) { point in
-                                    LineMark(x: .value("Date", point.date),
-                                             y: .value("Weight", point.value))
-                                        .interpolationMethod(.catmullRom)
-                                        .foregroundStyle(HCDesign.electric)
-                                    PointMark(x: .value("Date", point.date),
-                                              y: .value("Weight", point.value))
-                                        .foregroundStyle(HCDesign.electric)
-                                }
-                                .chartYAxisLabel("lb")
-                                .frame(height: 205)
-                            }
-                        }
-                        Text("Equipment-specific loads are kept separate. Dumbbell weights are per implement.")
-                            .font(.caption2).foregroundStyle(HCDesign.secondary)
-                    }
-                }
-                HCSectionTitle(title: "Running volume")
-                HCCard {
-                    if runPoints.isEmpty {
-                        Text("No measured running distances yet.")
-                            .foregroundStyle(HCDesign.secondary)
-                    } else {
-                        Chart(runPoints) { p in
-                            BarMark(x: .value("Date", p.date, unit: .day),
-                                    y: .value("Miles", p.value))
-                                .foregroundStyle(HCDesign.aqua.gradient)
-                                .cornerRadius(4)
-                        }
-                        .frame(height: 210)
-                    }
-                }
                 Spacer(minLength: 30)
             }
             .padding(18)
@@ -1894,6 +1933,7 @@ private struct PremiumProgressPage: View {
         .scrollIndicators(.hidden)
         .hcPage()
         .navigationBarTitleDisplayMode(.inline)
+        .navigationTitle("Progress")
         .sheet(item: $movingSession) { entry in
             IMUNMoveWorkoutSheet(entry: entry)
                 .environmentObject(coach)
@@ -2277,6 +2317,52 @@ private struct HCHealthSummaryStat: View {
     }
 }
 
+/// The top of Health shows real source-specific readings, not synthetic
+/// readiness or combined WHOOP/Apple Watch measurements.
+private struct HCHealthQuickMetric: View {
+    let title: String
+    let reading: HCRecoverySignal?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            Text(title.uppercased())
+                .font(.system(size: 10, weight: .semibold))
+                .tracking(0.65)
+                .foregroundStyle(HCDesign.secondary)
+            Text(reading?.formattedValue ?? "—")
+                .font(.system(size: 22, weight: .semibold))
+                .monospacedDigit()
+                .contentTransition(.numericText())
+                .animation(IMUNStyle.animationsEnabled ?
+                           .easeOut(duration: 0.16) : nil,
+                           value: reading?.formattedValue ?? "—")
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
+                .foregroundStyle(HCDesign.ink)
+            Text(reading.map {
+                HCMetricFamily.sourceName($0.source) + " · " + $0.date
+            } ?? "No reading available")
+                .font(.system(size: 10))
+                .foregroundStyle(HCDesign.secondary)
+                .lineLimit(2)
+        }
+        .frame(maxWidth: .infinity, minHeight: 80, alignment: .leading)
+        .padding(12)
+        .background(HCDesign.card, in: RoundedRectangle(cornerRadius: 13))
+        .overlay {
+            RoundedRectangle(cornerRadius: 13)
+                .strokeBorder(HCDesign.outline.opacity(0.4), lineWidth: 1)
+        }
+        .accessibilityElement(children: .combine)
+    }
+}
+
+private struct HCHealthCategoryGroup: Identifiable {
+    let name: String
+    let families: [HCMetricFamily]
+    var id: String { name }
+}
+
 private struct PremiumRecoveryPage: View {
     @EnvironmentObject private var coach: PhoneWorkoutBridge
     @ObservedObject var appleHealth: HCAppleHealthReader
@@ -2286,6 +2372,7 @@ private struct PremiumRecoveryPage: View {
     @AppStorage("hcSelectedHealthMetric") private var selectedHealthMetric = ""
     @State private var metricSearch = ""
     @State private var expandedTrends: Set<String> = []
+    @State private var expandedHealthGroups: Set<String> = ["Sleep", "Heart & Vitals"]
     // Trends and baselines are expensive; only rebuild when source records
     // change, rather than every scrolling/layout pass on the Health tab.
     @State private var cachedSignals: [HCRecoverySignal] = []
@@ -2395,6 +2482,95 @@ private struct PremiumRecoveryPage: View {
         return result.sorted { $0.date > $1.date }
     }
 
+    private func latestReading(for id: String,
+                               families: [HCMetricFamily]) -> HCRecoverySignal? {
+        families.first(where: { $0.id == id })?.readings
+            .sorted { $0.date > $1.date }.first
+    }
+
+    private func category(for family: HCMetricFamily) -> String {
+        switch family.id {
+        case "sleep": return "Sleep"
+        case "hrv", "heart-rate", "resting-heart-rate", "daily-low-heart-rate",
+             "respiratory-rate", "blood-oxygen": return "Heart & Vitals"
+        default:
+            for reading in family.readings {
+                if let match = appleHealth.metrics.first(where: { $0.name == reading.label }) {
+                    return match.category
+                }
+            }
+            return "Recovery & Other"
+        }
+    }
+
+    private func categorized(_ families: [HCMetricFamily]) -> [HCHealthCategoryGroup] {
+        let grouped = Dictionary(grouping: families) { category(for: $0) }
+        let priority = categoryOrder + ["Recovery & Other"]
+        return grouped.keys.sorted {
+            let lhs = priority.firstIndex(of: $0) ?? priority.count
+            let rhs = priority.firstIndex(of: $1) ?? priority.count
+            return lhs == rhs ? $0 < $1 : lhs < rhs
+        }.map { HCHealthCategoryGroup(name: $0, families: grouped[$0] ?? []) }
+    }
+
+    // Filters remain visible when the title and metrics scroll off-screen.
+    // Keeping the selector compact avoids a second oversized header.
+    private var stickyMetricFilters: some View {
+        VStack(spacing: 7) {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    ForEach(healthCategories, id: \.self) { category in
+                        Button {
+                            selectedHealthCategory = category
+                        } label: {
+                            Text(category)
+                                .font(.system(size: 11, weight:
+                                    selectedHealthCategory == category ? .semibold : .medium))
+                                .foregroundStyle(selectedHealthCategory == category ?
+                                                 HCDesign.ink : HCDesign.secondary)
+                                .padding(.horizontal, 11)
+                                .padding(.vertical, 7)
+                                .background(selectedHealthCategory == category ?
+                                            HCDesign.raised : Color.clear,
+                                            in: RoundedRectangle(cornerRadius: 8))
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityAddTraits(selectedHealthCategory == category ?
+                                                [.isSelected] : [])
+                    }
+                }
+            }
+            HStack(spacing: 7) {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 12))
+                    .foregroundStyle(HCDesign.secondary)
+                TextField("Find metric or source", text: $metricSearch)
+                    .font(.system(size: 12))
+                    .textInputAutocapitalization(.never)
+                    .accessibilityLabel("Search health measurements")
+                if !metricSearch.isEmpty {
+                    Button {
+                        metricSearch = ""
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundStyle(HCDesign.secondary)
+                    }
+                    .accessibilityLabel("Clear metric search")
+                }
+            }
+            .padding(.horizontal, 11)
+            .padding(.vertical, 7)
+            .background(HCDesign.raised, in: RoundedRectangle(cornerRadius: 9))
+        }
+        .padding(.horizontal, 18)
+        .padding(.vertical, 7)
+        .frame(maxWidth: .infinity)
+        .background(HCDesign.canvas)
+        .overlay(alignment: .bottom) {
+            Rectangle().fill(HCDesign.outline.opacity(0.45)).frame(height: 0.5)
+        }
+    }
+
     var body: some View {
         let allSignals = cachedSignals
         let allFamilies = HCMetricFamily.build(from: allSignals)
@@ -2447,6 +2623,25 @@ private struct PremiumRecoveryPage: View {
                                         title: "With baselines")
                 }
 
+                HCSectionTitle(title: "At a glance", detail: "Latest available readings")
+                if appleHealth.loading && allFamilies.isEmpty {
+                    IMUNLoadingPlaceholder(lines: 4, height: 170)
+                        .transition(.opacity)
+                } else {
+                    LazyVGrid(columns: [GridItem(.flexible(), spacing: 10),
+                                        GridItem(.flexible(), spacing: 10)],
+                              spacing: 10) {
+                        HCHealthQuickMetric(title: "Sleep",
+                            reading: latestReading(for: "sleep", families: allFamilies))
+                        HCHealthQuickMetric(title: "HRV",
+                            reading: latestReading(for: "hrv", families: allFamilies))
+                        HCHealthQuickMetric(title: "Resting HR",
+                            reading: latestReading(for: "resting-heart-rate", families: allFamilies))
+                        HCHealthQuickMetric(title: "Steps",
+                            reading: latestReading(for: "steps", families: allFamilies))
+                    }
+                    .transition(.opacity)
+                }
                 if changed > 0 {
                     HStack(alignment: .top, spacing: 10) {
                         Image(systemName: "info.circle")
@@ -2463,52 +2658,10 @@ private struct PremiumRecoveryPage: View {
                 HCSectionTitle(title: "Measurements",
                                detail: selectedHealthCategory == "Overview" ?
                                     "At a glance" : selectedHealthCategory)
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 6) {
-                        ForEach(healthCategories, id: \.self) { category in
-                            Button {
-                                selectedHealthCategory = category
-                            } label: {
-                                Text(category)
-                                    .font(.system(size: 12, weight:
-                                        selectedHealthCategory == category ?
-                                        .semibold : .medium))
-                                    .foregroundStyle(
-                                        selectedHealthCategory == category ?
-                                            HCDesign.ink : HCDesign.secondary)
-                                    .padding(.horizontal, 13)
-                                    .padding(.vertical, 10)
-                                    .background(
-                                        selectedHealthCategory == category ?
-                                            HCDesign.raised : Color.clear,
-                                        in: RoundedRectangle(cornerRadius: 9))
-                            }
-                            .buttonStyle(.plain)
-                            .accessibilityAddTraits(
-                                selectedHealthCategory == category ?
-                                    [.isSelected] : [])
-                        }
-                    }
-                }
-
-                HStack(spacing: 11) {
-                    Image(systemName: "magnifyingglass")
-                        .font(.system(size: 14))
-                        .foregroundStyle(HCDesign.secondary)
-                    TextField("Find a metric or source", text: $metricSearch)
-                        .textInputAutocapitalization(.never)
-                        .font(.system(size: 13))
-                        .accessibilityLabel("Search health measurements")
-                }
-                .padding(13)
-                .background(HCDesign.card,
-                            in: RoundedRectangle(cornerRadius: 11))
-                .overlay {
-                    RoundedRectangle(cornerRadius: 11)
-                        .strokeBorder(HCDesign.outline.opacity(0.45), lineWidth: 1)
-                }
-
-                if visibleFamilies.isEmpty {
+                if appleHealth.loading && allFamilies.isEmpty {
+                    IMUNLoadingPlaceholder(lines: 3, height: 138)
+                    IMUNLoadingPlaceholder(lines: 2, height: 104)
+                } else if visibleFamilies.isEmpty {
                     VStack(alignment: .leading, spacing: 8) {
                         Text(allFamilies.isEmpty ?
                              "No measurements available yet" : "No matching measurements")
@@ -2523,9 +2676,43 @@ private struct PremiumRecoveryPage: View {
                     .padding(.vertical, 28)
                 }
 
-                ForEach(visibleFamilies) { family in
-                    HCMetricFamilyCard(family: family,
-                                       expandedTrends: $expandedTrends)
+                if selectedHealthCategory == "All" {
+                    ForEach(categorized(visibleFamilies)) { group in
+                        DisclosureGroup(isExpanded: Binding(
+                            get: { expandedHealthGroups.contains(group.name) },
+                            set: { expanded in
+                                if expanded { expandedHealthGroups.insert(group.name) }
+                                else { expandedHealthGroups.remove(group.name) }
+                            }
+                        )) {
+                            LazyVStack(alignment: .leading, spacing: 12) {
+                                ForEach(group.families) { family in
+                                    HCMetricFamilyCard(family: family,
+                                                       expandedTrends: $expandedTrends)
+                                }
+                            }
+                            .padding(.top, 12)
+                        } label: {
+                            HStack {
+                                Text(group.name)
+                                    .font(.system(size: 15, weight: .semibold))
+                                    .foregroundStyle(HCDesign.ink)
+                                Spacer()
+                                Text("\(group.families.count) metrics")
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(HCDesign.secondary)
+                            }
+                        }
+                        .tint(HCDesign.electric)
+                        .padding(13)
+                        .background(HCDesign.card,
+                                    in: RoundedRectangle(cornerRadius: 13))
+                    }
+                } else {
+                    ForEach(visibleFamilies) { family in
+                        HCMetricFamilyCard(family: family,
+                                           expandedTrends: $expandedTrends)
+                    }
                 }
 
                 HCSectionTitle(title: "Data sources", detail: "Manage & inspect")
@@ -2623,6 +2810,10 @@ private struct PremiumRecoveryPage: View {
         }
         .scrollIndicators(.hidden)
         .hcPage()
+        .safeAreaInset(edge: .top, spacing: 0) { stickyMetricFilters }
+        .animation(IMUNStyle.animationsEnabled ? .easeOut(duration: 0.18) : nil,
+                   value: appleHealth.loading)
+        .navigationTitle("Health")
         .navigationBarTitleDisplayMode(.inline)
         .toolbarBackground(HCDesign.canvas, for: .navigationBar)
         .toolbarBackground(.visible, for: .navigationBar)
@@ -3694,7 +3885,8 @@ private struct PremiumSettingsPage: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 19) {
+            // Settings sections render on demand, matching Progress/Health.
+            LazyVStack(alignment: .leading, spacing: 19) {
                 PremiumHeader(eyebrow: "IMUN / SETTINGS",
                               title: "Your preferences.",
                               subtitle: "Fine-tune your coaching, appearance and connections.")
