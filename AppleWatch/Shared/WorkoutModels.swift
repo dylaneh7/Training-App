@@ -260,6 +260,9 @@ enum HCEitanCoachingPolicy {
             ($0.energy <= 2 && $0.stress >= 4)
         } ?? false
         let concerning = checkIn?.painOrIllness == true
+        let lowMotivationWithStress = checkIn.map {
+            $0.motivation <= 2 && $0.stress >= 4
+        } ?? false
         let persistentLow = lowDays >= 3
         let accumulatingLoad = streak >= 6 || (hardDays >= 4 && trainingDays >= 5)
         let repeatedShortSleep = (shortSleepNights ?? 0) >= 3 &&
@@ -273,7 +276,8 @@ enum HCEitanCoachingPolicy {
             (streak >= 8 && trainingDays >= 6)
         let adapt = !recoveryReview && (
             multipleProblems >= 1 && (streak >= 5 || poorSubjective ||
-                                      (wellness ?? 100) < 45 && lowDays >= 2))
+                                      (wellness ?? 100) < 45 && lowDays >= 2 ||
+                                      hardDays >= 4 || lowMotivationWithStress))
         let mode = recoveryReview ? "recover" : adapt ? "adapt" : "challenge"
         var reasons: [String] = []
         if streak >= 5 {
@@ -285,6 +289,9 @@ enum HCEitanCoachingPolicy {
         }
         if persistentLow { reasons.append("\(lowDays) consecutive lower EITAN wellness trends") }
         if poorSubjective { reasons.append("Your check-in reports pronounced fatigue or soreness/stress") }
+        if lowMotivationWithStress {
+            reasons.append("Your check-in reports high stress and low motivation")
+        }
         if concerning { reasons.append("Your check-in reports pain or illness") }
         if reasons.isEmpty, let checkIn, checkIn.energy >= 4,
            checkIn.soreness <= 2 {
@@ -317,7 +324,8 @@ enum HCEitanCoachingPolicy {
                 "Check in after the session and review the next day's recovery"
             ]
         } else {
-            title = styleName == "cautious" ? "Build consistently" : "Challenge with purpose"
+            title = styleName == "cautious" ? "Build consistently" :
+                styleName == "balanced" ? "Progress with intent" : "Challenge with purpose"
             let oneBadNight = (shortSleepNights ?? 0) == 1 && sleepObservations >= 1
             message = oneBadNight
                 ? "One shorter night is not an automatic rest command. Train according to warm-up feel and technique, then prioritize recovery without assuming tomorrow will make up for lost sleep."
@@ -326,6 +334,10 @@ enum HCEitanCoachingPolicy {
                 "Follow the plan with consistent technique and controlled progression",
                 "Use RIR or session effort to decide whether to add load",
                 "Protect sleep and recovery without treating one metric as permission or prohibition"
+            ] : styleName == "balanced" ? [
+                "Aim for today's training target; adjust based on warm-up speed, technique and effort",
+                "Use RIR to add a rep or load only when today's sets justify progression",
+                "Finish with a deliberate plan for sleep, nutrition and the next session"
             ] : [
                 "If warm-ups feel solid, pursue the planned sets or run goal",
                 "Push effort within good form; use RIR to adjust load rather than force failure",
