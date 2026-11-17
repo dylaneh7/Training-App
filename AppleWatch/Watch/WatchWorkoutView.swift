@@ -210,6 +210,11 @@ struct WatchWorkoutView: View {
     @AppStorage("hcDesignCustomGeometry") private var visualCustom = false
     @AppStorage("hcDesignShape") private var visualShape = "rounded"
     @AppStorage("hcDesignFont") private var visualFont = "standard"
+    @AppStorage("hcDesignCustomPalette") private var visualPalette = false
+    @AppStorage("hcDesignAccentHex") private var visualAccent = "D4324F"
+    @AppStorage("hcDesignBackgroundHex") private var visualBackground = "070C16"
+    @AppStorage("hcDesignSurfaceHex") private var visualSurface = "212831"
+    @AppStorage("hcDesignTextHex") private var visualInk = "F6F3E9"
     @Environment(\.scenePhase) private var scenePhase
     // Low-rate foreground refresh: no continuous iPhone connection required.
     private let progressPulse = Timer.publish(
@@ -226,9 +231,10 @@ struct WatchWorkoutView: View {
                                 .tracking(3)
                                 .foregroundStyle(WTheme.aqua)
                             Text("Make it\ncount.")
-                                .font(.system(size: 22, weight: .heavy, design: .rounded))
+                                .font(.system(size: 22, weight: .heavy,
+                                              design: IMUNStyle.headingDesign))
                                 .tracking(-0.6)
-                                .foregroundStyle(.white)
+                                .foregroundStyle(IMUNStyle.palette.ink)
                             Text(Date().formatted(.dateTime.weekday(.abbreviated).day()))
                                 .font(WTheme.label(10)).foregroundStyle(WTheme.muted)
                         }
@@ -463,11 +469,13 @@ struct WatchWorkoutView: View {
             if store.cloudSignedIn {
                 store.refreshCloudWorkout()
                 store.refreshCloudSets()
+                store.refreshCloudAppearance(force: true)
             }
         }
         .onReceive(progressPulse) { _ in
             if scenePhase == .active && store.cloudSignedIn {
                 store.refreshCloudSets()
+                store.refreshCloudAppearance()
             }
         }
         .onChange(of: scenePhase) { _, phase in
@@ -942,9 +950,7 @@ private struct WatchGuidedSession: View {
             Text("NEXT SET AUTO-STARTS")
                 .font(WTheme.label(9))
                 .foregroundStyle(WTheme.muted)
-            Text(wClock(seconds))
-                .font(WTheme.metric(52))
-                .foregroundStyle(WTheme.lime)
+            IMUNThemeTimerFace(seconds: seconds, countsDown: true, compact: true)
             Button {
                 store.skipRest()
                 readyHapticSent = true
@@ -1058,6 +1064,7 @@ private struct WatchMovementPicker: View {
 }
 
 private struct WatchPreferences: View {
+    @EnvironmentObject private var store: WatchWorkoutStore
     @AppStorage("hcDesignPreset") private var preset = "techno"
     @AppStorage("hcDesignCustomGeometry") private var customGeometry = false
     @AppStorage("hcDesignShape") private var cardShape = "rounded"
@@ -1090,8 +1097,27 @@ private struct WatchPreferences: View {
                         Text(option.title).tag(option.rawValue)
                     }
                 }
-                Toggle("Use iPhone style when sent", isOn: $acceptPhoneLook)
+                Toggle("Use iPhone design from cloud", isOn: $acceptPhoneLook)
                     .tint(WTheme.lime)
+                    .onChange(of: acceptPhoneLook) { _, enabled in
+                        if enabled { store.refreshCloudAppearance(force: true) }
+                    }
+                if acceptPhoneLook {
+                    Button {
+                        store.refreshCloudAppearance(force: true)
+                    } label: {
+                        Label("FETCH IPHONE DESIGN", systemImage: "icloud.and.arrow.down")
+                    }
+                    .disabled(!store.cloudSignedIn)
+                    Text(store.designCloudStatus)
+                        .font(.system(size: 10))
+                        .foregroundStyle(WTheme.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                } else {
+                    Text("Watch colors and layout stay independent.")
+                        .font(.system(size: 10))
+                        .foregroundStyle(WTheme.muted)
+                }
                 Toggle("Custom layout", isOn: $customGeometry)
                     .tint(WTheme.lime)
                 if customGeometry {

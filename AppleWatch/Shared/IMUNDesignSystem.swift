@@ -279,6 +279,56 @@ enum IMUNStyle {
             secondary: secondary, accent: accent,
             supporting: resolvedColor(p.accentTwo))
     }
+    /// Small, explicitly whitelisted appearance snapshot. No workout data,
+    /// HealthKit values or credentials are ever part of the cloud design row.
+    private static let designStrings: [String] = [
+        "hcDesignPreset", "hcDesignMode", "hcDesignAccentHex",
+        "hcDesignBackgroundHex", "hcDesignSurfaceHex", "hcDesignTextHex",
+        "hcDesignShape", "hcDesignButtonShape", "hcDesignFont",
+        "hcDesignDensity", "hcDesignMotif", "hcDesignNavigation",
+        "hcDesignProgress"
+    ]
+    private static let designFlags: [String] = [
+        "hcDesignCustomPalette", "hcDesignCustomGeometry",
+        "hcDesignReduceMotion"
+    ]
+
+    static func cloudDesignPayload() -> [String: Any] {
+        var result: [String: Any] = [
+            "version": 1,
+            "watchSyncEnabled": prefs.bool(forKey: "hcDesignWatchSyncEnabled"),
+            "hcDesignPreset": preset.rawValue
+        ]
+        for key in designStrings {
+            if let value = prefs.string(forKey: key), value.count <= 40 {
+                result[key] = value
+            }
+        }
+        for key in designFlags {
+            result[key] = prefs.bool(forKey: key)
+        }
+        return result
+    }
+
+    static func applyCloudDesign(_ data: [String: Any]) -> Bool {
+        guard data["version"] as? Int == 1,
+              data["watchSyncEnabled"] as? Bool == true,
+              let name = data["hcDesignPreset"] as? String,
+              IMUNPreset(rawValue: name) != nil else { return false }
+        for key in designStrings {
+            guard let value = data[key] as? String,
+                  !value.isEmpty, value.count <= 40 else { continue }
+            if key.hasSuffix("Hex") &&
+               (value.count != 6 || UInt64(value, radix: 16) == nil) { continue }
+            prefs.set(value, forKey: key)
+        }
+        for key in designFlags {
+            if let value = data[key] as? Bool { prefs.set(value, forKey: key) }
+        }
+        prefs.set(name, forKey: "hcDesignPreset")
+        return true
+    }
+
     static var onAccent: Color {
         // Contrast-aware foreground for the preset or athlete-selected accent.
         // 0.179 is the relative-luminance crossover for black vs. white text.

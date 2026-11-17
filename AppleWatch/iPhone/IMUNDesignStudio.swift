@@ -24,6 +24,17 @@ struct IMUNDesignStudioPage: View {
     @AppStorage("hcDesignReduceMotion") private var reduceMotion = false
     @AppStorage("hcDesignWatchSyncEnabled") private var shareWithWatch = false
 
+    // Debounce ColorPicker drags and layout changes. Every published version
+    // is a tiny preferences-only snapshot, never a workout transfer.
+    private var designSignature: String {
+        [preset, mode, String(customPalette), String(customGeometry),
+         accentHex, backgroundHex, surfaceHex, textHex, shape,
+         buttonShape, headingFont, density, motif, navigation,
+         progress, String(reduceMotion), String(shareWithWatch),
+         String(coach.signedIn)]
+            .joined(separator: "|")
+    }
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 23) {
@@ -42,6 +53,16 @@ struct IMUNDesignStudioPage: View {
                     .font(.caption2)
                     .foregroundStyle(HCDesign.secondary)
                 previews
+
+                HCCard {
+                    VStack(alignment: .leading, spacing: 11) {
+                        IMUNThemeEmblem(area: "training")
+                        IMUNThemeTimerFace(seconds: 75, countsDown: true)
+                        Text("Live style sample · 1:15 rest timer. No training clock is running.")
+                            .font(.caption2)
+                            .foregroundStyle(HCDesign.secondary)
+                    }
+                }
 
                 HCSectionTitle(title: "Choose an identity", detail: "Tap a preset")
                 LazyVGrid(columns: [GridItem(.flexible(), spacing: 10),
@@ -179,12 +200,17 @@ struct IMUNDesignStudioPage: View {
                         Text("The Watch can use the same visual identity or its own selection.")
                             .font(.caption)
                             .foregroundStyle(HCDesign.secondary)
-                        HCFilledButton(title: "SEND DESIGN TO WATCH",
-                                       icon: "applewatch") {
-                            shareWithWatch = true
-                            coach.sendToWatch(forceQueue: true)
+                        Toggle("Sync this appearance to my Watch", isOn: $shareWithWatch)
+                            .tint(HCDesign.electric)
+                        HCFilledButton(title: "SYNC DESIGN THROUGH CLOUD",
+                                       icon: "icloud.and.arrow.up",
+                                       disabled: !coach.signedIn) {
+                            coach.publishDesignToCloud()
                         }
-                        Text("If the Watch uses direct cloud sync or can't reach the iPhone, select your look in Watch → Preferences. You can turn off sharing there to keep a different Watch look.")
+                        Text(coach.designCloudStatus)
+                            .font(.caption)
+                            .foregroundStyle(HCDesign.secondary)
+                        Text("Appearance sync uses your private iMun account, independently of the iPhone–Watch link. Open Watch → Preferences to fetch it, or disable 'Use iPhone style' to choose a different Watch theme.")
                             .font(.caption2)
                             .foregroundStyle(HCDesign.secondary)
                     }
@@ -195,8 +221,14 @@ struct IMUNDesignStudioPage: View {
         .hcPage()
         .navigationTitle("Design studio")
         .navigationBarTitleDisplayMode(.inline)
-        .onChange(of: preset) { _, _ in
-            if shareWithWatch { coach.sendToWatch() }
+        .task(id: designSignature) {
+            guard coach.signedIn else { return }
+            // Turning sharing off is itself a cloud update, so Watch stops
+            // applying future iPhone changes.
+            do {
+                try await Task.sleep(nanoseconds: 850_000_000)
+            } catch { return }
+            coach.publishDesignToCloud()
         }
     }
 

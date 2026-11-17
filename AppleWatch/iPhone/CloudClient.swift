@@ -213,6 +213,23 @@ actor HCCloudClient {
         return try JSONDecoder().decode(HCWorkout.self, from: bytes)
     }
 
+    /// Persist only user-approved visual preferences. RLS ensures the Watch
+    /// signed into this same account can read them independently.
+    func saveVisualPreferences(_ design: [String: Any]) async throws {
+        let current = try await authorizedToken()
+        _ = try await send(
+            path: "/rest/v1/health_coach_visual_preferences",
+            query: [URLQueryItem(name: "on_conflict", value: "user_id")],
+            method: "POST",
+            json: [[
+                "user_id": current.userID,
+                "design": design,
+                "updated_at": ISO8601DateFormatter().string(from: Date())
+            ]],
+            bearer: current.access,
+            prefer: "resolution=merge-duplicates,return=minimal")
+    }
+
     /// Atomically moves one existing planner workout without rewriting the
     /// user's full calendar from a potentially stale iPhone snapshot.
     func movePlannedWorkout(id: String, to date: String) async throws {

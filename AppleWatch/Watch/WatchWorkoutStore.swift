@@ -57,6 +57,7 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
     @Published private(set) var phonePingStatus = "No live connection test performed"
     @Published private(set) var cloudSignedIn = false
     @Published private(set) var cloudStatus = "Cloud fallback not connected"
+    @Published private(set) var designCloudStatus = "Watch uses its local appearance"
     @Published private(set) var isRequestingSchedule = false
     @Published private(set) var lastPhoneAcknowledgement: Date?
     private var pendingManualScheduleRequest = false
@@ -70,6 +71,8 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
     private var cloudUploadedIDs: Set<UUID> = []
     private var isUploadingCloudSets = false
     private var isFetchingCloudSets = false
+    private var isFetchingCloudAppearance = false
+    private var lastCloudAppearanceCheck = Date.distantPast
 
     static func today() -> String {
         let f = DateFormatter()
@@ -117,6 +120,7 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
                 self.cloudSignedIn = available
                 if available {
                     self.refreshCloudWorkout()
+                    self.refreshCloudAppearance(force: true)
                     self.uploadPendingCloudSets()
                 }
             }
@@ -140,6 +144,7 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
                     self.cloudSignedIn = true
                     self.cloudStatus = "Signed in · loading today's workout"
                     self.refreshCloudWorkout()
+                    self.refreshCloudAppearance(force: true)
                     self.uploadPendingCloudSets()
                 }
             } catch {
@@ -174,6 +179,50 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
             } catch {
                 DispatchQueue.main.async {
                     self.cloudStatus = "Cloud download failed: " + error.localizedDescription
+                }
+            }
+        }
+    }
+
+    /// Uses the SAME authenticated cloud session as direct Watch workout
+    /// recovery. This is optional; locally selected Watch themes always win
+    /// when the athlete disables "Use iPhone style" in Preferences.
+    func refreshCloudAppearance(force: Bool = false) {
+        guard cloudSignedIn else {
+            designCloudStatus = "Sign in on Watch to sync appearance"
+            return
+        }
+        guard UserDefaults.standard.object(
+            forKey: "hcDesignAcceptPhoneAppearance") as? Bool ?? true else {
+            designCloudStatus = "Your Watch uses its own theme"
+            return
+        }
+        guard !isFetchingCloudAppearance,
+              force || Date().timeIntervalSince(lastCloudAppearanceCheck) > 60
+        else { return }
+        isFetchingCloudAppearance = true
+        lastCloudAppearanceCheck = Date()
+        designCloudStatus = "Checking cloud appearance…"
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                let value = try await cloud.fetchVisualPreferences()
+                DispatchQueue.main.async {
+                    self.isFetchingCloudAppearance = false
+                    guard UserDefaults.standard.object(
+                        forKey: "hcDesignAcceptPhoneAppearance") as? Bool ?? true
+                    else { return }
+                    if let value, IMUNStyle.applyCloudDesign(value) {
+                        self.designCloudStatus = "iPhone design applied through cloud"
+                    } else {
+                        self.designCloudStatus = "Using local Watch appearance"
+                    }
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    self.isFetchingCloudAppearance = false
+                    self.designCloudStatus =
+                        "Could not fetch appearance: " + error.localizedDescription
                 }
             }
         }
@@ -1300,6 +1349,21 @@ private actor HCWatchCloudFallback {
         guard let rows = try JSONSerialization.jsonObject(with: data) as? [[String: Any]]
         else { throw HCWatchCloudError.malformed }
         return HCSetReconciliation.decodeCloudRows(rows, workout: workout)
+    }
+
+    func fetchVisualPreferences() async throws -> [String: Any]? {
+        let session = try await authorized()
+        let data = try await request(
+            path: "/rest/v1/health_coach_visual_preferences",
+            query: [
+                URLQueryItem(name: "select", value: "design"),
+                URLQueryItem(name: "user_id", value: "eq." + session.userID),
+                URLQueryItem(name: "limit", value: "1")
+            ],
+            bearer: session.access)
+        guard let rows = try JSONSerialization.jsonObject(with: data)
+                as? [[String: Any]] else { throw HCWatchCloudError.malformed }
+        return rows.first?["design"] as? [String: Any]
     }
 
     func fetchPublishedWorkout(date: String) async throws -> HCWorkout? {

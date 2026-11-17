@@ -36,9 +36,23 @@ struct PremiumHomeView: View {
     @AppStorage("hcDesignCustomPalette") private var customPalette = false
     @AppStorage("hcDesignAccentHex") private var designAccentHex = "D4324F"
     @AppStorage("hcDesignBackgroundHex") private var designBackgroundHex = "070C16"
+    @AppStorage("hcDesignSurfaceHex") private var designSurfaceHex = "212831"
+    @AppStorage("hcDesignTextHex") private var designTextHex = "F6F3E9"
+    @AppStorage("hcDesignShape") private var designCardShape = "rounded"
+    @AppStorage("hcDesignFont") private var designFont = "standard"
+    @AppStorage("hcDesignCustomGeometry") private var designCustomGeometry = false
     @Environment(\.scenePhase) private var scenePhase
     private let scheduleRefresh = Timer.publish(every: 60, on: .main, in: .common).autoconnect()
     private let progressRefresh = Timer.publish(every: 15, on: .main, in: .common).autoconnect()
+
+    // A single observer covers all styling tokens. Chaining a dozen
+    // separate .onChange modifiers exceeded SwiftUI's type-check budget.
+    private var designSignature: String {
+        [designPreset, designMode, String(customPalette),
+         designAccentHex, designBackgroundHex, designSurfaceHex,
+         designTextHex, designCardShape, designFont,
+         String(designCustomGeometry)].joined(separator: "|")
+    }
 
     var body: some View {
         TabView {
@@ -87,11 +101,7 @@ struct PremiumHomeView: View {
             configureTabAppearance()
             coach.sendToWatch()
         }
-        .onChange(of: designPreset) { _, _ in configureTabAppearance() }
-        .onChange(of: designMode) { _, _ in configureTabAppearance() }
-        .onChange(of: customPalette) { _, _ in configureTabAppearance() }
-        .onChange(of: designAccentHex) { _, _ in configureTabAppearance() }
-        .onChange(of: designBackgroundHex) { _, _ in configureTabAppearance() }
+        .onChange(of: designSignature) { _, _ in configureTabAppearance() }
         .onAppear {
             if coach.signedIn && coach.workout == nil { coach.refresh(date: Date()) }
             if coach.signedIn { coach.refreshCloudProgress() }
@@ -126,10 +136,31 @@ struct PremiumHomeView: View {
 
 // One Training destination. The picker controls the sport, not the daily plan:
 // each activity still reads its date-matched workout from the iPhone calendar.
+/// Tracks only this tab's content offset, not the root screen position.
+private struct IMUNTrainingScrollKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
+    }
+}
+
+private struct IMUNTrainingScrollProbe: View {
+    var body: some View {
+        GeometryReader { geometry in
+            Color.clear.preference(
+                key: IMUNTrainingScrollKey.self,
+                value: geometry.frame(in: .named("imunTrainingScroll")).minY)
+        }
+        .frame(height: 0)
+        .accessibilityHidden(true)
+    }
+}
+
 private struct PremiumTrainingPage: View {
     @EnvironmentObject private var coach: PhoneWorkoutBridge
     @AppStorage("hcTrainingActivity") private var chosenActivity = "weightlifting"
     @State private var activityPickerExpanded = false
+    @State private var headerCollapsed = false
 
     private var selected: IMUNTrainingActivity {
         IMUNTrainingActivity(rawValue: chosenActivity) ?? .weightlifting
@@ -151,21 +182,24 @@ private struct PremiumTrainingPage: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            VStack(alignment: .leading, spacing: 9) {
-                HStack {
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text("IMUN / TRAINING")
-                            .font(HCDesign.label(9))
-                            .tracking(1.5)
-                            .foregroundStyle(HCDesign.aqua)
-                        Text("Training")
-                            .font(HCDesign.display(25))
-                            .foregroundStyle(HCDesign.ink)
+            VStack(alignment: .leading, spacing: headerCollapsed ? 3 : 9) {
+                if !headerCollapsed {
+                    HStack {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("IMUN / TRAINING")
+                                .font(HCDesign.label(9))
+                                .tracking(1.5)
+                                .foregroundStyle(HCDesign.aqua)
+                            Text("Training")
+                                .font(HCDesign.display(25))
+                                .foregroundStyle(HCDesign.ink)
+                        }
+                        Spacer()
+                        Text(Date().formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day()))
+                            .font(HCDesign.label(11))
+                            .foregroundStyle(HCDesign.secondary)
                     }
-                    Spacer()
-                    Text(Date().formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day()))
-                        .font(HCDesign.label(11))
-                        .foregroundStyle(HCDesign.secondary)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
                 }
 
                 Button {
@@ -199,7 +233,7 @@ private struct PremiumTrainingPage: View {
                             .foregroundStyle(HCDesign.aqua)
                     }
                     .padding(.horizontal, 13)
-                    .padding(.vertical, 9)
+                    .padding(.vertical, headerCollapsed ? 5 : 9)
                     .background(HCDesign.card,
                                 in: RoundedRectangle(cornerRadius: 15, style: .continuous))
                     .overlay(RoundedRectangle(cornerRadius: 15, style: .continuous)
@@ -234,8 +268,10 @@ private struct PremiumTrainingPage: View {
                 }
             }
             .padding(.horizontal, 18)
-            .padding(.top, 8)
-            .padding(.bottom, 10)
+            .padding(.top, headerCollapsed ? 4 : 8)
+            .padding(.bottom, headerCollapsed ? 5 : 10)
+            .animation(IMUNStyle.animationsEnabled ? .easeOut(duration: 0.19) : nil,
+                       value: headerCollapsed)
 
             Rectangle()
                 .fill(HCDesign.outline.opacity(0.65))
@@ -243,8 +279,8 @@ private struct PremiumTrainingPage: View {
 
             Group {
                 switch selected {
-                case .run: PremiumRunPage()
-                case .weightlifting: PremiumStrengthPage()
+                case .run: PremiumRunPage(headerCollapsed: $headerCollapsed)
+                case .weightlifting: PremiumStrengthPage(headerCollapsed: $headerCollapsed)
                 }
             }
         }
@@ -321,6 +357,7 @@ private struct PremiumLogin: View {
 }
 
 private struct PremiumStrengthPage: View {
+    @Binding var headerCollapsed: Bool
     @EnvironmentObject private var coach: PhoneWorkoutBridge
     private var date: Date { Date() }
     @State private var movingSession: HCPlannedSession?
@@ -340,6 +377,7 @@ private struct PremiumStrengthPage: View {
 
     var body: some View {
         ScrollView {
+            IMUNTrainingScrollProbe()
             VStack(alignment: .leading, spacing: 19) {
                 HCSectionTitle(title: "Weightlifting", detail: aggressive ? "Coached session" : "Today's plan")
                 HCSyncStatus(pending: coach.cloudPendingCount,
@@ -447,20 +485,19 @@ private struct PremiumStrengthPage: View {
             }
             .padding(.horizontal, 18)
         }
+        .coordinateSpace(name: "imunTrainingScroll")
+        .onPreferenceChange(IMUNTrainingScrollKey.self) { offset in
+            // Hysteresis stops a collapsing header from bouncing repeatedly
+            // at the exact scroll threshold while the page is dragged.
+            if offset < -95 && !headerCollapsed {
+                headerCollapsed = true
+            } else if offset > -25 && headerCollapsed {
+                headerCollapsed = false
+            }
+        }
         .scrollIndicators(.hidden)
         .hcPage()
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                Button {
-                    coach.refresh(date: date)
-                } label: {
-                    Image(systemName: "arrow.clockwise")
-                        .foregroundStyle(HCDesign.electric)
-                }
-                .accessibilityLabel("Refresh strength workout")
-            }
-        }
         .sheet(item: $movingSession) { entry in
             IMUNMoveWorkoutSheet(entry: entry)
                 .environmentObject(coach)
@@ -712,13 +749,13 @@ private struct PremiumExerciseSession: View {
                         VStack(alignment: .leading, spacing: 12) {
                             TimelineView(.periodic(from: .now, by: 1)) { timeline in
                                 if active, let started = coach.phoneSetStartedAt {
-                                    HCMetricBlock(label: "Set elapsed",
-                                                  value: hcDuration(timeline.date.timeIntervalSince(started)),
-                                                  tint: HCDesign.electric)
+                                    IMUNThemeTimerFace(
+                                        seconds: timeline.date.timeIntervalSince(started),
+                                        countsDown: false)
                                 } else if let rest = coach.phoneRestEndsAt, rest > timeline.date {
-                                    HCMetricBlock(label: "Recovery countdown",
-                                                  value: hcDuration(rest.timeIntervalSince(timeline.date)),
-                                                  tint: HCDesign.aqua)
+                                    IMUNThemeTimerFace(
+                                        seconds: rest.timeIntervalSince(timeline.date),
+                                        countsDown: true)
                                 }
                             }
                             if coach.phoneSessionStartedAt == nil {
@@ -816,6 +853,7 @@ private struct PremiumExerciseSession: View {
 // MARK: - Run
 
 private struct PremiumRunPage: View {
+    @Binding var headerCollapsed: Bool
     @EnvironmentObject private var coach: PhoneWorkoutBridge
     @EnvironmentObject private var importer: HCRunHealthImporter
     private var date: Date { Date() }
@@ -848,6 +886,7 @@ private struct PremiumRunPage: View {
 
     var body: some View {
         ScrollView {
+            IMUNTrainingScrollProbe()
             VStack(alignment: .leading, spacing: 19) {
                 HCSectionTitle(title: "Running", detail: "Today's plan")
                 if !coach.signedIn { PremiumLogin() }
@@ -1005,6 +1044,16 @@ private struct PremiumRunPage: View {
                 Spacer(minLength: 26)
             }
             .padding(.horizontal, 18)
+        }
+        .coordinateSpace(name: "imunTrainingScroll")
+        .onPreferenceChange(IMUNTrainingScrollKey.self) { offset in
+            // Hysteresis stops a collapsing header from bouncing repeatedly
+            // at the exact scroll threshold while the page is dragged.
+            if offset < -95 && !headerCollapsed {
+                headerCollapsed = true
+            } else if offset > -25 && headerCollapsed {
+                headerCollapsed = false
+            }
         }
         .scrollIndicators(.hidden)
         .hcPage()
@@ -2378,17 +2427,6 @@ private struct PremiumCoachPage: View {
             .scrollDismissesKeyboard(.interactively)
             .hcPage()
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    NavigationLink {
-                        PremiumSettingsPage()
-                    } label: {
-                        Image(systemName: "gearshape")
-                            .foregroundStyle(HCDesign.electric)
-                    }
-                    .accessibilityLabel("Coach settings")
-                }
-            }
             .sheet(item: $movingSession) { session in
                 IMUNMoveWorkoutSheet(entry: session)
                     .environmentObject(coach)
@@ -2759,7 +2797,7 @@ private struct PremiumSettingsPage: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 19) {
-                PremiumHeader(eyebrow: "COACH / SETTINGS",
+                PremiumHeader(eyebrow: "IMUN / SETTINGS",
                               title: "Your preferences.",
                               subtitle: "Fine-tune your coaching, appearance and connections.")
                 HCCard(accent: HCDesign.electric) {
