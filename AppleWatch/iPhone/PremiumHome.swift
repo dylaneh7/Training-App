@@ -739,13 +739,13 @@ private struct PremiumExerciseSession: View {
                         VStack(alignment: .leading, spacing: 12) {
                             TimelineView(.periodic(from: .now, by: 1)) { timeline in
                                 if active, let started = coach.phoneSetStartedAt {
-                                    HCMetricBlock(label: "Set elapsed",
-                                                  value: hcDuration(timeline.date.timeIntervalSince(started)),
-                                                  tint: HCDesign.electric)
+                                    IMUNThemeTimerFace(
+                                        seconds: timeline.date.timeIntervalSince(started),
+                                        countsDown: false)
                                 } else if let rest = coach.phoneRestEndsAt, rest > timeline.date {
-                                    HCMetricBlock(label: "Recovery countdown",
-                                                  value: hcDuration(rest.timeIntervalSince(timeline.date)),
-                                                  tint: HCDesign.aqua)
+                                    IMUNThemeTimerFace(
+                                        seconds: rest.timeIntervalSince(timeline.date),
+                                        countsDown: true)
                                 }
                             }
                             if coach.phoneSessionStartedAt == nil {
