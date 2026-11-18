@@ -237,6 +237,19 @@ private final class HCMotionRepEstimator {
         }
         result.peakWristRotationDegreesPerSecond = peakRotationSpeeds.max()
         result.repActivePhaseSeconds = Array(activePhaseSeconds.suffix(50))
+        result.cycleWristRotationDegrees = Array(rotationalTravel.suffix(50))
+        if rotationalTravel.count >= 3 {
+            let earlier = Array(rotationalTravel.dropLast()).filter { $0 > 0 }
+            let baseline = earlier.isEmpty ? 0 :
+                earlier.reduce(0, +) / Double(earlier.count)
+            if baseline > 0.5, let last = rotationalTravel.last {
+                let change = (last / baseline - 1) * 100
+                result.lastWristRotationChangePercent = change
+                if change < -18 && change > -95 {
+                    result.note = "Last detected cycle had \(Int(abs(change).rounded()))% less wrist rotational travel than earlier cycles. This is not joint range of motion. " + result.note
+                }
+            }
+        }
         result.repTempoConsistencyPercent = variability.map { max(0, 100 - $0) }
         // A relative unitless comparison index; it is NOT measured watts.
         if let avg = mean, avg > 0,
