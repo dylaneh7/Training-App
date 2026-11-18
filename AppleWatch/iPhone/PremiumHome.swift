@@ -4087,6 +4087,74 @@ private struct IMUNCoachRunPaceEvidence: View {
     }
 }
 
+/// The VO2-max graph uses real, same-source historical readings.
+/// Never join estimates from different watch vendors into a single trend.
+private struct IMUNCoachVO2Evidence: View {
+    let samples: [HCHealthTrendSample]
+
+    private struct Point: Identifiable {
+        let id: String
+        let date: Date
+        let value: Double
+    }
+
+    private var selectedSource: (String, [Point])? {
+        let readings = samples.filter {
+            ($0.name.localizedCaseInsensitiveContains("VO₂") ||
+             $0.name.localizedCaseInsensitiveContains("VO2")) &&
+            $0.value.isFinite && $0.value > 10 && $0.value < 95
+        }
+        let grouped = Dictionary(grouping: readings, by: \.source)
+        guard let source = grouped.keys.sorted().max(by: {
+            (grouped[$0]?.count ?? 0) < (grouped[$1]?.count ?? 0)
+        }), let rows = grouped[source], rows.count >= 3 else { return nil }
+        let ordered: [Point] = rows.compactMap { row in
+            guard let day = HCPlanBuilder.startOfDate(row.date) else { return nil }
+            return Point(id: row.id, date: day, value: row.value)
+        }.sorted { $0.date < $1.date }
+        guard ordered.count >= 3 else { return nil }
+        return (source, Array(ordered.suffix(24)))
+    }
+
+    var body: some View {
+        if let (source, observations) = selectedSource {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    Text("VO₂ MAX · RECORDED TREND")
+                        .font(.system(size: 11, weight: .semibold))
+                        .tracking(1)
+                    Spacer()
+                    Text("\(observations.count) readings")
+                        .font(.system(size: 11))
+                }
+                .foregroundStyle(HCDesign.secondary)
+                Chart(observations) { point in
+                    LineMark(
+                        x: .value("Date", point.date),
+                        y: .value("VO2 max", point.value)
+                    )
+                    .foregroundStyle(HCDesign.aqua)
+                    PointMark(
+                        x: .value("Date", point.date),
+                        y: .value("VO2 max", point.value)
+                    )
+                    .foregroundStyle(HCDesign.aqua)
+                    .symbolSize(24)
+                }
+                .frame(height: 160)
+                Text("mL/kg/min · " + source +
+                     ". Device-estimated aerobic fitness; compare with consistent methods.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(HCDesign.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(15)
+            .background(HCDesign.card,
+                        in: RoundedRectangle(cornerRadius: 16))
+        }
+    }
+}
+
 // A real conversation surface, not a backend diagnostics panel. Chats remain
 // on the phone. Nothing is transmitted until the athlete chooses Send.
 private struct PremiumCoachConversation: View {
@@ -4203,6 +4271,9 @@ private struct PremiumCoachConversation: View {
                             if shouldShowRunEvidence {
                                 IMUNCoachRunPaceEvidence(runs: coach.runHistory,
                                                          includeAppleHealth: shareRecovery)
+                                if shareRecovery {
+                                    IMUNCoachVO2Evidence(samples: appleHealth.metricHistory)
+                                }
                             }
                             ScrollView(.horizontal, showsIndicators: false) {
                                 HStack(spacing: 8) {
