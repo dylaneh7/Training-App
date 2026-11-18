@@ -1151,7 +1151,7 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
             return
         }
         if fromPhone, let latestAppliedPhoneScheduleAt,
-           latestAppliedPhoneScheduleAt > schedule.generatedAt {
+           latestAppliedPhoneScheduleAt >= schedule.generatedAt {
             return
         }
         if fromPhone, let latestFullCloudScheduleAt,
@@ -1159,7 +1159,7 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
             return
         }
         if fromFullCloud, let latestFullCloudScheduleAt,
-           latestFullCloudScheduleAt > schedule.generatedAt {
+           latestFullCloudScheduleAt >= schedule.generatedAt {
             return
         }
         if let previous = latestSchedule, previous.date == schedule.date {
