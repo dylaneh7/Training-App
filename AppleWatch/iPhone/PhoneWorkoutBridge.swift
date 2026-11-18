@@ -1768,6 +1768,8 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
             context["hcWhoopWearSide"] = prefs.string(forKey:"hcWhoopWearSide") ?? "off"
             context["hcWatchMotionRepEstimate"] =
                 prefs.object(forKey:"hcWatchMotionRepEstimate") as? Bool ?? true
+            context["hcWatchMotionRecognitionEnabled"] =
+                prefs.object(forKey:"hcWatchMotionRecognitionEnabled") as? Bool ?? false
         }
         // Use the EXACT same revision and snapshot as independent EITAN
         // delivery. Workout calendar updates must not supersede EITAN with a
