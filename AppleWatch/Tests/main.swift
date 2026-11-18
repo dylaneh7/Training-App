@@ -164,6 +164,8 @@ var singleArm = HCExercise(
     prescribedSets:6, repMin:8, repMax:12,
     suggestedWeightLb:50, restSeconds:90)
 check(singleArm.isUnilateral,"One-arm rows must be recognized as unilateral")
+check(HCExercise.isOneSidedName("Flat bench dumbell row"),
+      "Athlete's common spelling of one-arm row must still produce left/right slots")
 check(singleArm.side(forSet:1) == .left &&
       singleArm.side(forSet:2) == .right &&
       singleArm.side(forSet:5) == .left &&
