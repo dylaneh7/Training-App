@@ -1188,8 +1188,14 @@ private struct WatchGuidedSession: View {
                                                 showSetPicker = false
                                                 wHaptic(.click)
                                             } label: {
-                                                Image(systemName: done ? "checkmark" :
-                                                      chosen ? "arrow.forward" : "\(number).circle")
+                                                Group {
+                                                    if let side = movement.side(forSet: number) {
+                                                        Text("\(side == .left ? "L" : "R")\((number + 1) / 2)")
+                                                    } else {
+                                                        Image(systemName: done ? "checkmark" :
+                                                              chosen ? "arrow.forward" : "\(number).circle")
+                                                    }
+                                                }
                                                     .font(.system(size: 15, weight: .semibold))
                                                     .foregroundStyle(chosen && !done ?
                                                         WTheme.onAccent : done ? WTheme.muted : .white)
@@ -1201,6 +1207,7 @@ private struct WatchGuidedSession: View {
                                             .buttonStyle(.plain)
                                             .disabled(done || movement.prescribedSets < 1)
                                             .accessibilityLabel("\(movement.name) set \(number)" +
+                                                (movement.side(forSet: number).map { " · \($0.title)" } ?? "") +
                                                                 (done ? ", completed" : ", choose next"))
                                         }
                                     }
