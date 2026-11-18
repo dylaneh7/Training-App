@@ -572,6 +572,17 @@ private struct IMUNEitanExplanation: View {
                     .font(.system(size: 9))
                     .foregroundStyle(WTheme.muted)
                     .fixedSize(horizontal: false, vertical: true)
+                Text("Installed Watch ID · " +
+                     (Bundle.main.bundleIdentifier ?? "unknown"))
+                    .font(.system(size: 9))
+                    .foregroundStyle(WTheme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text("Declared iPhone companion · " +
+                     (Bundle.main.infoDictionary?[
+                        "WKCompanionAppBundleIdentifier"] as? String ?? "missing"))
+                    .font(.system(size: 9))
+                    .foregroundStyle(WTheme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
                 if let received = store.eitanLastReceivedAt {
                     Text("Last received " +
                          received.formatted(date: .omitted, time: .shortened))
@@ -650,14 +661,16 @@ struct WatchWorkoutView: View {
     @AppStorage("hcDesignTextHex") private var visualInk = "F6F3E9"
     @Environment(\.scenePhase) private var scenePhase
     @State private var lastCloudScheduleCheck = Date.distantPast
-    // Low-rate foreground refresh: no continuous iPhone connection required.
+    @State private var lastCloudProgressCheck = Date.distantPast
+    @State private var lastCloudEitanCheck = Date.distantPast
+    @State private var lastCloudRunCheck = Date.distantPast
+    // Short foreground cloud reconciliation while training; never promise
+    // instantaneous offline or background delivery on either platform.
     private let progressPulse = Timer.publish(
-        every: 15, on: .main, in: .common).autoconnect()
+        every: 6, on: .main, in: .common).autoconnect()
 
-    var body: some View {
-        NavigationStack {
-            List {
-                Section {
+    private var primaryActions: some View {
+Section {
                     if eitanEnabled {
                     NavigationLink {
                         IMUNEitanExplanation()
@@ -722,11 +735,17 @@ struct WatchWorkoutView: View {
                     }
                     .listRowBackground(WTheme.panel)
                 }
-                Section("IsAIah · TODAY") {
+    }
+
+    private var isaiahBrief: some View {
+Section("IsAIah · TODAY") {
                     WatchIsaiahDailyBrief()
                         .listRowBackground(WTheme.panel)
                 }
-                Section("TRAINING PLAN") {
+    }
+
+    private var trainingPlan: some View {
+Section("TRAINING PLAN") {
                     VStack(alignment: .leading, spacing: 6) {
                         Text(store.scheduleState == "ready" ?
                              (store.hasScheduledLift ? store.workout.title :
@@ -744,10 +763,21 @@ struct WatchWorkoutView: View {
                                 .font(.system(size: 10))
                                 .foregroundStyle(WTheme.aqua)
                         }
+                        Text(store.syncPathSummary)
+                            .font(.system(size: 10))
+                            .foregroundStyle(WTheme.aqua)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Text(store.progressSyncStatus)
+                            .font(.system(size: 10))
+                            .foregroundStyle(WTheme.muted)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                     .listRowBackground(WTheme.panel)
                 }
-                if let recovery = store.recoverySummary {
+    }
+
+    @ViewBuilder private var healthSummary: some View {
+if let recovery = store.recoverySummary {
                     Section("HEALTH · " + recovery.source.uppercased()) {
                         HStack(alignment: .firstTextBaseline, spacing: 10) {
                             WatchSmallHealthMetric(title: "SLEEP",
@@ -778,7 +808,10 @@ struct WatchWorkoutView: View {
                             .listRowBackground(WTheme.panel)
                     }
                 }
-                Section("PREFERENCES") {
+    }
+
+    private var preferences: some View {
+Section("PREFERENCES") {
                     NavigationLink {
                         WatchPreferences()
                     } label: {
@@ -793,7 +826,10 @@ struct WatchWorkoutView: View {
                         .foregroundStyle(WTheme.muted)
                         .accessibilityLabel("Installed imun Watch app version")
                 }
-                Section("YOUR TRAINING") {
+    }
+
+    private var trainingHistory: some View {
+Section("YOUR TRAINING") {
                     if let latest = store.runHistory.first {
                         NavigationLink {
                             WatchRunDetail(run: latest)
@@ -815,6 +851,17 @@ struct WatchWorkoutView: View {
                             .foregroundStyle(WTheme.muted)
                     }
                 }
+    }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                primaryActions
+                isaiahBrief
+                trainingPlan
+                healthSummary
+                preferences
+                trainingHistory
             }
             .listStyle(.plain)
             .scrollIndicators(.hidden)
@@ -833,21 +880,38 @@ struct WatchWorkoutView: View {
             if store.cloudSignedIn {
                 store.refreshCloudWorkout()
                 store.refreshCloudSets()
+                store.refreshCloudRunHistory(force: true)
                 store.refreshCloudAppearance(force: true)
                 store.refreshCloudEitan(force: true)
             }
         }
         .onReceive(progressPulse) { _ in
-            if scenePhase == .active && store.cloudSignedIn {
-                // iMun Watch can receive a new full schedule even if
-                // WatchConnectivity says no live iPhone route exists.
-                if Date().timeIntervalSince(lastCloudScheduleCheck) >= 60 {
-                    lastCloudScheduleCheck = Date()
-                    store.refreshCloudWorkout()
-                }
+            guard scenePhase == .active, store.cloudSignedIn else { return }
+            let now = Date()
+            let isTraining = store.liftClock?.isActive == true ||
+                             store.runClock?.isActive == true
+            // During an active session, reconcile new phone/Watch sets
+            // and undo events in seconds. Idle screens use a lighter rate.
+            if now.timeIntervalSince(lastCloudProgressCheck) >=
+                (isTraining ? 6 : 18) {
+                lastCloudProgressCheck = now
                 store.refreshCloudSets()
-                store.refreshCloudAppearance()
+                store.uploadPendingCloudSets()
+            }
+            if now.timeIntervalSince(lastCloudScheduleCheck) >=
+                (isTraining ? 12 : 30) {
+                lastCloudScheduleCheck = now
+                store.refreshCloudWorkout()
+            }
+            if now.timeIntervalSince(lastCloudRunCheck) >=
+                (isTraining ? 24 : 60) {
+                lastCloudRunCheck = now
+                store.refreshCloudRunHistory()
+            }
+            if now.timeIntervalSince(lastCloudEitanCheck) >= 30 {
+                lastCloudEitanCheck = now
                 store.refreshCloudEitan()
+                store.refreshCloudAppearance()
             }
         }
         .onChange(of: scenePhase) { _, phase in
@@ -856,6 +920,7 @@ struct WatchWorkoutView: View {
                 store.requestCurrentSchedule()
                 if store.cloudSignedIn {
                     store.refreshCloudWorkout()
+                    store.refreshCloudRunHistory(force: true)
                     store.refreshCloudEitan(force: true)
                 }
             }

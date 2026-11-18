@@ -88,10 +88,23 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
     private var latestFullCloudScheduleAt: Date?
     private var latestAppliedPhoneScheduleAt: Date?
     private let cloud = HCWatchCloudFallback()
+
+    /// Two independent routes, reported separately. A missing Apple
+    /// companion registration is not a cloud failure or lost workout.
+    var syncPathSummary: String {
+        let direct = WCSession.isSupported() &&
+            WCSession.default.activationState == .activated &&
+            WCSession.default.isReachable
+        return "Live iPhone: " + (direct ? "available" : "unavailable") +
+            " · Cloud account: " + (cloudSignedIn ? "connected" : "signed out")
+    }
     private var cloudUploadedIDs: Set<UUID> = []
+    private var cloudUploadedRunIDs: Set<UUID> = []
     private var uploadedUndoIDs: Set<UUID> = []
     private var isUploadingCloudSets = false
     private var isFetchingCloudSets = false
+    private var isFetchingCloudRuns = false
+    private var lastCloudRunHistoryCheck = Date.distantPast
     private var isFetchingCloudAppearance = false
     private var lastCloudAppearanceCheck = Date.distantPast
 
@@ -123,6 +136,9 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
         if let s: [UUID] = load("queued-ids.json") { queuedIDs = Set(s) }
         if let s: [UUID] = load("confirmed-ids.json") { confirmedIDs = Set(s) }
         if let s: [UUID] = load("cloud-uploaded-ids.json") { cloudUploadedIDs = Set(s) }
+        if let s: [UUID] = load("cloud-uploaded-run-ids.json") {
+            cloudUploadedRunIDs = Set(s)
+        }
         if let s: HCTrainingClock = load("lifting-clock.json") { liftClock = s }
         guidedExerciseID = load("guided-exercise-id.json")
         selectedGuidedSet = load("guided-set-selection.json")
@@ -151,6 +167,7 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
                 self.cloudSignedIn = available
                 if available {
                     self.refreshCloudWorkout()
+                    self.refreshCloudRunHistory(force: true)
                     self.refreshCloudAppearance(force: true)
                     self.refreshCloudEitan(force: true)
                     self.uploadPendingCloudSets()
@@ -176,6 +193,7 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
                     self.cloudSignedIn = true
                     self.cloudStatus = "Signed in · loading today's workout"
                     self.refreshCloudWorkout()
+                    self.refreshCloudRunHistory(force: true)
                     self.refreshCloudAppearance(force: true)
                     self.refreshCloudEitan(force: true)
                     self.uploadPendingCloudSets()
@@ -385,9 +403,19 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
                     self.isFetchingCloudSets = false
                     guard self.workout.id == requested.id,
                           self.workout.date == requested.date else { return }
-                    self.cloudUndoRecords = undoEntries
-                    self.cloudSets = entries
-                    self.progressSyncStatus = "Progress updated from iPhone + Watch"
+                    let changed = Set(self.cloudUndoRecords) != Set(undoEntries) ||
+                                  Set(self.cloudSets) != Set(entries)
+                    if Set(self.cloudUndoRecords) != Set(undoEntries) {
+                        self.cloudUndoRecords = undoEntries
+                    }
+                    if Set(self.cloudSets) != Set(entries) {
+                        self.cloudSets = entries
+                    }
+                    if changed {
+                        self.progressSyncStatus = "Workout changes received from cloud"
+                    } else if self.progressSyncStatus.hasPrefix("Cloud progress not checked") {
+                        self.progressSyncStatus = "Cloud workout progress connected"
+                    }
                 }
             } catch {
                 DispatchQueue.main.async {
@@ -395,6 +423,50 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
                     self.progressSyncStatus = "Offline progress retained: " +
                         error.localizedDescription
                 }
+            }
+        }
+    }
+
+    /// Read durable completed runs directly from the athlete's cloud account.
+    /// Live WatchConnectivity is optional; cached imported runs are preserved.
+    func refreshCloudRunHistory(force: Bool = false) {
+        guard cloudSignedIn, !isFetchingCloudRuns,
+              force || Date().timeIntervalSince(lastCloudRunHistoryCheck) >= 30
+        else { return }
+        isFetchingCloudRuns = true
+        lastCloudRunHistoryCheck = Date()
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                let incoming = try await cloud.fetchNativeRunHistory()
+                self.isFetchingCloudRuns = false
+                var merged = incoming
+                for current in self.runHistory {
+                    let duplicate = merged.contains { other in
+                        other.id == current.id ||
+                        other.id == current.id.replacingOccurrences(
+                            of: "imun-watch:", with: "") ||
+                        (other.date == current.date &&
+                         other.startedAt != nil && current.startedAt != nil &&
+                         abs(other.startedAt!.timeIntervalSince(
+                             current.startedAt!)) < 120)
+                    }
+                    if !duplicate { merged.append(current) }
+                }
+                merged.sort {
+                    if $0.date != $1.date { return $0.date > $1.date }
+                    return ($0.startedAt ?? .distantPast) >
+                           ($1.startedAt ?? .distantPast)
+                }
+                let latest = Array(merged.prefix(20))
+                if latest.map(\.id) != self.runHistory.map(\.id) {
+                    self.runHistory = latest
+                    self.save(latest, name: "run-history.json")
+                }
+            } catch {
+                self.isFetchingCloudRuns = false
+                self.cloudStatus = "Run history retained · cloud error: " +
+                    error.localizedDescription
             }
         }
     }
@@ -408,14 +480,21 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
             !cloudUploadedIDs.contains(item.id) &&
             !allUndoRecords.contains(where: { $0.applies(to: item) })
         }
-        guard !pendingUndo.isEmpty || !pending.isEmpty else { return }
+        let pendingRuns = completedRuns.filter {
+            !cloudUploadedRunIDs.contains($0.id)
+        }
+        guard !pendingUndo.isEmpty || !pending.isEmpty ||
+              !pendingRuns.isEmpty else { return }
         isUploadingCloudSets = true
         Task { @MainActor [weak self] in
             guard let self else { return }
             var failed = false
+            var uploadedAny = false
+            var uploadedRun = false
             for undo in pendingUndo {
                 do {
                     try await cloud.recordWorkoutUndo(undo)
+                    uploadedAny = true
                     DispatchQueue.main.async {
                         self.uploadedUndoIDs.insert(undo.id)
                         self.save(Array(self.uploadedUndoIDs),
@@ -435,6 +514,7 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
                 for entry in pending {
                     do {
                         try await cloud.upload(entry)
+                        uploadedAny = true
                         DispatchQueue.main.async {
                             self.cloudUploadedIDs.insert(entry.id)
                             self.save(Array(self.cloudUploadedIDs),
@@ -442,6 +522,7 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
                             self.cloudStatus = "Logged sets saved to your account"
                         }
                     } catch {
+                        failed = true
                         DispatchQueue.main.async {
                             self.cloudStatus = "Sets saved offline; cloud retry: " +
                                 error.localizedDescription
@@ -450,8 +531,36 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
                     }
                 }
             }
+            if !failed {
+                for run in pendingRuns {
+                    do {
+                        try await cloud.upload(run)
+                        uploadedAny = true
+                        uploadedRun = true
+                        DispatchQueue.main.async {
+                            self.cloudUploadedRunIDs.insert(run.id)
+                            self.save(Array(self.cloudUploadedRunIDs),
+                                      name: "cloud-uploaded-run-ids.json")
+                            self.cloudStatus = "Completed run saved to your account"
+                        }
+                    } catch {
+                        failed = true
+                        DispatchQueue.main.async {
+                            self.cloudStatus = "Run saved on Watch · cloud retry: " +
+                                error.localizedDescription
+                        }
+                        break
+                    }
+                }
+            }
+            let cloudChanged = uploadedAny
+            let runChanged = uploadedRun
             DispatchQueue.main.async {
                 self.isUploadingCloudSets = false
+                if cloudChanged {
+                    self.notifyPhoneCloudProgressChanged(containsRuns: runChanged)
+                }
+                if runChanged { self.refreshCloudRunHistory(force: true) }
                 self.refreshCloudSets()
                 // A correction can arrive while the previous upload is
                 // active. Process it immediately after a successful batch.
@@ -1037,6 +1146,7 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
             save(plan, name: "run-plan.json")
         }
         sendPending()
+        uploadPendingCloudSets()
     }
 
     // MARK: - WatchConnectivity
@@ -1056,10 +1166,12 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
             return
         }
         phoneConnectionStatus =
-            "Companion registration: " +
-            (connection.isCompanionAppInstalled ? "Recognized" : "Not confirmed") +
-            " · Live messaging: " + (connection.isReachable ? "Available" : "Unavailable") +
-            " · Cloud schedule works independently"
+            "Direct iPhone link: " +
+            (connection.isReachable ? "Available" : "Unavailable") +
+            " · Companion: " +
+            (connection.isCompanionAppInstalled ? "Recognized" : "Not registered") +
+            " · Cloud: " + (cloudSignedIn ? "Signed in" : "Signed out") +
+            (cloudSignedIn ? " (workouts sync independently)" : "")
     }
 
     /// A real round-trip probe avoids interpreting a boolean as a successful
@@ -1123,7 +1235,7 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
             return
         }
         if fromPhone, let latestAppliedPhoneScheduleAt,
-           latestAppliedPhoneScheduleAt > schedule.generatedAt {
+           latestAppliedPhoneScheduleAt >= schedule.generatedAt {
             return
         }
         if fromPhone, let latestFullCloudScheduleAt,
@@ -1131,7 +1243,7 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
             return
         }
         if fromFullCloud, let latestFullCloudScheduleAt,
-           latestFullCloudScheduleAt > schedule.generatedAt {
+           latestFullCloudScheduleAt >= schedule.generatedAt {
             return
         }
         if let previous = latestSchedule, previous.date == schedule.date {
@@ -1580,6 +1692,20 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
         }
     }
 
+    /// The cloud commit already succeeded. This is just a wake-up hint; a
+    /// missing live link never blocks the persisted workout/undo record.
+    private func notifyPhoneCloudProgressChanged(containsRuns: Bool = false) {
+        guard WCSession.isSupported() else { return }
+        let session = WCSession.default
+        guard session.activationState == .activated,
+              session.isReachable else { return }
+        session.sendMessage([
+            HCPayload.kind: HCPayload.progressCloudChanged,
+            "date": Self.today(),
+            "includesRuns": containsRuns
+        ], replyHandler: { _ in }, errorHandler: { _ in })
+    }
+
     private func sendPending(forceResend: Bool = false) {
         guard WCSession.isSupported(),
               WCSession.default.activationState == .activated else { return }
@@ -1752,6 +1878,18 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
 
     func session(_ session: WCSession, didReceiveMessage message: [String: Any],
                  replyHandler: @escaping ([String: Any]) -> Void) {
+        if message[HCPayload.kind] as? String == HCPayload.progressCloudChanged {
+            DispatchQueue.main.async {
+                if message["date"] as? String == Self.today() {
+                    self.refreshCloudSets()
+                    if message["includesRuns"] as? Bool == true {
+                        self.refreshCloudRunHistory(force: true)
+                    }
+                }
+                replyHandler(["received": true])
+            }
+            return
+        }
         if message[HCPayload.kind] as? String == HCPayload.eitanSync {
             DispatchQueue.main.async {
                 let accepted = self.applyEitanPacket(message)
@@ -2117,6 +2255,84 @@ private actor HCWatchCloudFallback {
         guard let raw = rows.first?["plan"] as? [String: Any] else { return nil }
         return try JSONDecoder().decode(HCWorkout.self,
             from: JSONSerialization.data(withJSONObject: raw))
+    }
+
+    /// Authenticated, owner-scoped completed runs; no raw HealthKit routes.
+    func fetchNativeRunHistory() async throws -> [HCProgressRun] {
+        let session = try await authorized()
+        let response = try await request(
+            path: "/rest/v1/health_coach_native_runs",
+            query: [
+                URLQueryItem(name: "select", value:
+                    "id,workout_date,started_at,ended_at,distance_meters,avg_heart_rate_bpm,splits,source"),
+                URLQueryItem(name: "user_id", value: "eq." + session.userID),
+                URLQueryItem(name: "order", value: "started_at.desc"),
+                URLQueryItem(name: "limit", value: "25")
+            ], bearer: session.access)
+        guard let records = try JSONSerialization.jsonObject(with: response)
+                as? [[String: Any]] else { throw HCWatchCloudError.malformed }
+        let precise = ISO8601DateFormatter()
+        precise.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let standard = ISO8601DateFormatter()
+        return records.compactMap { row -> HCProgressRun? in
+            guard let id = row["id"] as? String,
+                  let date = row["workout_date"] as? String else { return nil }
+            let started = (row["started_at"] as? String).flatMap {
+                precise.date(from: $0) ?? standard.date(from: $0)
+            }
+            let ended = (row["ended_at"] as? String).flatMap {
+                precise.date(from: $0) ?? standard.date(from: $0)
+            }
+            let splits = (row["splits"] as? [[String: Any]] ?? [])
+                .enumerated().map { index, point in
+                    HCRunSplit(
+                        index: (point["index"] as? Int) ?? index + 1,
+                        elapsedSeconds: (point["elapsedSeconds"] as? NSNumber)?.doubleValue ?? 0,
+                        distanceMeters: (point["distanceMeters"] as? NSNumber)?.doubleValue)
+                }
+            var run = HCProgressRun(
+                id: id, date: date, title: "iMun Run",
+                source: row["source"] as? String ?? "iMun",
+                distanceMeters: (row["distance_meters"] as? NSNumber)?.doubleValue,
+                durationSeconds: started != nil && ended != nil
+                    ? max(0, ended!.timeIntervalSince(started!)) : nil,
+                averageBPM: (row["avg_heart_rate_bpm"] as? NSNumber)?.doubleValue,
+                splits: splits)
+            run.startedAt = started
+            run.endedAt = ended
+            return run
+        }
+    }
+
+    /// Same idempotent owner-scoped run write as the iPhone client. Without
+    /// this, completed Watch runs were stranded if WCSession never connected.
+    func upload(_ run: HCRunFinished) async throws {
+        let session = try await authorized()
+        let iso = ISO8601DateFormatter()
+        iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let laps: [[String: Any]] = run.splits.map {
+            ["index": $0.index,
+             "elapsedSeconds": $0.elapsedSeconds,
+             "distanceMeters": $0.distanceMeters.map { $0 as Any } ?? NSNull()]
+        }
+        _ = try await request(
+            path: "/rest/v1/health_coach_native_runs",
+            query: [URLQueryItem(name: "on_conflict", value: "id")],
+            method: "POST",
+            json: [[
+                "id": run.id.uuidString.lowercased(),
+                "user_id": session.userID,
+                "plan_id": run.planID.map { $0 as Any } ?? NSNull(),
+                "workout_date": run.date,
+                "started_at": iso.string(from: run.startedAt),
+                "ended_at": iso.string(from: run.endedAt),
+                "distance_meters": run.distanceMeters.map { $0 as Any } ?? NSNull(),
+                "avg_heart_rate_bpm": run.averageHeartRate.map { $0 as Any } ?? NSNull(),
+                "splits": laps,
+                "source": "Apple Watch"
+            ]],
+            bearer: session.access,
+            prefer: "resolution=ignore-duplicates,return=minimal")
     }
 
     func upload(_ set: HCLoggedSet) async throws {

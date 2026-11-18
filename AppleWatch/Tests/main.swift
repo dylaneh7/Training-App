@@ -125,3 +125,32 @@ check(HCPayload.eitanStamp != HCPayload.schedule &&
       HCPayload.eitanSnapshot != HCPayload.schedule,
       "EITAN snapshot and schedule must keep separate dictionary keys")
 print("EITAN nil-baseline, source attribution and packet-key regression checks passed.")
+
+
+// Build 50: the durable cloud record and fast WatchConnectivity update hint
+// must remain distinct from workout event / undo payload families.
+check(HCPayload.progressCloudChanged == "imunCloudProgressChangedV1",
+      "iPhone and Watch share the exact cloud-progress notification kind")
+check(HCPayload.progressCloudChanged != HCPayload.loggedSet &&
+      HCPayload.progressCloudChanged != HCPayload.workoutUndo &&
+      HCPayload.progressCloudChanged != HCPayload.pushSchedule,
+      "A cloud refresh hint must not be interpreted as a new workout event")
+
+// The client compares Hashable cloud records before publishing a UI change;
+// corrections to weight/reps for the same UUID must still register as a change.
+let comparisonID = UUID()
+let oldSet = HCLoggedSet(
+    id: comparisonID, workoutID: "w", workoutDate: "2026-11-17",
+    sessionKey: "s", workoutTitle: "Session", exerciseID: "e",
+    exerciseName: "Squat", exerciseIndex: 0, index: 1,
+    weightLb: 135, reps: 6, rir: 2, completedAt: Date(timeIntervalSince1970: 50))
+let correctedSet = HCLoggedSet(
+    id: comparisonID, workoutID: "w", workoutDate: "2026-11-17",
+    sessionKey: "s", workoutTitle: "Session", exerciseID: "e",
+    exerciseName: "Squat", exerciseIndex: 0, index: 1,
+    weightLb: 145, reps: 6, rir: 2, completedAt: Date(timeIntervalSince1970: 50))
+check(Set([oldSet]) != Set([correctedSet]),
+      "Same-UUID set correction must refresh the other device")
+check(Set([oldSet]) == Set([oldSet]),
+      "Identical cloud sets must not force an unnecessary UI refresh")
+print("Build 50 cloud-progress signaling and change-detection checks passed.")

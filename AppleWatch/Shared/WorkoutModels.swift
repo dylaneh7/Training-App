@@ -430,6 +430,7 @@ enum HCPayload {
     static let eitanSnapshot = "hcEitanSnapshot"
     static let eitanStamp = "hcEitanTimestamp"
     static let syncRequest = "syncRequestV3"
+    static let progressCloudChanged = "imunCloudProgressChangedV1"
     static let syncReceipt = "syncReceiptV3"
     static let workout = "workout"
     static let runPlan = "runPlan"

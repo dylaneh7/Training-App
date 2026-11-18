@@ -195,7 +195,17 @@ private struct IMUNEitanTodayCard: View {
         if showEitan {
             HCCard(accent: HCDesign.electric) {
                 VStack(alignment: .leading, spacing: 11) {
-                    HStack {
+                    heading
+                    wellnessContent
+                    coachingContent
+                    syncDiagnostics
+                }
+            }
+        }
+    }
+
+    private var heading: some View {
+HStack {
                         VStack(alignment: .leading, spacing: 4) {
                             Text("EITAN / " + (healthEnabled ? "BODY WELLNESS" : "TRAINING"))
                                 .font(HCDesign.label(10))
@@ -215,7 +225,10 @@ private struct IMUNEitanTodayCard: View {
                             .minimumScaleFactor(0.65)
                             .lineLimit(1)
                     }
-                    if healthEnabled {
+    }
+
+    @ViewBuilder private var wellnessContent: some View {
+if healthEnabled {
                         if let snapshot = coach.eitanSnapshot,
                            snapshot.date == HCPlanBuilder.dateString(Date()) {
                             Text("Primary wearable: " + (snapshot.primaryWearable ?? "Auto"))
@@ -270,7 +283,10 @@ private struct IMUNEitanTodayCard: View {
                             .font(.system(size: 12))
                             .foregroundStyle(HCDesign.secondary)
                     }
-                    if coachingEnabled {
+    }
+
+    @ViewBuilder private var coachingContent: some View {
+if coachingEnabled {
                         if let strategy = coach.eitanSnapshot?.coachingPlan, healthEnabled {
                             HStack(spacing: 8) {
                                 Image(systemName: strategy.mode == "challenge"
@@ -297,7 +313,11 @@ private struct IMUNEitanTodayCard: View {
                         }
                         IMUNEitanCheckInEditor()
                     }
-                    Divider().overlay(HCDesign.outline)
+    }
+
+    private var syncDiagnostics: some View {
+        VStack(alignment: .leading, spacing: 9) {
+Divider().overlay(HCDesign.outline)
                     HStack(spacing: 10) {
                         Image(systemName: coach.eitanWatchAcknowledgedAt == nil
                             ? "applewatch.slash" : "applewatch")
@@ -343,8 +363,6 @@ private struct IMUNEitanTodayCard: View {
                     Text("Personal trends and coaching suggestions are informational, not medical diagnoses.")
                         .font(.system(size: 10))
                         .foregroundStyle(HCDesign.secondary)
-                }
-            }
         }
     }
 }
@@ -537,7 +555,9 @@ struct PremiumHomeView: View {
     @Environment(\.scenePhase) private var scenePhase
     private let scheduleRefresh = Timer.publish(every: 60, on: .main, in: .common).autoconnect()
     // Network polling should never be a 15-second render interruption on Health/Progress.
-    private let progressRefresh = Timer.publish(every: 75, on: .main, in: .common).autoconnect()
+    private let progressRefresh = Timer.publish(every: 6, on: .main, in: .common).autoconnect()
+    @State private var lastProgressCloudCheck = Date.distantPast
+    @State private var lastRunHistoryCloudCheck = Date.distantPast
 
     // A single observer covers all styling tokens. Chaining a dozen
     // separate .onChange modifiers exceeded SwiftUI's type-check budget.
@@ -771,9 +791,21 @@ struct PremiumHomeView: View {
             }
         }
         .onReceive(progressRefresh) { _ in
-            if scenePhase == .active && coach.signedIn &&
-               (selectedTab == "training" || coach.isWorkoutActive) {
-                coach.refreshCloudProgress()
+            guard scenePhase == .active, coach.signedIn else { return }
+            let now = Date()
+            let activeInterval: TimeInterval = coach.isWorkoutActive ? 6 :
+                (selectedTab == "training" || selectedTab == "today" ? 12 : 45)
+            guard now.timeIntervalSince(lastProgressCloudCheck) >=
+                    activeInterval else { return }
+            lastProgressCloudCheck = now
+            // Read cloud-authoritative UUID/undo records even if the
+            // companion link is down. Pending local records remain visible.
+            coach.refreshCloudProgress()
+            coach.retryPendingCloudSets()
+            let runInterval: TimeInterval = coach.isWorkoutActive ? 24 : 60
+            if now.timeIntervalSince(lastRunHistoryCloudCheck) >= runInterval {
+                lastRunHistoryCloudCheck = now
+                coach.refreshCloudRunHistory()
             }
         }
         .onReceive(scheduleRefresh) { _ in
@@ -792,7 +824,10 @@ struct PremiumHomeView: View {
             migratePreviousHealthSourceChoice()
             if selectedTab == "coach" { selectedTab = "training" }
             if coach.signedIn && coach.workout == nil { coach.refresh(date: Date()) }
-            if coach.signedIn { coach.refreshCloudProgress() }
+            if coach.signedIn {
+                coach.refreshCloudProgress()
+                coach.refreshCloudRunHistory(force: true)
+            }
             configureTabAppearance()
             if tredictPlans.connected { tredictPlans.refresh() }
             publishWidgets()
