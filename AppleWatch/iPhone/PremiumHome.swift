@@ -5778,6 +5778,7 @@ private struct PremiumSettingsPage: View {
     @AppStorage("hcWatchWearSide") private var motionWatchWrist = "unknown"
     @AppStorage("hcWhoopWearSide") private var motionWhoopPosition = "off"
     @AppStorage("hcWatchMotionRepEstimate") private var motionAutoReps = true
+    @AppStorage("hcWatchMotionRecognitionEnabled") private var learnMovementPatterns = false
     @EnvironmentObject private var tredict: HCTredictImporter
     @State private var tredictToken = ""
     @AppStorage("hcAggressiveProgression") private var aggressive = true
@@ -5869,6 +5870,13 @@ private struct PremiumSettingsPage: View {
                             .onChange(of: motionAutoReps) { _, _ in
                                 syncMotionConfiguration()
                             }
+                        Toggle("Learn exercise motion patterns", isOn: $learnMovementPatterns)
+                            .tint(HCDesign.electric)
+                            .onChange(of: learnMovementPatterns) { _, _ in
+                                syncMotionConfiguration()
+                            }
+                        Text("Experimental: learns only from previously labeled sets. Movement suggestions require comparable recordings and never change the plan automatically.")
+                            .font(.caption2).foregroundStyle(HCDesign.secondary)
                         Picker("Apple Watch wrist", selection: $motionWatchWrist) {
                             Text("Not configured").tag("unknown")
                             Text("Left wrist").tag("left")
