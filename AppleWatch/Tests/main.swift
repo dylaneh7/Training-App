@@ -198,7 +198,7 @@ sideSet.side = .left
 sideSet.motionInsight = HCMotionSetInsight(
     wearSide:"left",detectedReps:6,averageCycleSeconds:1.7,
     lastCycleSeconds:2.1,lastCycleSlowdownPercent:23.5,
-    lastWristExcursionChangePercent:-15,
+    lastWristMotionIntensityChangePercent:-15,
     note:"Last cycle was slower; wrist-motion proxy only")
 let restored = try JSONDecoder().decode(HCLoggedSet.self,
                    from:JSONEncoder().encode(sideSet))
