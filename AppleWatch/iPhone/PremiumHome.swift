@@ -1799,6 +1799,7 @@ private struct PremiumExerciseSession: View {
                                 HStack(spacing: 10) {
                                     ForEach([HCWorkingSide.left, HCWorkingSide.right],
                                             id: \.self) { side in
+                                        let completedOnSide = completed.filter { $0.side == side }.count
                                         Button {
                                             workingSide = side
                                         } label: {
@@ -1806,9 +1807,7 @@ private struct PremiumExerciseSession: View {
                                                 Text(side == .left ? "LEFT" : "RIGHT")
                                                     .font(.system(size: 12, weight: .bold))
                                                 Spacer()
-                                                Text("\(completed.filter {
-                                                    $0.side == side
-                                                }.count)/\(ex.prescribedSets / 2)")
+                                                Text("\(completedOnSide)/\(ex.prescribedSets / 2)")
                                                     .font(.system(size: 11))
                                             }
                                             .padding(12)
