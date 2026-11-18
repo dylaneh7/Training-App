@@ -1168,6 +1168,36 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
         return exercise.side(forSet: guidedSetNumber)
     }
 
+    func publishMotionPreferences() {
+        refreshMotionRepPreference()
+        guard WCSession.isSupported() else { return }
+        let session = WCSession.default
+        guard session.activationState == .activated else {
+            session.activate()
+            return
+        }
+        let prefs = UserDefaults.standard
+        let packet: [String: Any] = [
+            HCPayload.kind: "imunMotionPreferencesV1",
+            "hcMotionPreferenceTimestamp": prefs.double(
+                forKey:"hcMotionPreferenceTimestamp"),
+            "hcWatchWearSide": prefs.string(forKey:"hcWatchWearSide") ?? "unknown",
+            "hcWhoopWearSide": prefs.string(forKey:"hcWhoopWearSide") ?? "off",
+            "hcWatchMotionRepEstimate": prefs.object(forKey:
+                "hcWatchMotionRepEstimate") as? Bool ?? true,
+            "hcWatchMotionRecognitionEnabled": prefs.object(forKey:
+                "hcWatchMotionRecognitionEnabled") as? Bool ?? false
+        ]
+        if session.isReachable {
+            session.sendMessage(packet, replyHandler: { _ in },
+                                errorHandler: { _ in
+                session.transferUserInfo(packet)
+            })
+        } else {
+            session.transferUserInfo(packet)
+        }
+    }
+
     /// No unilateral auto-count from a device on the opposite wrist.
     var motionCanTrackActiveSide: Bool {
         guard let side = activeSetSide else { return true }
