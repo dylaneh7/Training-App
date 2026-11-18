@@ -88,6 +88,16 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
     private var latestFullCloudScheduleAt: Date?
     private var latestAppliedPhoneScheduleAt: Date?
     private let cloud = HCWatchCloudFallback()
+
+    /// Two independent routes, reported separately. A missing Apple
+    /// companion registration is not a cloud failure or lost workout.
+    var syncPathSummary: String {
+        let direct = WCSession.isSupported() &&
+            WCSession.default.activationState == .activated &&
+            WCSession.default.isReachable
+        return "Live iPhone: " + (direct ? "available" : "unavailable") +
+            " · Cloud account: " + (cloudSignedIn ? "connected" : "signed out")
+    }
     private var cloudUploadedIDs: Set<UUID> = []
     private var uploadedUndoIDs: Set<UUID> = []
     private var isUploadingCloudSets = false
@@ -385,9 +395,19 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
                     self.isFetchingCloudSets = false
                     guard self.workout.id == requested.id,
                           self.workout.date == requested.date else { return }
-                    self.cloudUndoRecords = undoEntries
-                    self.cloudSets = entries
-                    self.progressSyncStatus = "Progress updated from iPhone + Watch"
+                    let changed = Set(self.cloudUndoRecords) != Set(undoEntries) ||
+                                  Set(self.cloudSets) != Set(entries)
+                    if Set(self.cloudUndoRecords) != Set(undoEntries) {
+                        self.cloudUndoRecords = undoEntries
+                    }
+                    if Set(self.cloudSets) != Set(entries) {
+                        self.cloudSets = entries
+                    }
+                    if changed {
+                        self.progressSyncStatus = "Workout changes received from cloud"
+                    } else if self.progressSyncStatus.hasPrefix("Cloud progress not checked") {
+                        self.progressSyncStatus = "Cloud workout progress connected"
+                    }
                 }
             } catch {
                 DispatchQueue.main.async {
@@ -413,9 +433,11 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
         Task { @MainActor [weak self] in
             guard let self else { return }
             var failed = false
+            var uploadedAny = false
             for undo in pendingUndo {
                 do {
                     try await cloud.recordWorkoutUndo(undo)
+                    uploadedAny = true
                     DispatchQueue.main.async {
                         self.uploadedUndoIDs.insert(undo.id)
                         self.save(Array(self.uploadedUndoIDs),
@@ -435,6 +457,7 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
                 for entry in pending {
                     do {
                         try await cloud.upload(entry)
+                        uploadedAny = true
                         DispatchQueue.main.async {
                             self.cloudUploadedIDs.insert(entry.id)
                             self.save(Array(self.cloudUploadedIDs),
@@ -442,6 +465,7 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
                             self.cloudStatus = "Logged sets saved to your account"
                         }
                     } catch {
+                        failed = true
                         DispatchQueue.main.async {
                             self.cloudStatus = "Sets saved offline; cloud retry: " +
                                 error.localizedDescription
@@ -450,8 +474,10 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
                     }
                 }
             }
+            let cloudChanged = uploadedAny
             DispatchQueue.main.async {
                 self.isUploadingCloudSets = false
+                if cloudChanged { self.notifyPhoneCloudProgressChanged() }
                 self.refreshCloudSets()
                 // A correction can arrive while the previous upload is
                 // active. Process it immediately after a successful batch.
@@ -1056,10 +1082,12 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
             return
         }
         phoneConnectionStatus =
-            "Companion registration: " +
-            (connection.isCompanionAppInstalled ? "Recognized" : "Not confirmed") +
-            " · Live messaging: " + (connection.isReachable ? "Available" : "Unavailable") +
-            " · Cloud schedule works independently"
+            "Direct iPhone link: " +
+            (connection.isReachable ? "Available" : "Unavailable") +
+            " · Companion: " +
+            (connection.isCompanionAppInstalled ? "Recognized" : "Not registered") +
+            " · Cloud: " + (cloudSignedIn ? "Signed in" : "Signed out") +
+            (cloudSignedIn ? " (workouts sync independently)" : "")
     }
 
     /// A real round-trip probe avoids interpreting a boolean as a successful
@@ -1580,6 +1608,19 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
         }
     }
 
+    /// The cloud commit already succeeded. This is just a wake-up hint; a
+    /// missing live link never blocks the persisted workout/undo record.
+    private func notifyPhoneCloudProgressChanged() {
+        guard WCSession.isSupported() else { return }
+        let session = WCSession.default
+        guard session.activationState == .activated,
+              session.isReachable else { return }
+        session.sendMessage([
+            HCPayload.kind: HCPayload.progressCloudChanged,
+            "date": Self.today()
+        ], replyHandler: { _ in }, errorHandler: { _ in })
+    }
+
     private func sendPending(forceResend: Bool = false) {
         guard WCSession.isSupported(),
               WCSession.default.activationState == .activated else { return }
@@ -1752,6 +1793,15 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
 
     func session(_ session: WCSession, didReceiveMessage message: [String: Any],
                  replyHandler: @escaping ([String: Any]) -> Void) {
+        if message[HCPayload.kind] as? String == HCPayload.progressCloudChanged {
+            DispatchQueue.main.async {
+                if message["date"] as? String == Self.today() {
+                    self.refreshCloudSets()
+                }
+                replyHandler(["received": true])
+            }
+            return
+        }
         if message[HCPayload.kind] as? String == HCPayload.eitanSync {
             DispatchQueue.main.async {
                 let accepted = self.applyEitanPacket(message)
