@@ -16,6 +16,7 @@
   <key>WKWatchOnly</key><false/>
   <key>WKRunsIndependentlyOfCompanionApp</key><true/>
   <key>WKBackgroundModes</key><array><string>workout-processing</string></array>
+  <key>NSMotionUsageDescription</key><string>iMun optionally reads Apple Watch motion during active strength sets to estimate repetitions. Estimates stay on your Watch until you choose to use them.</string>
   <key>NSHealthShareUsageDescription</key><string>Health Coach reads workout heart rate while you train.</string>
   <key>NSHealthUpdateUsageDescription</key><string>Health Coach saves your strength workout to Apple Fitness when you choose Start.</string>
 </dict>
