@@ -6368,10 +6368,8 @@ private struct PremiumSettingsPage: View {
         return lines.joined(separator: "\n")
     }
 
-    var body: some View {
-        ScrollView {
-            // Settings sections render on demand, matching Progress/Health.
-            LazyVStack(alignment: .leading, spacing: 19) {
+    @ViewBuilder
+    private var settingsIntro: some View {
                 PremiumHeader(eyebrow: "IMUN / SETTINGS",
                               title: "Your preferences.",
                               subtitle: "Fine-tune your coaching, appearance and connections.")
@@ -6425,6 +6423,10 @@ private struct PremiumSettingsPage: View {
                 Text("Apple Watch supplies live Core Motion. WHOOP placement is saved, but its official API does not provide live raw motion. Other wearable models can be added to this device list in future releases.")
                     .font(.caption2)
                     .foregroundStyle(HCDesign.secondary)
+    }
+
+    @ViewBuilder
+    private var settingsIntelligence: some View {
                 HCSectionTitle(title: "IsAIah sources", detail: "Your recovery, across devices")
                 HCCard {
                     VStack(alignment: .leading, spacing: 11) {
@@ -6524,6 +6526,10 @@ private struct PremiumSettingsPage: View {
                         }
                     }
                 }
+    }
+
+    @ViewBuilder
+    private var settingsIdentity: some View {
                 HCSectionTitle(title: "Home & Lock Screen", detail: "Widgets and live workouts")
                 HCCard {
                     VStack(alignment: .leading, spacing: 13) {
@@ -6605,6 +6611,10 @@ private struct PremiumSettingsPage: View {
                     }
                 }
                 .buttonStyle(.plain)
+    }
+
+    @ViewBuilder
+    private var settingsWorkoutControls: some View {
                 HCSectionTitle(title: "Workout controls")
                 HCCard {
                     VStack(alignment: .leading, spacing: 15) {
@@ -6664,6 +6674,10 @@ private struct PremiumSettingsPage: View {
                 .onChange(of: runAutoLaps) { _, _ in coach.sendToWatch() }
                 .onChange(of: runIntervals) { _, _ in coach.sendToWatch() }
                 .onChange(of: runCueMinutes) { _, _ in coach.sendToWatch() }
+    }
+
+    @ViewBuilder
+    private var settingsSharing: some View {
                 HCSectionTitle(title: "Your coaching notes")
                 HCCard {
                     VStack(alignment: .leading, spacing: 12) {
@@ -6698,6 +6712,10 @@ private struct PremiumSettingsPage: View {
                             .foregroundStyle(HCDesign.secondary)
                     }
                 }
+    }
+
+    @ViewBuilder
+    private var settingsTredict: some View {
                 HCSectionTitle(title: "Tredict / Garmin", detail: "Full-history personal connection")
                 HCCard {
                     VStack(alignment: .leading, spacing: 13) {
@@ -6763,6 +6781,10 @@ private struct PremiumSettingsPage: View {
                         }
                     }
                 }
+    }
+
+    @ViewBuilder
+    private var settingsHistory: some View {
                 HCSectionTitle(title: "Connected training history")
                 HCCard {
                     VStack(alignment: .leading, spacing: 10) {
@@ -6833,6 +6855,10 @@ private struct PremiumSettingsPage: View {
                             .foregroundStyle(HCDesign.secondary)
                     }
                 }
+    }
+
+    @ViewBuilder
+    private var settingsConnections: some View {
                 HCSectionTitle(title: "Connections")
                 HCCard {
                     VStack(alignment: .leading, spacing: 14) {
@@ -6900,6 +6926,21 @@ private struct PremiumSettingsPage: View {
                 }
                 .padding(.top, 7)
                 Spacer(minLength: 30)
+    }
+
+
+    var body: some View {
+        ScrollView {
+            // Settings sections render on demand, matching Progress/Health.
+            LazyVStack(alignment: .leading, spacing: 19) {
+                settingsIntro
+                settingsIntelligence
+                settingsIdentity
+                settingsWorkoutControls
+                settingsSharing
+                settingsTredict
+                settingsHistory
+                settingsConnections
             }
             .padding(18)
         }
