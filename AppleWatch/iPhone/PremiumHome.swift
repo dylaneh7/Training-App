@@ -464,7 +464,8 @@ private struct IMUNTodaysHealthStat: View {
 
 struct PremiumHomeView: View {
     @EnvironmentObject private var coach: PhoneWorkoutBridge
-    @StateObject private var appleHealth = HCAppleHealthReader()
+    // The app entry point owns this instance, so it survives tab changes.
+    @EnvironmentObject private var appleHealth: HCAppleHealthReader
     @StateObject private var runImporter = HCRunHealthImporter()
     @StateObject private var tredictImporter = HCTredictImporter()
     @StateObject private var tredictPlans = HCTredictWatchPlanSync()
