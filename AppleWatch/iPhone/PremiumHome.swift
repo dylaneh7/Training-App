@@ -195,7 +195,17 @@ private struct IMUNEitanTodayCard: View {
         if showEitan {
             HCCard(accent: HCDesign.electric) {
                 VStack(alignment: .leading, spacing: 11) {
-                    HStack {
+                    heading
+                    wellnessContent
+                    coachingContent
+                    syncDiagnostics
+                }
+            }
+        }
+    }
+
+    private var heading: some View {
+HStack {
                         VStack(alignment: .leading, spacing: 4) {
                             Text("EITAN / " + (healthEnabled ? "BODY WELLNESS" : "TRAINING"))
                                 .font(HCDesign.label(10))
@@ -215,7 +225,10 @@ private struct IMUNEitanTodayCard: View {
                             .minimumScaleFactor(0.65)
                             .lineLimit(1)
                     }
-                    if healthEnabled {
+    }
+
+    @ViewBuilder private var wellnessContent: some View {
+if healthEnabled {
                         if let snapshot = coach.eitanSnapshot,
                            snapshot.date == HCPlanBuilder.dateString(Date()) {
                             Text("Primary wearable: " + (snapshot.primaryWearable ?? "Auto"))
@@ -270,7 +283,10 @@ private struct IMUNEitanTodayCard: View {
                             .font(.system(size: 12))
                             .foregroundStyle(HCDesign.secondary)
                     }
-                    if coachingEnabled {
+    }
+
+    @ViewBuilder private var coachingContent: some View {
+if coachingEnabled {
                         if let strategy = coach.eitanSnapshot?.coachingPlan, healthEnabled {
                             HStack(spacing: 8) {
                                 Image(systemName: strategy.mode == "challenge"
@@ -297,7 +313,11 @@ private struct IMUNEitanTodayCard: View {
                         }
                         IMUNEitanCheckInEditor()
                     }
-                    Divider().overlay(HCDesign.outline)
+    }
+
+    private var syncDiagnostics: some View {
+        VStack(alignment: .leading, spacing: 9) {
+Divider().overlay(HCDesign.outline)
                     HStack(spacing: 10) {
                         Image(systemName: coach.eitanWatchAcknowledgedAt == nil
                             ? "applewatch.slash" : "applewatch")
@@ -343,8 +363,6 @@ private struct IMUNEitanTodayCard: View {
                     Text("Personal trends and coaching suggestions are informational, not medical diagnoses.")
                         .font(.system(size: 10))
                         .foregroundStyle(HCDesign.secondary)
-                }
-            }
         }
     }
 }
