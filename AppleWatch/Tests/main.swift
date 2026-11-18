@@ -274,3 +274,107 @@ let chestBench = movement("Flat barbell bench press")
 check(!HCExerciseLibrary.alternatives(for: chestBench, limit: 5).isEmpty,
       "Horizontal press movements should have appropriate substitutions")
 print("Build 63 offline catalog, instructions and smart swap tests passed: \(HCExerciseLibrary.all.count) unique movements.")
+
+
+// Build 64: device placement is explicit per vendor, independent of whether
+// live IMU access is supported, with correct migration and side attribution.
+let placementDefaults = UserDefaults(suiteName: "imun-wearable-qa-\(UUID())")!
+placementDefaults.set("left", forKey: "hcWatchWearSide")
+placementDefaults.set("right", forKey: "hcWhoopWearSide")
+IMUNWearablePlacementStore.migrateLegacy(defaults: placementDefaults)
+check(IMUNWearablePlacementStore.location("appleWatch", defaults:placementDefaults) == .leftWrist,
+      "Old left-wrist setting must migrate without user action")
+check(IMUNWearablePlacementStore.location("whoop", defaults:placementDefaults) == .rightWrist,
+      "Old WHOOP right-wrist setting must migrate")
+check(IMUNWearableLocation.leftUpperArm.side == .left &&
+      IMUNWearableLocation.rightForearm.side == .right,
+      "Upper-arm/biceps and forearm placement must retain physical side")
+check(IMUNWearableLocation.other.side == nil &&
+      IMUNWearableLocation.notWorn.side == nil,
+      "Unassigned and non-arm positions must not fabricate unilateral side attribution")
+IMUNWearablePlacementStore.save(.rightUpperArm,for:"appleWatch",defaults:placementDefaults)
+IMUNWearablePlacementStore.save(.leftForearm,for:"whoop",defaults:placementDefaults)
+let placementPacket = IMUNWearablePlacementStore.payload(defaults:placementDefaults)
+check(placementPacket["appleWatch"] == "rightUpperArm" &&
+      placementPacket["whoop"] == "leftForearm",
+      "Device-specific placements must survive WatchConnectivity transfer")
+let watchDefaults = UserDefaults(suiteName: "imun-watch-qa-\(UUID())")!
+check(IMUNWearablePlacementStore.apply(placementPacket, defaults:watchDefaults),
+      "New position packet should be recognized")
+check(IMUNWearablePlacementStore.location("appleWatch", defaults:watchDefaults) == .rightUpperArm,
+      "Watch must restore upper-arm position without reducing it to right wrist")
+check(IMUNWearablePlacementStore.location("whoop", defaults:watchDefaults) == .leftForearm,
+      "Watch must restore future WHOOP forearm position")
+check(!IMUNWearableCatalog.devices.first(where:{$0.id == "whoop"})!.hasSupportedLiveMotion,
+      "WHOOP must never falsely advertise raw real-time IMU access")
+let invalidPacket = ["appleWatch":"wrongSide","futureDevice":"leftWrist"]
+check(!IMUNWearablePlacementStore.apply(invalidPacket, defaults: watchDefaults),
+      "Unknown device IDs and invalid body locations must not change settings")
+check(IMUNWearablePlacementStore.location("appleWatch", defaults:watchDefaults) == .rightUpperArm,
+      "Invalid sync must not erase an existing choice")
+
+// Sample quality and location are persisted with the original set UUID.
+var qualitySet = sideSet
+qualitySet.motionInsight?.wearableLocation = IMUNWearableLocation.leftUpperArm.rawValue
+qualitySet.motionInsight?.motionModelVersion = 2
+qualitySet.motionInsight?.motionSampleCount = 235
+qualitySet.motionInsight?.sampleCoveragePercent = 96.7
+qualitySet.motionInsight?.samplingGapCount = 0
+qualitySet.motionInsight?.analysisConfidence = "Moderate"
+let qualityRoundTrip = try JSONDecoder().decode(HCLoggedSet.self,
+                      from: JSONEncoder().encode(qualitySet))
+check(qualityRoundTrip.motionInsight?.wearableLocation == "leftUpperArm" &&
+      qualityRoundTrip.motionInsight?.motionSampleCount == 235,
+      "Saved workout analysis must preserve placement and signal provenance")
+
+// Cloud history can decode past days without today's workout plan.
+let historyDecoded = HCSetReconciliation.decodeMotionHistoryRows([cloudRow])
+check(historyDecoded.count == 1 &&
+      historyDecoded[0].motionInsight?.detectedReps == 6,
+      "Historic cloud motion decoding must retain movement observations")
+
+// Repeated same-exercise/placement sessions support a cautious forecast,
+// while mixed forearm/biceps/wrist data must never be joined.
+var sampleSessions: [HCLoggedSet] = []
+for i in 0..<5 {
+    var entry = HCLoggedSet(
+        id: UUID(), workoutID:"forecast-\(i)",
+        workoutDate:String(format:"2026-11-%02d",i+1),
+        sessionKey:"forecast-\(i)", workoutTitle:"Workout \(i)",
+        exerciseID:"single-arm-row", exerciseName:"One-arm dumbbell row",
+        exerciseIndex:0,index:1,weightLb:50+Double(i),
+        reps:8,rir:2,
+        completedAt:Date(timeIntervalSince1970:Double(i)*86_400))
+    entry.side = .left
+    entry.motionInsight = HCMotionSetInsight(
+        wearSide:"left",detectedReps:8,
+        averageCycleSeconds:1.9-Double(i)*0.025,
+        lastCycleSeconds:2.0,
+        lastCycleSlowdownPercent:8,
+        lastWristMotionIntensityChangePercent:-3,
+        note:"Experimental wrist movement")
+    entry.motionInsight?.wearableLocation = "leftWrist"
+    entry.motionInsight?.analysisConfidence = "Moderate"
+    entry.motionInsight?.sampleCoveragePercent = 96
+    sampleSessions.append(entry)
+}
+let motionProjection = IMUNMotionAnalytics.forecastMotion(
+    sampleSessions,exerciseName:"One-arm dumbbell row",location:"leftWrist")
+check(motionProjection != nil && motionProjection!.sessionCount == 5 &&
+      motionProjection!.projectedNextCycleSeconds > 0,
+      "Five comparable movement sessions should yield a bounded trend projection")
+check(IMUNMotionAnalytics.forecastMotion(
+    sampleSessions,exerciseName:"One-arm dumbbell row",
+    location:"leftUpperArm") == nil,
+    "Motion projections must not combine wrist and biceps recordings")
+check(IMUNMotionAnalytics.forecastStrength(sampleSessions,
+    exerciseName:"One-arm dumbbell row")?.sessionCount == 5,
+    "Logged load and reps should support a separately labeled e1RM trend")
+var lowQuality = sampleSessions
+for i in lowQuality.indices {
+    lowQuality[i].motionInsight?.sampleCoveragePercent = 40
+}
+check(IMUNMotionAnalytics.forecastMotion(lowQuality,
+    exerciseName:"One-arm dumbbell row",location:"leftWrist") == nil,
+    "Low-quality sensor sessions must not produce confident predictions")
+print("Build 64 device placement, historical motion, capture quality and guarded forecasts passed.")
