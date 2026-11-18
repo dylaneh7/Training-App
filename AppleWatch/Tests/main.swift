@@ -207,3 +207,43 @@ check(restored.side == .left &&
       restored.motionInsight?.wearSide == "left",
       "Motion summaries must retain their physical side and source")
 print("Build 62 unilateral slots, backward decoding and motion summary tests passed.")
+
+
+// Build 62 cloud round-trip: side provenance and compact movement metrics
+// must survive when a Watch uploads while the iPhone is disconnected.
+let cloudWorkout = HCWorkout(
+    id: "2026-11-18-test", date: "2026-11-18", sessionKey: "test",
+    title: "Source-aware training", exercises: [singleArm], isPreview: false)
+let insightBytes = try JSONEncoder().encode(sideSet.motionInsight!)
+let insightObject = try JSONSerialization.jsonObject(with: insightBytes)
+let cloudRow: [String: Any] = [
+    "id": UUID().uuidString.lowercased(),
+    "workout_date": "2026-11-18",
+    "session_key": "test",
+    "workout_title": "Source-aware training",
+    "exercise_id": "single-arm-row",
+    "exercise_name": "One-arm dumbbell row",
+    "exercise_index": 0,
+    "set_index": 1,
+    "reps": 6,
+    "completed_at": "2026-11-18T06:00:00.000Z",
+    "source": "Apple Watch",
+    "working_side": "left",
+    "motion_insight": insightObject
+]
+let recoveredCloud = HCSetReconciliation.decodeCloudRows(
+    [cloudRow], workout: cloudWorkout)
+check(recoveredCloud.count == 1 &&
+      recoveredCloud[0].side == .left &&
+      recoveredCloud[0].motionInsight?.wearSide == "left" &&
+      recoveredCloud[0].motionInsight?.detectedReps == 6,
+      "Cloud restores working side and labeled per-set motion summary")
+var oldCloudRow = cloudRow
+oldCloudRow.removeValue(forKey:"working_side")
+oldCloudRow.removeValue(forKey:"motion_insight")
+let inferred = HCSetReconciliation.decodeCloudRows(
+    [oldCloudRow], workout: cloudWorkout)
+check(inferred.count == 1 && inferred[0].side == .left &&
+      inferred[0].motionInsight == nil,
+      "Legacy cloud rows infer side without inventing movement data")
+print("Build 62 cloud side and motion summary decoding tests passed.")
