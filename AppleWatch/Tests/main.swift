@@ -356,6 +356,7 @@ for i in 0..<5 {
     entry.motionInsight?.wearableLocation = "leftWrist"
     entry.motionInsight?.analysisConfidence = "Moderate"
     entry.motionInsight?.sampleCoveragePercent = 96
+    entry.motionInsight?.samplingGapCount = 0
     sampleSessions.append(entry)
 }
 let motionProjection = IMUNMotionAnalytics.forecastMotion(
