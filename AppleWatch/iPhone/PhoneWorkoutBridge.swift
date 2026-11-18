@@ -1168,6 +1168,7 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
                          String(screenContext.prefix(600)))
         }
         lines.append("Available iMun Coach controls require confirmation: edit today's prescribed strength exercises, create/rename/reschedule workouts, confirm completion, sync Watch, change training/appearance/motivation settings, and navigate app sections. These are app actions, never assumed completed by a chat reply.")
+        lines.append("ISAIah COACHING METHOD: Answer like a thoughtful, data-literate endurance and strength coach, not a dashboard chatbot. First answer the athlete's actual concern in plain language. When possible, cite 2–4 actual dated comparisons with measured values, units and explicit source names. Distinguish observed change from possible causes and state when evidence is sparse, missing, device-dependent or confounded by route, terrain, weather, effort, distance and HR source. For running fitness compare 30–60-day trends, endurance capacity, pace at broadly comparable effort/HR, recent volume and recovery; never claim a race PR or VO2-max improvement without measured evidence. Connect recent strength sessions and run workload to reports of heavy legs, sleep restriction or fatigue without diagnosing a condition. Give one practical, appropriately flexible next step and ask one discriminating follow-up question. Any app training change is only a proposal until the user reviews and confirms it. Do not make unqualified blanket rest orders solely from a readiness color or single poor sleep. If reported symptoms include severe pain, unilateral leg swelling, sudden breathlessness, chest pain, or dark urine after intense exertion, advise prompt medical assessment instead of assuming ordinary exercise fatigue. Never fabricate sensor-derived WHOOP strain, recovery percentages, sleep duration or heart-rate zones.")
         let coachingStyle = UserDefaults.standard.string(
             forKey: "hcEitanCoachStyle") ?? "driven"
         let coachingOn = UserDefaults.standard.object(
@@ -1326,6 +1327,35 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
             lines.append("Exercise: " + items.joined(separator: " | "))
         }
         lines.append("Run and exercise summaries never include raw GPS coordinates. Raw GPS routes and full heart-rate traces are not sent to the AI. Missing detailed metrics are unknown, not zero.")
+        // Report recorded training load separately from wellness/readiness.
+        // Distinct source sessions are deduplicated in trainingActivities.
+        // Counts are explicitly partial if not all providers have synced.
+        let workoutTimeline = trainingActivities.filter {
+            shareRecovery || !$0.id.hasPrefix("healthkit:")
+        }
+        let dayStart = Calendar.current.startOfDay(for: Date())
+        for (name, startOffset, endOffset) in [
+            ("Last 7 days", -6, 1), ("Previous 7 days", -13, -6)
+        ] {
+            guard let beginning = Calendar.current.date(
+                    byAdding: .day, value: startOffset, to: dayStart),
+                  let ending = Calendar.current.date(
+                    byAdding: .day, value: endOffset, to: dayStart)
+            else { continue }
+            let records = workoutTimeline.filter { row in
+                guard let date = HCPlanBuilder.startOfDate(row.date)
+                else { return false }
+                return date >= beginning && date < ending
+            }
+            let knownMinutes = records.reduce(0.0) {
+                $0 + max(0, ($1.durationSeconds ?? 0)) / 60
+            }
+            let runCount = records.filter { $0.kind == "run" }.count
+            let liftingCount = records.filter { $0.kind == "lift" }.count
+            lines.append(String(format:
+                "Imported training load %@: %d recorded sessions (%d runs, %d lifts), %.0f minutes with measured duration; this may omit unsynced workouts and does not establish a causal explanation for fatigue.",
+                name, records.count, runCount, liftingCount, knownMinutes))
+        }
 
 
         // Place explicitly shared Health records before the long training

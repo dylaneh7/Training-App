@@ -3444,6 +3444,9 @@ private struct PremiumRecoveryPage: View {
                     .fill(HCDesign.outline.opacity(0.55))
                     .frame(height: 1)
 
+                IMUNAppleHealthConnectionCard(appleHealth: appleHealth,
+                                               compact: true)
+
                 HStack(alignment: .top, spacing: 12) {
                     HCHealthSummaryStat(value: "\(allFamilies.count)",
                                         title: "Metrics")
@@ -3568,10 +3571,8 @@ private struct PremiumRecoveryPage: View {
                             .font(.system(size: 13))
                             .foregroundStyle(HCDesign.secondary)
                         HStack(spacing: 10) {
-                            HCOutlineButton(title: "Health access",
-                                            icon: "heart") { appleHealth.connect() }
                             HCOutlineButton(title: appleHealth.loading ?
-                                            "Reading…" : "Refresh",
+                                            "Reading…" : "Refresh readings",
                                             icon: "arrow.clockwise") {
                                 appleHealth.refreshIfAuthorized(force: true)
                             }
@@ -4014,6 +4015,146 @@ private struct IMUNIsAIahThinking: View {
     }
 }
 
+// A compact evidence chart for questions about measured running progress.
+// This is calculated locally from imported, attributed workouts. The chart
+// is never fabricated by a language model and never shows missing pace as 0.
+private struct IMUNCoachRunPaceEvidence: View {
+    let runs: [HCProgressRun]
+    let includeAppleHealth: Bool
+
+    private struct Point: Identifiable {
+        let id: String
+        let date: Date
+        let paceMinutes: Double
+        let source: String
+    }
+
+    private var points: [Point] {
+        let measured: [Point] = runs.compactMap { run in
+            guard includeAppleHealth || !run.fromAppleHealth,
+                  let distance = run.distanceMeters, distance >= 800,
+                  let elapsed = run.durationSeconds, elapsed > 0,
+                  let date = HCPlanBuilder.startOfDate(run.date)
+            else { return nil }
+            let pace = elapsed / 60 / (distance / 1609.344)
+            guard pace.isFinite && pace >= 4 && pace <= 30 else { return nil }
+            return Point(id: run.id, date: date,
+                         paceMinutes: pace, source: run.source)
+        }
+        return Array(measured.sorted { $0.date < $1.date }.suffix(14))
+    }
+
+    var body: some View {
+        let observations = points
+        if observations.count >= 3 {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    Text("RECORDED RUNNING PACE")
+                        .font(.system(size: 11, weight: .semibold))
+                        .tracking(1.0)
+                    Spacer()
+                    Text("\(observations.count) runs")
+                        .font(.system(size: 11))
+                }
+                .foregroundStyle(HCDesign.secondary)
+                Chart(observations) { point in
+                    LineMark(
+                        x: .value("Date", point.date),
+                        y: .value("Pace (min/mi)", point.paceMinutes)
+                    )
+                    .foregroundStyle(HCDesign.aqua)
+                    PointMark(
+                        x: .value("Date", point.date),
+                        y: .value("Pace (min/mi)", point.paceMinutes)
+                    )
+                    .foregroundStyle(HCDesign.aqua)
+                    .symbolSize(25)
+                }
+                .frame(height: 166)
+                Text("Minutes per mile · lower is faster. Different routes, effort and recording sources are not directly comparable.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(HCDesign.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text("Sources: " +
+                     Set(observations.map(\.source)).sorted().joined(separator: ", "))
+                    .font(.system(size: 10))
+                    .foregroundStyle(HCDesign.secondary)
+            }
+            .padding(15)
+            .background(HCDesign.card,
+                        in: RoundedRectangle(cornerRadius: 16))
+        }
+    }
+}
+
+/// The VO2-max graph uses real, same-source historical readings.
+/// Never join estimates from different watch vendors into a single trend.
+private struct IMUNCoachVO2Evidence: View {
+    let samples: [HCHealthTrendSample]
+
+    private struct Point: Identifiable {
+        let id: String
+        let date: Date
+        let value: Double
+    }
+
+    private var selectedSource: (String, [Point])? {
+        let readings = samples.filter {
+            ($0.name.localizedCaseInsensitiveContains("VO₂") ||
+             $0.name.localizedCaseInsensitiveContains("VO2")) &&
+            $0.value.isFinite && $0.value > 10 && $0.value < 95
+        }
+        let grouped = Dictionary(grouping: readings, by: \.source)
+        guard let source = grouped.keys.sorted().max(by: {
+            (grouped[$0]?.count ?? 0) < (grouped[$1]?.count ?? 0)
+        }), let rows = grouped[source], rows.count >= 3 else { return nil }
+        let ordered: [Point] = rows.compactMap { row in
+            guard let day = HCPlanBuilder.startOfDate(row.date) else { return nil }
+            return Point(id: row.id, date: day, value: row.value)
+        }.sorted { $0.date < $1.date }
+        guard ordered.count >= 3 else { return nil }
+        return (source, Array(ordered.suffix(24)))
+    }
+
+    var body: some View {
+        if let (source, observations) = selectedSource {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    Text("VO₂ MAX · RECORDED TREND")
+                        .font(.system(size: 11, weight: .semibold))
+                        .tracking(1)
+                    Spacer()
+                    Text("\(observations.count) readings")
+                        .font(.system(size: 11))
+                }
+                .foregroundStyle(HCDesign.secondary)
+                Chart(observations) { point in
+                    LineMark(
+                        x: .value("Date", point.date),
+                        y: .value("VO2 max", point.value)
+                    )
+                    .foregroundStyle(HCDesign.aqua)
+                    PointMark(
+                        x: .value("Date", point.date),
+                        y: .value("VO2 max", point.value)
+                    )
+                    .foregroundStyle(HCDesign.aqua)
+                    .symbolSize(24)
+                }
+                .frame(height: 160)
+                Text("mL/kg/min · " + source +
+                     ". Device-estimated aerobic fitness; compare with consistent methods.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(HCDesign.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(15)
+            .background(HCDesign.card,
+                        in: RoundedRectangle(cornerRadius: 16))
+        }
+    }
+}
+
 // A real conversation surface, not a backend diagnostics panel. Chats remain
 // on the phone. Nothing is transmitted until the athlete chooses Send.
 private struct PremiumCoachConversation: View {
@@ -4072,6 +4213,16 @@ private struct PremiumCoachConversation: View {
         !question.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
+    private var shouldShowRunEvidence: Bool {
+        guard let latestQuestion = turns.last(where: { $0.role == "user" }) else {
+            return false
+        }
+        let text = latestQuestion.text.lowercased()
+        return ["run", "pace", "endurance", "aerobic", "fitness",
+                "vo2", "vo₂", "plateau", "progress"]
+            .contains(where: { text.contains($0) })
+    }
+
 
     // Full-height chat with an anchored composer. Scrolling can never bury Send.
     var body: some View {
@@ -4088,9 +4239,10 @@ private struct PremiumCoachConversation: View {
                                 Text("Ask naturally about this screen, your training or your health.")
                                     .font(.system(size: 13))
                                     .foregroundStyle(HCDesign.secondary)
-                                suggestion("Help me understand this screen")
+                                suggestion("Is my running fitness improving since September?")
+                                suggestion("Are my legs tired from recent training?")
+                                suggestion("Compare my training load and recovery this week")
                                 suggestion("Review today's workout")
-                                suggestion("What can you change in iMun?")
                             }
                             .padding(.vertical, 14)
                         }
@@ -4113,6 +4265,23 @@ private struct PremiumCoachConversation: View {
                                                 HCDesign.card,
                                                 in: RoundedRectangle(cornerRadius: 16))
                                 if turn.role != "user" { Spacer(minLength: 35) }
+                            }
+                        }
+                        if !isSending && turns.last?.role == "assistant" {
+                            if shouldShowRunEvidence {
+                                IMUNCoachRunPaceEvidence(runs: coach.runHistory,
+                                                         includeAppleHealth: shareRecovery)
+                                if shareRecovery {
+                                    IMUNCoachVO2Evidence(samples: appleHealth.metricHistory)
+                                }
+                            }
+                            ScrollView(.horizontal, showsIndicators: false) {
+                                HStack(spacing: 8) {
+                                    followUp("Compare my running progress over 8 weeks")
+                                    followUp("Is fatigue affecting my performance?")
+                                    followUp("What should I adjust tomorrow?")
+                                }
+                                .padding(.vertical, 3)
                             }
                         }
                         if isSending {
@@ -4318,6 +4487,22 @@ private struct PremiumCoachConversation: View {
                 .foregroundStyle(HCDesign.secondary)
             }
             .tint(HCDesign.electric)
+            if shareRecovery && runImporter.workouts.isEmpty &&
+                !runImporter.refreshing {
+                HStack(spacing: 9) {
+                    Text("No Apple Health workout history loaded yet.")
+                        .font(.system(size: 11))
+                        .foregroundStyle(HCDesign.secondary)
+                    Spacer(minLength: 4)
+                    Button("Connect") {
+                        appleHealth.connect(onRequestCompleted: {
+                            runImporter.startIfAuthorized()
+                        })
+                    }
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(HCDesign.aqua)
+                }
+            }
             Toggle("Use relevant previous IsAIah chats", isOn: $rememberChats)
                 .font(.system(size: 11))
                 .tint(HCDesign.electric)
@@ -4325,12 +4510,7 @@ private struct PremiumCoachConversation: View {
                 .onChange(of: rememberChats) { _, enabled in
                     if enabled { IMUNCoachLocalMemory.save(turns) }
                 }
-            if !composerFocused {
-                Text("Only Send shares selected Health or past-chat context with IsAIah. Older chats may contain personal details.")
-                    .font(.system(size: 10))
-                    .foregroundStyle(HCDesign.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
+
         }
         .padding(.horizontal, 14)
         .padding(.top, 12)
@@ -4339,6 +4519,22 @@ private struct PremiumCoachConversation: View {
         .overlay(alignment: .top) {
             Rectangle().fill(HCDesign.outline).frame(height: 1)
         }
+    }
+
+    private func followUp(_ text: String) -> some View {
+        Button {
+            question = text
+            composerFocused = true
+        } label: {
+            Text(text)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(HCDesign.ink)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
+                .background(HCDesign.raised,
+                            in: Capsule())
+        }
+        .buttonStyle(.plain)
     }
 
     private func suggestion(_ text: String) -> some View {
@@ -4887,31 +5083,115 @@ private struct HCEitanCloudSyncControls: View {
     }
 }
 
-/// Opt-in integration controls live in Settings, not below today's run.
-private struct IMUNRunImportSettings: View {
+/// A single understandable Health connection surface, rather than a
+/// separate metric permission and hidden running importer.
+private struct IMUNAppleHealthConnectionCard: View {
+    @ObservedObject var appleHealth: HCAppleHealthReader
     @EnvironmentObject private var importer: HCRunHealthImporter
+    @AppStorage("hcHealthCatalogEnabled") private var hasRequestedAccess = false
+    let compact: Bool
+
+    private var whoopCount: Int {
+        importer.workouts.filter {
+            $0.source.localizedCaseInsensitiveContains("whoop")
+        }.count
+    }
+
+    private var firstWorkoutDate: String? {
+        importer.workouts.map(\.date).min()
+    }
+
+    private func connect() {
+        appleHealth.connect(onRequestCompleted: {
+            importer.startIfAuthorized()
+        })
+    }
+
+    private func refresh() {
+        appleHealth.refreshIfAuthorized(force: true)
+        importer.startIfAuthorized()
+    }
 
     var body: some View {
-                HCCard(accent: HCDesign.aqua) {
-                    VStack(alignment: .leading, spacing: 12) {
-                        HCAccentTag(title: "AUTO-IMPORT / APPLE HEALTH", color: HCDesign.aqua)
-                        Text(importer.enabled ? "Exercise history sync enabled" : "Connect Apple Health workouts")
-                            .font(.system(size: 17, weight: .bold, design: .rounded))
-                        Text("Read all authorized Apple Health exercise sessions, including runs, lifting, walks, cycling, swimming and other recorded sports. Tredict and Garmin history is handled separately. Nothing is shared with IsAIah until you enable his Health-sharing control and send a message.")
-                            .font(.system(size: 12))
+        HCCard(accent: HCDesign.aqua) {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(alignment: .center, spacing: 10) {
+                    Image(systemName: "heart.text.square.fill")
+                        .font(.system(size: 18))
+                        .foregroundStyle(HCDesign.aqua)
+                        .frame(width: 29, height: 29)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Apple Health")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundStyle(HCDesign.ink)
+                        Text(importer.workouts.isEmpty ?
+                             (hasRequestedAccess ?
+                              (importer.refreshing ? "Checking available records" :
+                               "No workout records imported yet") :
+                              "Connect your exercise and recovery history") :
+                             "Workout history available")
+                            .font(.system(size: 11))
                             .foregroundStyle(HCDesign.secondary)
-                        if importer.enabled {
-                            HCOutlineButton(title: importer.refreshing ? "Checking Health…" : "Check new runs",
-                                            icon: "arrow.clockwise") { importer.refresh() }
-                        } else {
-                            HCFilledButton(title: "CONNECT APPLE HEALTH", icon: "heart.fill",
-                                           tint: HCDesign.aqua) { importer.connect() }
-                        }
-                        Text(importer.status)
-                            .font(.caption2)
+                    }
+                    Spacer(minLength: 3)
+                    if importer.refreshing || appleHealth.loading {
+                        ProgressView().tint(HCDesign.aqua)
+                    }
+                }
+
+                if !compact || !importer.workouts.isEmpty {
+                    HStack(spacing: 8) {
+                        HCMetricBlock(label: "Workouts",
+                                      value: String(importer.workouts.count))
+                        HCMetricBlock(label: "Runs",
+                                      value: String(importer.runs.count))
+                        HCMetricBlock(label: "WHOOP",
+                                      value: String(whoopCount))
+                    }
+                }
+
+                if !compact {
+                    Text("Read workouts, runs, sleep and physiological measurements from the sources Apple Health makes available. Your Garmin and Tredict connection is separate.")
+                        .font(.system(size: 12))
+                        .foregroundStyle(HCDesign.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if let firstWorkoutDate {
+                        Text("Earliest imported workout: " + firstWorkoutDate)
+                            .font(.system(size: 11))
                             .foregroundStyle(HCDesign.secondary)
                     }
                 }
+
+                VStack(spacing: 8) {
+                    HCFilledButton(
+                        title: hasRequestedAccess ? "REVIEW HEALTH ACCESS" :
+                               "CONNECT APPLE HEALTH",
+                        icon: "heart.fill", tint: HCDesign.aqua,
+                        disabled: appleHealth.loading || importer.refreshing) {
+                        connect()
+                    }
+                    if hasRequestedAccess {
+                        HCOutlineButton(title: importer.refreshing ?
+                                        "Importing workouts…" : "Sync Health data",
+                                        icon: "arrow.clockwise") {
+                            refresh()
+                        }
+                    }
+                }
+
+                if !compact {
+                    Text(importer.status)
+                        .font(.system(size: 11))
+                        .foregroundStyle(HCDesign.secondary)
+                    Text("Apple may not display the permission sheet again after a decision. To change access, open Health on your iPhone and find iMun under Apps or Data Access & Devices. The counts above reflect imported data—not a claim that every permission was granted.")
+                        .font(.system(size: 11))
+                        .foregroundStyle(HCDesign.secondary)
+                    Text("IsAIah uses Apple Health readings online only when you enable Health sharing in his chat and send a message.")
+                        .font(.system(size: 11))
+                        .foregroundStyle(HCDesign.secondary)
+                }
+            }
+        }
     }
 }
 
@@ -5017,6 +5297,8 @@ private struct PremiumSettingsPage: View {
                 PremiumHeader(eyebrow: "IMUN / SETTINGS",
                               title: "Your preferences.",
                               subtitle: "Fine-tune your coaching, appearance and connections.")
+                IMUNAppleHealthConnectionCard(appleHealth: appleHealth,
+                                               compact: false)
                 HCCard(accent: HCDesign.electric) {
                     VStack(alignment: .leading, spacing: 11) {
                         HCAccentTag(title: "TRAINING INTELLIGENCE")
@@ -5397,8 +5679,6 @@ private struct PremiumSettingsPage: View {
                             .foregroundStyle(HCDesign.secondary)
                     }
                 }
-                HCSectionTitle(title: "Apple Health runs", detail: "Import and permissions")
-                IMUNRunImportSettings()
                 HCSectionTitle(title: "Connections")
                 HCCard {
                     VStack(alignment: .leading, spacing: 14) {
