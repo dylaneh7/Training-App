@@ -1159,7 +1159,8 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
     func askIMUNCoach(question: String, shareRecovery: Bool,
                       recentConversation: String = "",
                       screenContext: String = "",
-                      healthSnapshot: String = "") async throws -> String {
+                      healthSnapshot: String = "",
+                      attachments: [IMUNCoachAttachment] = []) async throws -> String {
         let today = HCPlanBuilder.dateString(Date())
         var lines = ["Today: \(today)", "Source: IMUN training calendar and recorded workout history",
                      "You have access to the imported workout summaries explicitly listed below. These may include past Apple Health runs and other sports if the athlete enabled Health sharing, plus Tredict/Garmin and iMun history. Do not say you cannot access past running or exercise data when source-attributed records are present. For missing records, explain source permissions/sync or missing measurements, never invent values."]
@@ -1524,7 +1525,8 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
         let boundedContext = String(lines.joined(separator: "\n").prefix(23_500))
         return try await cloud.askIMUNCoach(question: question,
                                             context: boundedContext,
-                                            shareRecovery: shareRecovery)
+                                            shareRecovery: shareRecovery,
+                                            attachments: attachments)
     }
 
     /// A separate EITAN transport prevents a schedule mismatch, a sign-in
