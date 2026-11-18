@@ -48,6 +48,9 @@ private final class HCMotionRepEstimator {
     private var lastRepTime = -Double.infinity
     private var count = 0
     private var lastPeriod: Double?
+    private var cyclePeak = 0.0
+    private var peaks: [Double] = []
+    private var periods: [Double] = []
     var onEstimate: ((Int, Double?) -> Void)?
 
     var isAvailable: Bool { manager.isDeviceMotionAvailable }
@@ -61,6 +64,9 @@ private final class HCMotionRepEstimator {
         motionPeakSeen = false
         lastRepTime = -Double.infinity
         lastPeriod = nil
+        cyclePeak = 0
+        peaks.removeAll(keepingCapacity: true)
+        periods.removeAll(keepingCapacity: true)
         manager.deviceMotionUpdateInterval = 1.0 / 25.0
         // The Watch holds one Core Motion manager for this session. Samples
         // are processed locally and never added to the HealthKit workout.
@@ -95,6 +101,7 @@ private final class HCMotionRepEstimator {
         let now = sample.timestamp
 
         if smoothedEnergy >= 0.24 {
+            cyclePeak = max(cyclePeak, smoothedEnergy)
             if aboveThresholdSince == nil {
                 aboveThresholdSince = now
             }
@@ -104,15 +111,59 @@ private final class HCMotionRepEstimator {
         } else if smoothedEnergy <= 0.105 {
             if motionPeakSeen && now - lastRepTime >= 0.65 {
                 if lastRepTime.isFinite {
-                    lastPeriod = now - lastRepTime
+                    let period = now - lastRepTime
+                    if (0.4...5.0).contains(period) {
+                        lastPeriod = period
+                        periods.append(period)
+                    } else {
+                        lastPeriod = nil
+                    }
                 }
                 lastRepTime = now
                 count += 1
+                peaks.append(cyclePeak)
                 onEstimate?(count, lastPeriod)
             }
+            cyclePeak = 0
             aboveThresholdSince = nil
             motionPeakSeen = false
         }
+    }
+
+    /// Derived wrist-motion proxies. Never label acceleration/rotation as
+    /// actual dumbbell trajectory, joint range, or movement quality.
+    func insight(wearSide: String) -> HCMotionSetInsight? {
+        guard count >= 3 else { return nil }
+        let basePeriods = Array(periods.dropLast())
+        let meanPeriod = basePeriods.isEmpty ? nil :
+            basePeriods.reduce(0, +) / Double(basePeriods.count)
+        let lastPeriod = periods.last
+        let slowdown = (meanPeriod != nil && lastPeriod != nil && meanPeriod! > 0) ?
+            100 * (lastPeriod! / meanPeriod! - 1) : nil
+        let basePeaks = Array(peaks.dropLast())
+        let baseline = basePeaks.isEmpty ? nil :
+            basePeaks.reduce(0, +) / Double(basePeaks.count)
+        let motionChange = (baseline != nil && baseline! > 0 && peaks.last != nil) ?
+            100 * (peaks.last! / baseline! - 1) : nil
+        var observations: [String] = []
+        if let slowdown, slowdown > 18, slowdown < 180 {
+            observations.append("Last detected cycle was \(Int(slowdown.rounded()))% slower than earlier cycles")
+        }
+        if let motionChange, motionChange < -20, motionChange > -85 {
+            observations.append("Last cycle had \(Int(abs(motionChange).rounded()))% less wrist-motion intensity")
+        }
+        if observations.isEmpty {
+            observations.append("Detected wrist cycles were relatively consistent")
+        }
+        return HCMotionSetInsight(
+            wearSide: wearSide,
+            detectedReps: count,
+            averageCycleSeconds: meanPeriod,
+            lastCycleSeconds: lastPeriod,
+            lastCycleSlowdownPercent: slowdown,
+            lastWristExcursionChangePercent: motionChange,
+            note: observations.joined(separator: ". ") + ". These are experimental wrist-motion estimates, not validated form or range-of-motion measurements."
+        )
     }
 }
 
@@ -146,6 +197,7 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
     @Published private(set) var motionEstimatedReps = 0
     @Published private(set) var motionRepStatus = "Motion rep estimates are off"
     @Published private(set) var motionLastRepPeriod: Double?
+    @Published private(set) var lastSetMotionNote: String?
     private let repEstimator = HCMotionRepEstimator()
     @Published private(set) var guidedExerciseID: String?
     @Published private(set) var selectedGuidedSet: HCGuidedSetChoice?
@@ -224,7 +276,7 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
         repEstimator.onEstimate = { [weak self] reps, secondsPerRep in
             self?.motionEstimatedReps = reps
             self?.motionLastRepPeriod = secondsPerRep
-            self?.motionRepStatus = "Wrist motion estimate · verify manually"
+            self?.motionRepStatus = "Apple Watch wrist cycles · editable rep count"
         }
         if UserDefaults.standard.bool(forKey: "hcWatchRestNotifications") {
             restNotificationStatus =
@@ -985,17 +1037,43 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
         UserDefaults.standard.bool(forKey: "hcWatchMotionRepEstimate")
     }
 
+    private var wornAppleWatchSide: HCWorkingSide? {
+        HCWorkingSide(rawValue:
+            UserDefaults.standard.string(forKey: "hcWatchWearSide") ?? "")
+    }
+
+    var activeSetSide: HCWorkingSide? {
+        guard let exercise = guidedExercise else { return nil }
+        return exercise.side(forSet: guidedSetNumber)
+    }
+
+    /// No unilateral auto-count from a device on the opposite wrist.
+    var motionCanTrackActiveSide: Bool {
+        guard let side = activeSetSide else { return true }
+        return wornAppleWatchSide == side
+    }
+
+    /// WHOOP has no supported public raw IMU stream. It is not treated as
+    /// a live source even if the user has configured its worn side.
+    var whoopMotionAvailable: Bool { false }
+
     private func beginRepEstimate() {
         motionEstimatedReps = 0
         motionLastRepPeriod = nil
+        lastSetMotionNote = nil
         guard motionRepEnabled else {
             motionRepStatus = "Motion rep estimates are off"
             repEstimator.stop()
             return
         }
+        guard motionCanTrackActiveSide else {
+            motionRepStatus = "Apple Watch is not on the working wrist · enter reps manually"
+            repEstimator.stop()
+            return
+        }
         motionRepStatus = repEstimator.start()
-            ? "Listening for rhythmic wrist movements…"
-            : "Motion data not available on this Watch"
+            ? "Counting wrist-motion cycles · check reps before saving"
+            : "Motion data unavailable · enter reps manually"
     }
 
     private func endRepEstimate() {
@@ -1250,6 +1328,8 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
               !completedSets(for: exercise, setNumber: setNumber) else { return false }
 
         let now = Date()
+        let motionInsight = motionRepEnabled && motionCanTrackActiveSide ?
+            repEstimator.insight(wearSide: wornAppleWatchSide?.rawValue ?? "unknown") : nil
         endRepEstimate()
         var entry = HCLoggedSet(
             id: UUID(),
@@ -1268,6 +1348,9 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
         )
         entry.startedAt = started
         entry.durationSeconds = now.timeIntervalSince(started)
+        entry.side = exercise.side(forSet: setNumber)
+        entry.motionInsight = motionInsight
+        lastSetMotionNote = motionInsight?.note
         sets.append(entry)
         save(sets, name: "sets.json")
         uploadPendingCloudSets()
