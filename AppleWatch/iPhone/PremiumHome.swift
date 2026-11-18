@@ -1597,7 +1597,6 @@ private struct PremiumExerciseSession: View {
 private struct PremiumRunPage: View {
     @Binding var headerCollapsed: Bool
     @EnvironmentObject private var coach: PhoneWorkoutBridge
-    @EnvironmentObject private var importer: HCRunHealthImporter
     private var date: Date { Date() }
     @State private var movingSession: HCPlannedSession?
     @State private var showingStructuredRun = false
@@ -1770,23 +1769,6 @@ private struct PremiumRunPage: View {
                                     .padding(.vertical, 5)
                                 }
                             }
-                        }
-                    }
-                }
-                HCCard(accent: HCDesign.aqua) {
-                    VStack(alignment: .leading, spacing: 12) {
-                        HCAccentTag(title: "AUTO-IMPORT / APPLE HEALTH", color: HCDesign.aqua)
-                        Text(importer.enabled ? "Runs sync automatically" : "Connect completed workouts")
-                            .font(.system(size: 17, weight: .bold, design: .rounded))
-                        Text("Bring in running workouts from Apple Workout and WHOOP when they appear in Apple Health. Individual metrics depend on what each source shares.")
-                            .font(.system(size: 12))
-                            .foregroundStyle(HCDesign.secondary)
-                        if importer.enabled {
-                            HCOutlineButton(title: importer.refreshing ? "Checking Health…" : "Check new runs",
-                                            icon: "arrow.clockwise") { importer.refresh() }
-                        } else {
-                            HCFilledButton(title: "CONNECT APPLE HEALTH", icon: "heart.fill",
-                                           tint: HCDesign.aqua) { importer.connect() }
                         }
                     }
                 }
@@ -4804,6 +4786,31 @@ private struct HCEitanCloudSyncControls: View {
     }
 }
 
+/// Opt-in integration controls live in Settings, not below today's run.
+private struct IMUNRunImportSettings: View {
+    @EnvironmentObject private var importer: HCRunHealthImporter
+
+    var body: some View {
+                HCCard(accent: HCDesign.aqua) {
+                    VStack(alignment: .leading, spacing: 12) {
+                        HCAccentTag(title: "AUTO-IMPORT / APPLE HEALTH", color: HCDesign.aqua)
+                        Text(importer.enabled ? "Runs sync automatically" : "Connect completed workouts")
+                            .font(.system(size: 17, weight: .bold, design: .rounded))
+                        Text("Bring in running workouts from Apple Workout and WHOOP when they appear in Apple Health. Individual metrics depend on what each source shares.")
+                            .font(.system(size: 12))
+                            .foregroundStyle(HCDesign.secondary)
+                        if importer.enabled {
+                            HCOutlineButton(title: importer.refreshing ? "Checking Health…" : "Check new runs",
+                                            icon: "arrow.clockwise") { importer.refresh() }
+                        } else {
+                            HCFilledButton(title: "CONNECT APPLE HEALTH", icon: "heart.fill",
+                                           tint: HCDesign.aqua) { importer.connect() }
+                        }
+                    }
+                }
+    }
+}
+
 // All original settings and integrations remain available through the Coach gear.
 private struct PremiumSettingsPage: View {
     @EnvironmentObject private var coach: PhoneWorkoutBridge
@@ -5251,6 +5258,8 @@ private struct PremiumSettingsPage: View {
                             .foregroundStyle(HCDesign.secondary)
                     }
                 }
+                HCSectionTitle(title: "Apple Health runs", detail: "Import and permissions")
+                IMUNRunImportSettings()
                 HCSectionTitle(title: "Connections")
                 HCCard {
                     VStack(alignment: .leading, spacing: 14) {
