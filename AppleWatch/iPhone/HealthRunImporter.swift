@@ -11,6 +11,9 @@ import Combine
 /// capability and is not testable in the iOS Simulator.
 final class HCRunHealthImporter: ObservableObject {
     @Published private(set) var runs: [HCProgressRun] = []
+    // All authorized Apple Health exercise sessions, not just running.
+    // Remains on-device; IsAIah only receives selected summaries on consent.
+    @Published private(set) var workouts: [HCTrainingActivity] = []
     @Published private(set) var status = "Connect Apple Health to import completed runs."
     @Published private(set) var enabled = UserDefaults.standard.bool(forKey: "hcAutomaticRunImport")
     @Published private(set) var refreshing = false
@@ -21,10 +24,18 @@ final class HCRunHealthImporter: ObservableObject {
     private var pendingCompletions: [HKObserverQueryCompletionHandler] = []
     private let formatter = DateFormatter()
     private let cache = "health-coach-imported-runs.json"
+    private let workoutCache = "imun-apple-health-exercise-history.json"
 
     init() {
         formatter.dateFormat = "yyyy-MM-dd"
         formatter.timeZone = .current
+        enabled = UserDefaults.standard.bool(forKey: "hcAutomaticRunImport") ||
+            UserDefaults.standard.bool(forKey: "hcHealthCatalogEnabled")
+        if let url = try? cacheURL(named: workoutCache),
+           let bytes = try? Data(contentsOf: url),
+           let stored = try? JSONDecoder().decode([HCTrainingActivity].self, from: bytes) {
+            workouts = stored
+        }
         if let url = try? cacheURL(),
            let bytes = try? Data(contentsOf: url),
            let stored = try? JSONDecoder().decode([HCProgressRun].self, from: bytes) {
@@ -33,11 +44,11 @@ final class HCRunHealthImporter: ObservableObject {
         if enabled { startIfAuthorized() }
     }
 
-    private func cacheURL() throws -> URL {
+    private func cacheURL(named fileName: String = "health-coach-imported-runs.json") throws -> URL {
         guard let folder = FileManager.default.urls(for: .documentDirectory,
                                                    in: .userDomainMask).first
         else { throw NSError(domain: "Health Coach", code: 1) }
-        return folder.appendingPathComponent(cache)
+        return folder.appendingPathComponent(fileName)
     }
 
     /// The user explicitly opts in; HealthKit permission is never requested on
@@ -73,6 +84,11 @@ final class HCRunHealthImporter: ObservableObject {
     }
 
     func startIfAuthorized() {
+        // Health catalog permission includes workout-read authorization.
+        // Start the local importer when that existing user grant is enabled.
+        if !enabled && UserDefaults.standard.bool(forKey: "hcHealthCatalogEnabled") {
+            enabled = true
+        }
         guard enabled else { return }
         guard HKHealthStore.isHealthDataAvailable() else {
             status = "Apple Health requires a physical iPhone."
@@ -122,19 +138,26 @@ final class HCRunHealthImporter: ObservableObject {
     }
 
     private func queryRecent() {
-        let earliest = Calendar.current.date(byAdding: .year, value: -2, to: Date()) ?? .distantPast
-        let predicate = HKQuery.predicateForSamples(withStart: earliest, end: nil, options: [])
+        // No two-year cutoff: historical runs and all other exercise types
+        // should remain searchable. This loads summaries, not raw route traces.
         let sort = NSSortDescriptor(key: HKSampleSortIdentifierEndDate, ascending: false)
         let query = HKSampleQuery(sampleType: HKObjectType.workoutType(),
-                                  predicate: predicate, limit: 750,
+                                  predicate: nil, limit: HKObjectQueryNoLimit,
                                   sortDescriptors: [sort]) { [weak self] _, results, error in
             DispatchQueue.main.async {
                 guard let self else { return }
                 if let error {
                     self.status = "Apple Health run import: \(error.localizedDescription)"
                 } else {
-                    let workouts = (results as? [HKWorkout] ?? [])
-                        .filter { $0.workoutActivityType == .running }
+                    let allWorkouts = results as? [HKWorkout] ?? []
+                    self.workouts = allWorkouts.map { self.convertActivity($0) }
+                    if let url = try? self.cacheURL(named: self.workoutCache),
+                       let bytes = try? JSONEncoder().encode(self.workouts) {
+                        try? bytes.write(to: url, options: .atomic)
+                    }
+                    let workouts = allWorkouts.filter {
+                        $0.workoutActivityType == .running
+                    }
                     let previous = Dictionary(self.runs.map { ($0.id, $0) },
                                               uniquingKeysWith: { current, _ in current })
                     let incoming = workouts.map { workout -> HCProgressRun in
@@ -157,9 +180,9 @@ final class HCRunHealthImporter: ObservableObject {
                        let bytes = try? JSONEncoder().encode(self.runs) {
                         try? bytes.write(to: url, options: .atomic)
                     }
-                    self.status = self.runs.isEmpty
-                        ? "No running workouts were shared with Health Coach."
-                        : "Imported \(self.runs.count) runs from Apple Health."
+                    self.status = allWorkouts.isEmpty
+                        ? "No workouts are available from the authorized Apple Health source."
+                        : "Loaded \(allWorkouts.count) Apple Health workouts, including \(self.runs.count) runs."
                     // Detailed HR samples and GPS routes can arrive after the
                     // original workout. Query recent items without blocking
                     // the observer completion handler or summary display.
@@ -259,6 +282,45 @@ final class HCRunHealthImporter: ObservableObject {
             self?.store.execute(routeQuery)
         }
         store.execute(sampleQuery)
+    }
+
+    /// One source-attributed activity for every exercise type HealthKit exposes.
+    /// The app deliberately does not export raw GPS routes or granular HR traces
+    /// to the online coach through this activity summary.
+    private func convertActivity(_ workout: HKWorkout) -> HCTrainingActivity {
+        let kind: String
+        switch workout.workoutActivityType {
+        case .running: kind = "run"
+        case .walking: kind = "walk"
+        case .cycling: kind = "cycle"
+        case .traditionalStrengthTraining, .functionalStrengthTraining:
+            kind = "lift"
+        case .swimming: kind = "swim"
+        case .hiking: kind = "hike"
+        case .rowing: kind = "row"
+        default: kind = String(describing: workout.workoutActivityType)
+        }
+        let source = workout.sourceRevision.source
+        let sourceName = source.name.isEmpty ? "Apple Health" : source.name
+        let meters = workout.totalDistance?.doubleValue(for: .meter())
+        let calories = workout.totalEnergyBurned?.doubleValue(for: .kilocalorie())
+        let bpm = HKUnit.count().unitDivided(by: .minute())
+        let heartRateType = HKObjectType.quantityType(forIdentifier: .heartRate)
+        let heart = heartRateType.flatMap { workout.statistics(for: $0) }
+        let avg = heart?.averageQuantity()?.doubleValue(for: bpm)
+        let maxHR = heart?.maximumQuantity()?.doubleValue(for: bpm)
+        var row = HCTrainingActivity(
+            id: "healthkit:\(workout.uuid.uuidString)",
+            date: formatter.string(from: workout.startDate),
+            title: kind.capitalized + " Workout", kind: kind,
+            source: sourceName, distanceMeters: meters,
+            durationSeconds: workout.duration,
+            averageBPM: avg, maxBPM: maxHR, calories: calories,
+            perceivedEffort: nil)
+        row.attribution = source.bundleIdentifier
+        row.externalID = workout.uuid.uuidString
+        row.totalDurationSeconds = workout.duration
+        return row
     }
 
     private func convert(_ workout: HKWorkout) -> HCProgressRun {
