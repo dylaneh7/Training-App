@@ -595,7 +595,7 @@ struct PremiumHomeView: View {
             NavigationStack { PremiumRecoveryPage(appleHealth: appleHealth) }
                 .tabItem { Label("Health", systemImage: "heart.text.square.fill") }
                 .tag("health")
-            NavigationStack { PremiumSettingsPage() }
+            NavigationStack { PremiumSettingsPage(appleHealth: appleHealth) }
                 .tabItem { Label("Settings", systemImage: "gearshape.fill") }
                 .tag("settings")
         }
@@ -4809,7 +4809,7 @@ private struct IMUNRunImportSettings: View {
 // All original settings and integrations remain available through the Coach gear.
 private struct PremiumSettingsPage: View {
     @EnvironmentObject private var coach: PhoneWorkoutBridge
-    @EnvironmentObject private var appleHealth: HCAppleHealthReader
+    @ObservedObject var appleHealth: HCAppleHealthReader
     @AppStorage("hcEitanEnabled") private var eitanEnabled = true
     @AppStorage("hcEitanUseHealth") private var eitanUseHealth = true
     @AppStorage("hcEitanCloudSyncEnabled") private var eitanCloudConsent = false
