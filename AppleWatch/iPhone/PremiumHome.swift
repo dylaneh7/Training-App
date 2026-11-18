@@ -1004,9 +1004,9 @@ private struct PremiumLogin: View {
                 Image(systemName: "lock.shield")
                     .font(.system(size: 25, weight: .medium))
                     .foregroundStyle(HCDesign.aqua)
-                Text("YOUR TRAINING. CONNECTED.")
+                Text("WELCOME TO IMUN")
                     .font(HCDesign.display(21))
-                Text("Sign in with your Health Coach / Command Center account. Your lifting history and planned runs stay in sync.")
+                Text("Sign in to access your training, history and personal coaching.")
                     .font(.subheadline)
                     .foregroundStyle(HCDesign.secondary)
                 TextField("Email", text: $email)
@@ -1788,7 +1788,6 @@ private struct PremiumRunPage: View {
                             HCFilledButton(title: "CONNECT APPLE HEALTH", icon: "heart.fill",
                                            tint: HCDesign.aqua) { importer.connect() }
                         }
-                        Text(importer.status).font(.caption2).foregroundStyle(HCDesign.secondary)
                     }
                 }
                 HCSectionTitle(title: "Previous runs", detail: "Recorded only")
@@ -1816,7 +1815,7 @@ private struct PremiumRunPage: View {
                 }
                 if coach.runHistory.isEmpty {
                     HCCard {
-                        Text("Completed runs will appear here when they sync from your watch or existing account.")
+                        Text("No completed runs yet.")
                             .font(.subheadline).foregroundStyle(HCDesign.secondary)
                     }
                 }
@@ -1887,8 +1886,6 @@ private struct IMUNCreateRunSheet: View {
                                 .keyboardType(.numberPad)
                         }
                     }
-                    Text("Creates a prescribed running session in iMun and syncs it to iMun Watch. You can then send it to Apple Workout from the Running screen.")
-                        .font(.caption).foregroundStyle(.secondary)
                 }
                 Section {
                     Button("Create run") {
@@ -2365,7 +2362,7 @@ private struct PremiumProgressPage: View {
                             if coach.loading {
                                 IMUNLoadingPlaceholder(lines: 3, height: 140)
                             } else {
-                                Text("Your actual logged strength history will appear after sync.")
+                                Text("No logged strength history yet.")
                                     .font(.subheadline).foregroundStyle(HCDesign.secondary)
                             }
                         } else {
@@ -2520,7 +2517,7 @@ private struct PremiumProgressPage: View {
                 }
                 HCSectionTitle(title: "Completed training", detail: "Health Coach + Tredict")
                 if coach.trainingActivities.isEmpty {
-                    Text("Your previous training sessions will appear after your account finishes syncing.")
+                    Text("No completed training sessions yet.")
                         .foregroundStyle(HCDesign.secondary)
                 } else {
                     ForEach(coach.trainingActivities.prefix(35)) { activity in
@@ -4810,6 +4807,7 @@ private struct HCEitanCloudSyncControls: View {
 // All original settings and integrations remain available through the Coach gear.
 private struct PremiumSettingsPage: View {
     @EnvironmentObject private var coach: PhoneWorkoutBridge
+    @EnvironmentObject private var appleHealth: HCAppleHealthReader
     @AppStorage("hcEitanEnabled") private var eitanEnabled = true
     @AppStorage("hcEitanUseHealth") private var eitanUseHealth = true
     @AppStorage("hcEitanCloudSyncEnabled") private var eitanCloudConsent = false
@@ -4942,10 +4940,6 @@ private struct PremiumSettingsPage: View {
                             }
                             HCEitanCloudSyncControls(consent: $eitanCloudConsent)
                             Divider()
-                            Text(coach.eitanWatchSyncStatus)
-                                .font(.system(size: 11))
-                                .foregroundStyle(HCDesign.secondary)
-                                .fixedSize(horizontal: false, vertical: true)
                             Text(coach.watchConnectionDetails)
                                 .font(.system(size: 10))
                                 .foregroundStyle(HCDesign.secondary)
@@ -5285,6 +5279,10 @@ private struct PremiumSettingsPage: View {
                             .foregroundStyle(HCDesign.secondary)
                             .fixedSize(horizontal: false, vertical: true)
                         Text(coach.cloudWorkoutStatus)
+                            .font(.caption2)
+                            .foregroundStyle(HCDesign.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Text("Apple Health · " + appleHealth.status)
                             .font(.caption2)
                             .foregroundStyle(HCDesign.secondary)
                             .fixedSize(horizontal: false, vertical: true)
