@@ -5764,6 +5764,83 @@ private struct IMUNIsaiahMemorySettings: View {
     }
 }
 
+/// Reusable device-location card. New wearables only need a catalog entry.
+private struct IMUNWearableLocationCard: View {
+    let device: IMUNWearableDefinition
+    let selected: IMUNWearableLocation
+    let choose: (IMUNWearableLocation) -> Void
+    @State private var expanded = false
+
+    var body: some View {
+        HCCard {
+            VStack(alignment: .leading, spacing: 12) {
+                Button { expanded.toggle() } label: {
+                    HStack(spacing: 13) {
+                        Image(systemName: device.symbol)
+                            .font(.system(size: 22, weight: .medium))
+                            .foregroundStyle(HCDesign.electric)
+                            .frame(width: 36)
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(device.name.uppercased())
+                                .font(.system(size: 12, weight: .bold, design: .rounded))
+                                .foregroundStyle(HCDesign.ink)
+                            Text(selected.title)
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundStyle(HCDesign.aqua)
+                        }
+                        Spacer(minLength: 5)
+                        Image(systemName: expanded ? "chevron.up" : "chevron.down")
+                            .foregroundStyle(HCDesign.secondary)
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                if expanded {
+                    Text("WHERE DO YOU WEAR IT?")
+                        .font(.system(size: 10, weight: .bold))
+                        .tracking(0.7)
+                        .foregroundStyle(HCDesign.secondary)
+                    LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())],
+                              spacing: 8) {
+                        ForEach(IMUNWearableLocation.allCases, id: \.rawValue) { choice in
+                            Button { choose(choice) } label: {
+                                HStack(spacing: 5) {
+                                    Image(systemName: selected == choice ?
+                                          "checkmark.circle.fill" : "circle")
+                                        .font(.system(size: 12))
+                                    Text(choice.title)
+                                        .font(.system(size: 11, weight: .semibold))
+                                        .lineLimit(2)
+                                        .minimumScaleFactor(0.8)
+                                    Spacer(minLength: 0)
+                                }
+                                .frame(maxWidth: .infinity, minHeight: 45,
+                                       alignment: .leading)
+                                .padding(.horizontal, 10)
+                                .foregroundStyle(selected == choice ?
+                                    HCDesign.canvas : HCDesign.ink)
+                                .background(selected == choice ?
+                                    HCDesign.electric : HCDesign.raised,
+                                    in: RoundedRectangle(cornerRadius: 10))
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityAddTraits(selected == choice ? .isSelected : [])
+                        }
+                    }
+                    Text(device.hasSupportedLiveMotion ?
+                        "iMun can access this device's live movement sensors. Changing arm position can affect rep-count accuracy." :
+                        "Placement saved for future analysis. This device does not currently provide iMun with a supported live gyroscope feed.")
+                        .font(.system(size: 11))
+                        .foregroundStyle(HCDesign.secondary)
+                }
+            }
+        }
+        .onAppear {
+            if selected == .unassigned { expanded = true }
+        }
+    }
+}
+
 // All original settings and integrations remain available through the Coach gear.
 private struct PremiumSettingsPage: View {
     @EnvironmentObject private var coach: PhoneWorkoutBridge
@@ -5775,8 +5852,7 @@ private struct PremiumSettingsPage: View {
     @AppStorage("hcEitanCoachStyle") private var eitanCoachStyle = "driven"
     @AppStorage("hcEitanPrimaryWearable") private var primaryWearable = "Auto"
     @AppStorage("hcIsaiahRecoveryPriority") private var isaiahRecoveryPriority = "WHOOP"
-    @AppStorage("hcWatchWearSide") private var motionWatchWrist = "unknown"
-    @AppStorage("hcWhoopWearSide") private var motionWhoopPosition = "off"
+    @State private var wearableLocations: [String: IMUNWearableLocation] = [:]
     @AppStorage("hcWatchMotionRepEstimate") private var motionAutoReps = true
     @AppStorage("hcWatchMotionRecognitionEnabled") private var learnMovementPatterns = false
     @EnvironmentObject private var tredict: HCTredictImporter
@@ -5796,6 +5872,20 @@ private struct PremiumSettingsPage: View {
     @AppStorage("hcRunAutoLaps") private var runAutoLaps = true
     @AppStorage("hcRunIntervals") private var runIntervals = false
     @AppStorage("hcRunCueMinutes") private var runCueMinutes = 5
+
+    private func loadWearableLocations() {
+        IMUNWearablePlacementStore.migrateLegacy()
+        wearableLocations = Dictionary(uniqueKeysWithValues:
+            IMUNWearableCatalog.devices.map {
+                ($0.id, IMUNWearablePlacementStore.location($0.id))
+            })
+    }
+
+    private func chooseLocation(_ location: IMUNWearableLocation, for id: String) {
+        IMUNWearablePlacementStore.save(location, for: id)
+        wearableLocations[id] = location
+        syncMotionConfiguration()
+    }
 
     private func syncMotionConfiguration() {
         UserDefaults.standard.set(Date().timeIntervalSince1970,
@@ -5862,7 +5952,8 @@ private struct PremiumSettingsPage: View {
                             .font(.caption2).foregroundStyle(HCDesign.secondary)
                     }
                 }
-                HCSectionTitle(title: "Wearable movement", detail: "Motion and placement")
+                HCSectionTitle(title: "Wearable placement",
+                               detail: "Which arm and where each device sits")
                 HCCard {
                     VStack(alignment: .leading, spacing: 11) {
                         Toggle("Automatic rep counting", isOn: $motionAutoReps)
@@ -5870,40 +5961,29 @@ private struct PremiumSettingsPage: View {
                             .onChange(of: motionAutoReps) { _, _ in
                                 syncMotionConfiguration()
                             }
-                        Toggle("Learn exercise motion patterns", isOn: $learnMovementPatterns)
+                        Toggle("Learn exercise motion patterns",
+                               isOn: $learnMovementPatterns)
                             .tint(HCDesign.electric)
                             .onChange(of: learnMovementPatterns) { _, _ in
                                 syncMotionConfiguration()
                             }
-                        Text("Experimental: learns only from previously labeled sets. Movement suggestions require comparable recordings and never change the plan automatically.")
-                            .font(.caption2).foregroundStyle(HCDesign.secondary)
-                        Picker("Apple Watch wrist", selection: $motionWatchWrist) {
-                            Text("Not configured").tag("unknown")
-                            Text("Left wrist").tag("left")
-                            Text("Right wrist").tag("right")
-                        }
-                        .tint(HCDesign.electric)
-                        .onChange(of: motionWatchWrist) { _, _ in
-                            syncMotionConfiguration()
-                        }
-                        Picker("WHOOP position", selection: $motionWhoopPosition) {
-                            Text("Not worn").tag("off")
-                            Text("Left wrist").tag("left")
-                            Text("Right wrist").tag("right")
-                            Text("Other location").tag("other")
-                        }
-                        .tint(HCDesign.electric)
-                        .onChange(of: motionWhoopPosition) { _, _ in
-                            syncMotionConfiguration()
-                        }
-                        Text("Apple Watch: live Core Motion available during active tracked sets. WHOOP: physiological and workout data only through supported integrations; official live gyroscope/accelerometer streaming is not available.")
+                        Text("For arm-specific sets, iMun uses the selected device's side. Wrist, forearm and biceps positions are recorded separately so the motion model can be calibrated accurately.")
                             .font(.caption)
-                            .foregroundStyle(HCDesign.secondary)
-                        Text("For one-sided exercises, iMun only applies an automatic count when the active Watch is on the working wrist. Six planned sets mean three on each side.")
-                            .font(.caption2)
                             .foregroundStyle(HCDesign.secondary)
                     }
                 }
+                ForEach(IMUNWearableCatalog.devices) { device in
+                    IMUNWearableLocationCard(
+                        device: device,
+                        selected: wearableLocations[device.id] ??
+                            IMUNWearablePlacementStore.location(device.id)
+                    ) { place in
+                        chooseLocation(place, for: device.id)
+                    }
+                }
+                Text("Apple Watch supplies live Core Motion. WHOOP placement is saved, but its official API does not provide live raw motion. Other wearable models can be added to this device list in future releases.")
+                    .font(.caption2)
+                    .foregroundStyle(HCDesign.secondary)
                 HCSectionTitle(title: "IsAIah sources", detail: "Your recovery, across devices")
                 HCCard {
                     VStack(alignment: .leading, spacing: 11) {
@@ -6386,6 +6466,7 @@ private struct PremiumSettingsPage: View {
         .hcPage()
         .navigationBarTitleDisplayMode(.inline)
         .navigationTitle("Settings")
+        .onAppear { loadWearableLocations() }
     }
     @ViewBuilder
     private func accentTile(id: String, name: String, tint: Color) -> some View {
