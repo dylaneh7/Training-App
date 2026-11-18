@@ -246,6 +246,47 @@ actor HCCloudClient {
         else { throw HCCloudError.malformedResponse }
     }
 
+    /// Optional EITAN bridge for an athlete's independently authenticated
+    /// Apple Watch. Only runs after explicit EITAN cloud consent. This is
+    /// derived health information and must NEVER be attached to the workout
+    /// schedule or enabled implicitly by ordinary account sign-in.
+    func publishEitanForWatch(_ snapshot: HCEitanSnapshot?,
+                              enabled: Bool) async throws {
+        let session = try await authorizedToken()
+        let json: Any
+        if enabled, let snapshot {
+            let bytes = try JSONEncoder().encode(snapshot)
+            guard bytes.count < 32_000,
+                  let dictionary = try JSONSerialization.jsonObject(
+                    with: bytes) as? [String: Any] else {
+                throw HCCloudError.malformedResponse
+            }
+            json = dictionary
+        } else {
+            json = NSNull()
+        }
+        let date = enabled ? snapshot?.date : nil
+        let response = try await send(
+            path: "/rest/v1/health_coach_eitan_snapshots",
+            query: [URLQueryItem(name: "on_conflict", value: "user_id")],
+            method: "POST",
+            json: [[
+                "user_id": session.userID,
+                "score_date": date as Any? ?? NSNull(),
+                "enabled": enabled,
+                "snapshot": json,
+                "updated_at": ISO8601DateFormatter().string(from: Date())
+            ]],
+            bearer: session.access,
+            prefer: "resolution=merge-duplicates,return=representation")
+        guard let rows = try JSONSerialization.jsonObject(with: response)
+                as? [[String: Any]],
+              rows.count == 1,
+              rows[0]["enabled"] as? Bool == enabled else {
+            throw HCCloudError.malformedResponse
+        }
+    }
+
     func fetchPublishedPlan(date: String) async throws -> HCWorkout? {
         let authenticated = try await authorizedToken()
         let data = try await send(path: "/rest/v1/health_coach_native_plans",
