@@ -61,6 +61,12 @@ private final class HCMotionRepEstimator {
     private var cyclePeak = 0.0
     private var peaks: [Double] = []
     private var periods: [Double] = []
+    private var lastSampleTime: TimeInterval?
+    private var currentCycleRotationDegrees = 0.0
+    private var currentMaxRotationDegreesPerSecond = 0.0
+    private var rotationalTravel: [Double] = []
+    private var peakRotationSpeeds: [Double] = []
+    private var activePhaseSeconds: [Double] = []
     var onEstimate: ((Int, Double?) -> Void)?
 
     var isAvailable: Bool { manager.isDeviceMotionAvailable }
@@ -78,6 +84,12 @@ private final class HCMotionRepEstimator {
         cyclePeak = 0
         peaks.removeAll(keepingCapacity: true)
         periods.removeAll(keepingCapacity: true)
+        rotationalTravel.removeAll(keepingCapacity: true)
+        peakRotationSpeeds.removeAll(keepingCapacity: true)
+        activePhaseSeconds.removeAll(keepingCapacity: true)
+        lastSampleTime = nil
+        currentCycleRotationDegrees = 0
+        currentMaxRotationDegreesPerSecond = 0
         manager.deviceMotionUpdateInterval = 1.0 / 25.0
         // The Watch holds one Core Motion manager for this session. Samples
         // are processed locally and never added to the HealthKit workout.
@@ -110,6 +122,18 @@ private final class HCMotionRepEstimator {
         let energy = linear + 0.08 * angular
         smoothedEnergy = 0.7 * smoothedEnergy + 0.3 * energy
         let now = sample.timestamp
+        let dt = lastSampleTime.map {
+            max(0, min(0.08, now - $0))
+        } ?? 0
+        lastSampleTime = now
+        // Integrate gyro magnitude only for relative rotational wrist travel.
+        // This is not a joint-ROM estimate and cannot infer dumbbell velocity.
+        if smoothedEnergy >= 0.105 {
+            let degPerSecond = angular * 180 / .pi
+            currentCycleRotationDegrees += degPerSecond * dt
+            currentMaxRotationDegreesPerSecond =
+                max(currentMaxRotationDegreesPerSecond, degPerSecond)
+        }
 
         if smoothedEnergy >= 0.24 {
             cyclePeak = max(cyclePeak, smoothedEnergy)
@@ -133,9 +157,16 @@ private final class HCMotionRepEstimator {
                 lastRepTime = now
                 count += 1
                 peaks.append(cyclePeak)
+                rotationalTravel.append(currentCycleRotationDegrees)
+                peakRotationSpeeds.append(currentMaxRotationDegreesPerSecond)
+                if let began = aboveThresholdSince {
+                    activePhaseSeconds.append(max(0, now - began))
+                }
                 onEstimate?(count, lastPeriod)
             }
             cyclePeak = 0
+            currentCycleRotationDegrees = 0
+            currentMaxRotationDegreesPerSecond = 0
             aboveThresholdSince = nil
             motionPeakSeen = false
         }
@@ -187,6 +218,36 @@ private final class HCMotionRepEstimator {
         result.cycleSeconds = Array(periods.suffix(50))
         result.cycleWristMotionPeaks = Array(peaks.suffix(50))
         result.cycleTimingVariabilityPercent = variability
+        func variation(_ data: [Double]) -> Double? {
+            guard data.count >= 3 else { return nil }
+            let avg = data.reduce(0, +) / Double(data.count)
+            guard avg > 0.001 else { return nil }
+            let variance = data.reduce(0) {
+                $0 + pow($1 - avg, 2)
+            } / Double(data.count)
+            return min(1000, sqrt(variance) / avg * 100)
+        }
+        let usableRotation = rotationalTravel.filter { $0 > 0.25 }
+        if usableRotation.count >= 3 {
+            result.meanWristRotationDegrees = usableRotation.reduce(0, +) /
+                Double(usableRotation.count)
+            if let variation = variation(usableRotation) {
+                result.wristRotationConsistencyPercent = max(0, 100 - variation)
+            }
+        }
+        result.peakWristRotationDegreesPerSecond = peakRotationSpeeds.max()
+        result.repActivePhaseSeconds = Array(activePhaseSeconds.suffix(50))
+        result.repTempoConsistencyPercent = variability.map { max(0, 100 - $0) }
+        // A relative unitless comparison index; it is NOT measured watts.
+        if let avg = mean, avg > 0,
+           let meanMotion = usableRotation.isEmpty ? nil :
+            usableRotation.reduce(0, +) / Double(usableRotation.count) {
+            result.relativeMotionIntensityIndex = meanMotion / avg
+        }
+        if let tempo = result.repTempoConsistencyPercent,
+           let rotation = result.wristRotationConsistencyPercent {
+            result.wristMotionConsistencyScore = (tempo + rotation) / 2
+        }
         return result
     }
 }
