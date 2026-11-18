@@ -1467,6 +1467,8 @@ private struct WatchPreferences: View {
     @AppStorage("hcRestOverrideSeconds") private var restOverride = 0
     @AppStorage("hcAutoStartNextSet") private var autoStartNextSet = true
     @AppStorage("hcWatchHaptics") private var haptics = true
+    @AppStorage("hcWatchSetStartHaptics") private var setStartHaptics = true
+    @AppStorage("hcWatchRestCompleteHaptics") private var restCompleteHaptics = true
 
     var body: some View {
         List {
@@ -1573,7 +1575,35 @@ private struct WatchPreferences: View {
                     ? "The Watch will start the next set when rest finishes. The first set starts with Start Workout."
                     : "Rest still counts down and alerts you. Tap Start Set when you are ready; no next set begins on its own.")
                     .font(.caption2).foregroundStyle(WTheme.muted)
-                Toggle("Haptic feedback", isOn: $haptics).tint(WTheme.lime)
+                Toggle("Haptic feedback", isOn: $haptics)
+                    .tint(WTheme.lime)
+                    .onChange(of: haptics) { _, _ in
+                        store.refreshRestAlertPreferences()
+                    }
+                if haptics {
+                    Toggle("Tap when each set starts", isOn: $setStartHaptics)
+                        .tint(WTheme.lime)
+                    Toggle("Alert when rest finishes", isOn: $restCompleteHaptics)
+                        .tint(WTheme.lime)
+                        .onChange(of: restCompleteHaptics) { _, _ in
+                            store.refreshRestAlertPreferences()
+                        }
+                    if restCompleteHaptics {
+                        Button {
+                            store.enableBackgroundRestAlerts()
+                        } label: {
+                            Label("ENABLE BACKGROUND REST ALERTS",
+                                  systemImage: "bell.badge")
+                        }
+                        Text(store.restNotificationStatus)
+                            .font(.caption2)
+                            .foregroundStyle(WTheme.muted)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Text("Watch notifications can alert you after rest even when you leave the workout screen. Delivery follows Watch notification and Focus settings.")
+                            .font(.caption2)
+                            .foregroundStyle(WTheme.muted)
+                    }
+                }
                 Text("Running voice cues and automatic miles remain in the Run screen.")
                     .font(.caption2).foregroundStyle(WTheme.muted)
             }
