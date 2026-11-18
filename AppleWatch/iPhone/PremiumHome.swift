@@ -5428,6 +5428,9 @@ private struct PremiumSettingsPage: View {
     @AppStorage("hcEitanCoachStyle") private var eitanCoachStyle = "driven"
     @AppStorage("hcEitanPrimaryWearable") private var primaryWearable = "Auto"
     @AppStorage("hcIsaiahRecoveryPriority") private var isaiahRecoveryPriority = "WHOOP"
+    @AppStorage("hcWatchWearSide") private var motionWatchWrist = "unknown"
+    @AppStorage("hcWhoopWearSide") private var motionWhoopPosition = "off"
+    @AppStorage("hcWatchMotionRepEstimate") private var motionAutoReps = true
     @EnvironmentObject private var tredict: HCTredictImporter
     @State private var tredictToken = ""
     @AppStorage("hcAggressiveProgression") private var aggressive = true
@@ -5503,6 +5506,32 @@ private struct PremiumSettingsPage: View {
                         .tint(HCDesign.electric)
                         Text("Movement changes use conservative estimates, confidence labels, and your subsequent actual performance.")
                             .font(.caption2).foregroundStyle(HCDesign.secondary)
+                    }
+                }
+                HCSectionTitle(title: "Wearable movement", detail: "Motion and placement")
+                HCCard {
+                    VStack(alignment: .leading, spacing: 11) {
+                        Toggle("Automatic rep counting", isOn: $motionAutoReps)
+                            .tint(HCDesign.electric)
+                        Picker("Apple Watch wrist", selection: $motionWatchWrist) {
+                            Text("Not configured").tag("unknown")
+                            Text("Left wrist").tag("left")
+                            Text("Right wrist").tag("right")
+                        }
+                        .tint(HCDesign.electric)
+                        Picker("WHOOP position", selection: $motionWhoopPosition) {
+                            Text("Not worn").tag("off")
+                            Text("Left wrist").tag("left")
+                            Text("Right wrist").tag("right")
+                            Text("Other location").tag("other")
+                        }
+                        .tint(HCDesign.electric)
+                        Text("Apple Watch: live Core Motion available during active tracked sets. WHOOP: physiological and workout data only through supported integrations; official live gyroscope/accelerometer streaming is not available.")
+                            .font(.caption)
+                            .foregroundStyle(HCDesign.secondary)
+                        Text("For one-sided exercises, iMun only applies an automatic count when the active Watch is on the working wrist. Six planned sets mean three on each side.")
+                            .font(.caption2)
+                            .foregroundStyle(HCDesign.secondary)
                     }
                 }
                 HCSectionTitle(title: "IsAIah sources", detail: "Your recovery, across devices")
