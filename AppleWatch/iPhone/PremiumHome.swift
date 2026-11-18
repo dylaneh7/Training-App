@@ -537,7 +537,8 @@ struct PremiumHomeView: View {
     @Environment(\.scenePhase) private var scenePhase
     private let scheduleRefresh = Timer.publish(every: 60, on: .main, in: .common).autoconnect()
     // Network polling should never be a 15-second render interruption on Health/Progress.
-    private let progressRefresh = Timer.publish(every: 75, on: .main, in: .common).autoconnect()
+    private let progressRefresh = Timer.publish(every: 6, on: .main, in: .common).autoconnect()
+    @State private var lastProgressCloudCheck = Date.distantPast
 
     // A single observer covers all styling tokens. Chaining a dozen
     // separate .onChange modifiers exceeded SwiftUI's type-check budget.
@@ -771,10 +772,17 @@ struct PremiumHomeView: View {
             }
         }
         .onReceive(progressRefresh) { _ in
-            if scenePhase == .active && coach.signedIn &&
-               (selectedTab == "training" || coach.isWorkoutActive) {
-                coach.refreshCloudProgress()
-            }
+            guard scenePhase == .active, coach.signedIn else { return }
+            let now = Date()
+            let activeInterval: TimeInterval = coach.isWorkoutActive ? 6 :
+                (selectedTab == "training" || selectedTab == "today" ? 12 : 45)
+            guard now.timeIntervalSince(lastProgressCloudCheck) >=
+                    activeInterval else { return }
+            lastProgressCloudCheck = now
+            // Read cloud-authoritative UUID/undo records even if the
+            // companion link is down. Pending local records remain visible.
+            coach.refreshCloudProgress()
+            coach.retryPendingCloudSets()
         }
         .onReceive(scheduleRefresh) { _ in
             // Poll the Command Center calendar while the iPhone app is open.
