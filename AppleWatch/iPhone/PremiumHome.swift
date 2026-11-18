@@ -557,6 +557,7 @@ struct PremiumHomeView: View {
     // Network polling should never be a 15-second render interruption on Health/Progress.
     private let progressRefresh = Timer.publish(every: 6, on: .main, in: .common).autoconnect()
     @State private var lastProgressCloudCheck = Date.distantPast
+    @State private var lastRunHistoryCloudCheck = Date.distantPast
 
     // A single observer covers all styling tokens. Chaining a dozen
     // separate .onChange modifiers exceeded SwiftUI's type-check budget.
@@ -801,6 +802,11 @@ struct PremiumHomeView: View {
             // companion link is down. Pending local records remain visible.
             coach.refreshCloudProgress()
             coach.retryPendingCloudSets()
+            let runInterval: TimeInterval = coach.isWorkoutActive ? 24 : 60
+            if now.timeIntervalSince(lastRunHistoryCloudCheck) >= runInterval {
+                lastRunHistoryCloudCheck = now
+                coach.refreshCloudRunHistory()
+            }
         }
         .onReceive(scheduleRefresh) { _ in
             // Poll the Command Center calendar while the iPhone app is open.
@@ -818,7 +824,10 @@ struct PremiumHomeView: View {
             migratePreviousHealthSourceChoice()
             if selectedTab == "coach" { selectedTab = "training" }
             if coach.signedIn && coach.workout == nil { coach.refresh(date: Date()) }
-            if coach.signedIn { coach.refreshCloudProgress() }
+            if coach.signedIn {
+                coach.refreshCloudProgress()
+                coach.refreshCloudRunHistory(force: true)
+            }
             configureTabAppearance()
             if tredictPlans.connected { tredictPlans.refresh() }
             publishWidgets()
