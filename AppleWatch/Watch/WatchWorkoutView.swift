@@ -751,6 +751,14 @@ Section("TRAINING PLAN") {
                                 .font(.system(size: 10))
                                 .foregroundStyle(WTheme.aqua)
                         }
+                        Text(store.syncPathSummary)
+                            .font(.system(size: 10))
+                            .foregroundStyle(WTheme.aqua)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Text(store.progressSyncStatus)
+                            .font(.system(size: 10))
+                            .foregroundStyle(WTheme.muted)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                     .listRowBackground(WTheme.panel)
                 }
