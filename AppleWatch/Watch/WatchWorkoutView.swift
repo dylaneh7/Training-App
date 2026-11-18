@@ -1622,10 +1622,29 @@ private struct WatchConnectivityDiagnostics: View {
 
 private struct WatchEitanSyncSettings: View {
     var body: some View {
-        DisclosureGroup("EITAN & WATCH DETAILS") {
-            WatchEitanTransportDetails()
-            WatchEitanRecoveryControls()
+        NavigationLink {
+            WatchEitanDetailsSettings()
+        } label: {
+            Label("EITAN & WATCH DETAILS", systemImage: "waveform.path.ecg")
         }
+    }
+}
+
+/// watchOS does not support DisclosureGroup. Keep connection and recovery
+/// tools behind a dedicated Settings destination rather than the dashboard.
+private struct WatchEitanDetailsSettings: View {
+    var body: some View {
+        List {
+            Section("EITAN STATUS") {
+                WatchEitanTransportDetails()
+            }
+            Section("SYNC & RECOVERY") {
+                WatchEitanRecoveryControls()
+            }
+        }
+        .listStyle(.plain)
+        .navigationTitle("EITAN Details")
+        .background(WTheme.bg.ignoresSafeArea())
     }
 }
 
