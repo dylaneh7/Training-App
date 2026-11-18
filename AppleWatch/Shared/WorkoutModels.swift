@@ -61,8 +61,11 @@ struct HCExercise: Codable, Identifiable, Hashable {
     }
 
     var setSummary: String {
-        isUnilateral ? "\(prescribedSets) total · \(prescribedSets / 2) per side"
-                     : "\(prescribedSets) sets"
+        guard isUnilateral else { return "\(prescribedSets) sets" }
+        guard prescribedSets.isMultiple(of: 2) else {
+            return "\(prescribedSets) total · adjust for even side split"
+        }
+        return "\(prescribedSets) total · \(prescribedSets / 2) per side"
     }
 
     var repDescription: String { "\(repMin)–\(repMax)" }
