@@ -1570,9 +1570,12 @@ final class HCAppleHealthReader: ObservableObject {
               unit:HKUnit.gramUnit(with:.milli),suffix:"mg",isDailySum:true)
     ]
 
-    func connect() {
+    /// One HealthKit permission flow covers biometrics, historical workouts
+    /// and the associated running details. HealthKit does not disclose which
+    /// read types were accepted: only verified imported records prove access.
+    func connect(onRequestCompleted: (() -> Void)? = nil) {
         guard HKHealthStore.isHealthDataAvailable() else {
-            status = "Apple Health isn't available on this device."
+            status = "Apple Health is unavailable on this device."
             return
         }
         var types = Set<HKObjectType>()
@@ -1583,15 +1586,25 @@ final class HCAppleHealthReader: ObservableObject {
             types.insert(sleep)
         }
         types.insert(HKObjectType.workoutType())
-        store.requestAuthorization(toShare: [], read: types) { [weak self] _, error in
+        types.insert(HKSeriesType.workoutRoute())
+        store.requestAuthorization(toShare: [], read: types) { [weak self] completed, error in
             DispatchQueue.main.async {
                 guard let self else { return }
                 if let error {
-                    self.status = error.localizedDescription
+                    self.status = "Apple Health request: " + error.localizedDescription
                     return
                 }
+                guard completed else {
+                    self.status = "Apple Health request was not completed."
+                    return
+                }
+                // This records completion of the request, not whether each
+                // protected read category was granted.
                 UserDefaults.standard.set(true, forKey: "hcHealthCatalogEnabled")
+                UserDefaults.standard.set(true, forKey: "hcAutomaticRunImport")
+                self.status = "Checking Apple Health for readable records…"
                 self.refresh()
+                onRequestCompleted?()
             }
         }
     }
@@ -1685,8 +1698,12 @@ final class HCAppleHealthReader: ObservableObject {
         for item in catalog {
             guard let type = item.type else { continue }
             group.enter()
+            // VO2 max is relatively sparse: keep enough history to compare
+            // September with November without extending dense HR sample reads.
+            let lookbackDays = item.identifier == "VO2Max" ? 365 : 35
             let predicate = HKQuery.predicateForSamples(
-                withStart: Calendar.current.date(byAdding: .day, value: -35, to: Date()),
+                withStart: Calendar.current.date(byAdding: .day,
+                                                  value: -lookbackDays, to: Date()),
                 end: Date(), options: .strictStartDate)
             // Bounded query: high-frequency streams can contain very many samples.
             let query = HKSampleQuery(
