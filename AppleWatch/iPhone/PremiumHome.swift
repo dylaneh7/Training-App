@@ -770,6 +770,7 @@ struct PremiumHomeView: View {
         .onChange(of: designSignature) { _, _ in configureTabAppearance() }
         .onAppear {
             migratePreviousHealthSourceChoice()
+            runImporter.startIfAuthorized()
             if selectedTab == "coach" { selectedTab = "training" }
             if coach.signedIn && coach.workout == nil { coach.refresh(date: Date()) }
             if coach.signedIn {
@@ -4194,7 +4195,9 @@ private struct PremiumCoachConversation: View {
                 turns = Array(decoded.suffix(24))
                 if rememberChats { IMUNCoachLocalMemory.save(turns) }
             }
-            if runImporter.enabled { runImporter.refresh() }
+            // Refresh all authorized Apple Health workout types, including
+            // older records, before answering history questions.
+            runImporter.startIfAuthorized()
         }
         .task {
             try? await Task.sleep(nanoseconds: 350_000_000)
