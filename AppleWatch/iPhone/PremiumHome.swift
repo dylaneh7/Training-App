@@ -5101,11 +5101,17 @@ private struct PremiumCoachConversation: View {
     }
 
     private func send() {
-        let questionText = question.trimmingCharacters(in: .whitespacesAndNewlines)
+        let originalDraft = question.trimmingCharacters(in: .whitespacesAndNewlines)
         guard canSend else { return }
-        if questionText.lowercased().contains("what can you control") ||
+        let uploads = pendingAttachments
+        let questionText = originalDraft.isEmpty ?
+            "Please analyze the attached exercise data. Explain what you can verify and what is missing." :
+            originalDraft
+        let userDisplayText = uploads.isEmpty ? questionText :
+            questionText + "\nAttachments: " + uploads.map(\.name).joined(separator: ", ")
+        if uploads.isEmpty && (questionText.lowercased().contains("what can you control") ||
            questionText.lowercased().contains("what can you do in imun") ||
-           questionText.lowercased().contains("what actions can you") {
+           questionText.lowercased().contains("what actions can you")) {
             question = ""
             composerFocused = false
             turns.append(IMUNCoachTurn(role: "user", text: questionText))
@@ -5114,7 +5120,7 @@ private struct PremiumCoachConversation: View {
             persist()
             return
         }
-        if let proposed = IMUNCoachActionInterpreter.propose(
+        if uploads.isEmpty, let proposed = IMUNCoachActionInterpreter.propose(
             questionText, sessions: coach.plannedSessions,
             workout: coach.workout, run: coach.runPlan) {
             question = ""
@@ -5133,12 +5139,13 @@ private struct PremiumCoachConversation: View {
         errorMessage = nil
         isSending = true
         thinkingPhase = "IsAIah is thinking"
-        turns.append(IMUNCoachTurn(role: "user", text: questionText))
+        turns.append(IMUNCoachTurn(role: "user", text: userDisplayText))
         persist()
         Task {
             // The service is a language classifier only: it cannot mutate
             // workouts, choose an unvalidated ID, or bypass confirmation.
-            if IMUNCoachActionInterpreter.mightNeedModelProposal(questionText) {
+            if uploads.isEmpty &&
+                IMUNCoachActionInterpreter.mightNeedModelProposal(questionText) {
                 await MainActor.run { thinkingPhase = "Reviewing your request" }
                 if let classification = try? await coach.classifyIMUNCoachAction(
                     request: questionText, screenContext: launchContext),
@@ -5165,8 +5172,10 @@ private struct PremiumCoachConversation: View {
                             question: questionText,
                             primaryWearable: UserDefaults.standard.string(
                                 forKey: "hcEitanPrimaryWearable") ?? "Auto") +
-                         eitanSharedCoachContext) : "")
+                         eitanSharedCoachContext) : "",
+                    attachments: uploads)
                 await MainActor.run {
+                    pendingAttachments.removeAll()
                     turns.append(IMUNCoachTurn(role: "assistant", text: reply))
                     isSending = false
                     persist()
@@ -5177,7 +5186,7 @@ private struct PremiumCoachConversation: View {
                     if turns.last?.role == "user" {
                         turns.removeLast()
                     }
-                    question = questionText
+                    question = originalDraft
                     errorMessage = error.localizedDescription
                     isSending = false
                     persist()
