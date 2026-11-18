@@ -1593,9 +1593,12 @@ private struct PremiumWorkoutEditor: View {
                     if let plan {
                         HCSectionTitle(title: "Movement sequence",
                                        detail: "\(plan.exercises.count) movements · \(plan.prescribedSetCount) work sets")
-                        ForEach(Array(plan.exercises.enumerated()), id: \.element.id) { pos, exercise in
-                            exerciseCard(exercise, position: pos,
-                                         total: plan.exercises.count)
+                        ForEach(plan.exercises) { exercise in
+                            exerciseCard(exercise,
+                                position: plan.exercises.firstIndex(where: {
+                                    $0.id == exercise.id
+                                }) ?? 0,
+                                total: plan.exercises.count)
                         }
                     }
                     HCFilledButton(title: "ADD MOVEMENT",
