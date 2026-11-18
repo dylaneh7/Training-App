@@ -1945,6 +1945,39 @@ private actor HCWatchCloudFallback {
         return rows.first?["design"] as? [String: Any]
     }
 
+    /// Consent-gated, private EITAN state owned by this authenticated user.
+    /// EITAN health metrics are never inferred from workout tables.
+    func fetchEitanForWatch() async throws ->
+        (enabled: Bool, snapshot: HCEitanSnapshot?, updatedAt: Date?)? {
+        let session = try await authorized()
+        let data = try await request(
+            path: "/rest/v1/health_coach_eitan_snapshots",
+            query: [
+                URLQueryItem(name: "select", value:
+                    "enabled,score_date,snapshot,updated_at"),
+                URLQueryItem(name: "user_id", value:
+                    "eq." + session.userID),
+                URLQueryItem(name: "limit", value: "1")
+            ], bearer: session.access)
+        guard let rows = try JSONSerialization.jsonObject(with: data)
+                as? [[String: Any]] else { throw HCWatchCloudError.malformed }
+        guard let row = rows.first,
+              let enabled = row["enabled"] as? Bool else { return nil }
+        let modified = (row["updated_at"] as? String).flatMap {
+            ISO8601DateFormatter().date(from: $0)
+        }
+        guard enabled else { return (false, nil, modified) }
+        let decoded: HCEitanSnapshot?
+        if let raw = row["snapshot"] as? [String: Any] {
+            let bytes = try JSONSerialization.data(withJSONObject: raw)
+            decoded = try JSONDecoder().decode(HCEitanSnapshot.self,
+                                               from: bytes)
+        } else {
+            decoded = nil
+        }
+        return (true, decoded, modified)
+    }
+
     /// The same versioned daily schedule that iMun shows on iPhone.
     /// This is independent of WatchConnectivity's foreground reachability.
     func fetchPublishedSchedule(date: String) async throws -> HCWatchSchedule? {
