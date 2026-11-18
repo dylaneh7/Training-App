@@ -1648,6 +1648,86 @@ private struct PremiumWorkoutEditor: View {
     }
 }
 
+/// Source-attributed, wrist-specific coaching signals. Values are relative
+/// movement proxies; no anatomical ROM, bar velocity or measured watts.
+private struct IMUNSetMotionInsights: View {
+    let insight: HCMotionSetInsight
+
+    private func stat(_ name: String, _ value: String) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text(name.uppercased())
+                .font(.system(size: 9, weight: .bold, design: .rounded))
+                .tracking(0.7)
+                .foregroundStyle(HCDesign.secondary)
+            Text(value)
+                .font(HCDesign.metric(17))
+                .foregroundStyle(HCDesign.ink)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(10)
+        .background(HCDesign.canvas.opacity(0.6),
+                    in: RoundedRectangle(cornerRadius: 11))
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Label("MOTION INTELLIGENCE", systemImage: "waveform.path")
+                    .font(.system(size: 11, weight: .bold))
+                    .tracking(0.6)
+                    .foregroundStyle(HCDesign.aqua)
+                Spacer()
+                Text(insight.source + " · " + insight.wearSide.capitalized)
+                    .font(.system(size: 10))
+                    .foregroundStyle(HCDesign.secondary)
+            }
+            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())],
+                      spacing: 8) {
+                stat("Detected cycles", "\(insight.detectedReps)")
+                if let seconds = insight.averageCycleSeconds {
+                    stat("Avg cycle", String(format: "%.2f s", seconds))
+                }
+                if let speed = insight.peakWristRotationDegreesPerSecond {
+                    stat("Peak wrist rotation", String(format: "%.0f°/s", speed))
+                }
+                if let score = insight.repTempoConsistencyPercent {
+                    stat("Tempo consistency", String(format: "%.0f%% proxy", score))
+                }
+                if let score = insight.wristMotionConsistencyScore {
+                    stat("Wrist consistency", String(format: "%.0f%% proxy", score))
+                }
+                if let travel = insight.meanWristRotationDegrees {
+                    stat("Rotational travel", String(format: "%.0f° proxy", travel))
+                }
+                if let index = insight.relativeMotionIntensityIndex {
+                    stat("Motion intensity", String(format: "%.1f relative", index))
+                }
+            }
+            if let cycles = insight.cycleSeconds, cycles.count >= 3 {
+                VStack(alignment: .leading, spacing: 5) {
+                    Text("DETECTED CYCLE TEMPO")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(HCDesign.secondary)
+                    Chart(Array(cycles.indices), id: \.self) { index in
+                        LineMark(x: .value("Cycle", index + 1),
+                                 y: .value("Seconds", cycles[index]))
+                            .foregroundStyle(HCDesign.electric)
+                    }
+                    .frame(height: 112)
+                    .accessibilityLabel("Wrist-motion cycle duration over this set")
+                }
+            }
+            Text(insight.note)
+                .font(.system(size: 12))
+                .foregroundStyle(HCDesign.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Text("Experimental. Wrist motion is not directly measured joint range, dumbbell speed, force, power, or a verified form assessment.")
+                .font(.system(size: 10))
+                .foregroundStyle(HCDesign.secondary)
+        }
+    }
+}
+
 private struct PremiumExerciseSession: View {
     @EnvironmentObject private var coach: PhoneWorkoutBridge
     @AppStorage("hcAggressiveProgression") private var aggressive = true
@@ -1826,14 +1906,23 @@ private struct PremiumExerciseSession: View {
                                 .accessibilityLabel("Undo Set \(set.index)")
                             }
                             if let insight = set.motionInsight {
-                                VStack(alignment: .leading, spacing: 5) {
-                                    Text("IsAIah · MOTION REVIEW")
+                                IMUNSetMotionInsights(insight: insight)
+                            }
+                            if let load = set.weightLb, load > 0,
+                               (1...12).contains(set.reps) {
+                                HStack {
+                                    Text("EST. ONE-REP MAX")
                                         .font(.system(size: 10, weight: .bold))
-                                        .foregroundStyle(HCDesign.aqua)
-                                    Text(insight.note)
-                                        .font(.system(size: 12))
                                         .foregroundStyle(HCDesign.secondary)
+                                    Spacer()
+                                    Text(String(format: "%.1f lb", set.reps == 1 ?
+                                        load : load * (1 + Double(set.reps) / 30)))
+                                        .font(HCDesign.metric(15))
+                                        .foregroundStyle(HCDesign.aqua)
                                 }
+                                Text("Epley estimate from logged weight and reps, not a tested maximum.")
+                                    .font(.system(size: 10))
+                                    .foregroundStyle(HCDesign.secondary)
                             }
                         }
                     }
