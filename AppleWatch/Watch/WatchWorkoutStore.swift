@@ -137,6 +137,10 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
 
     override init() {
         super.init()
+        if UserDefaults.standard.bool(forKey: "hcWatchRestNotifications") {
+            restNotificationStatus =
+                "Background rest alerts enabled; delivery follows Watch notification settings"
+        }
         // Never revive the older hardcoded Saturday example or yesterday's cache.
         if let snapshot: HCWatchSchedule = load("latest-schedule.json"),
            snapshot.date == Self.today() {
@@ -885,7 +889,9 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
     // MARK: - Watch set and recovery haptics
 
     private func playSetHaptic() {
-        guard setHapticsEnabled else { return }
+        guard setHapticsEnabled,
+              UserDefaults.standard.object(forKey: "hcWatchSetStartHaptics")
+                  as? Bool ?? true else { return }
         WKInterfaceDevice.current().play(.start)
     }
 
@@ -897,6 +903,8 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
     private func scheduleBackgroundRestAlert(deadline: Date) {
         cancelBackgroundRestAlert()
         guard setHapticsEnabled,
+              UserDefaults.standard.object(forKey: "hcWatchRestCompleteHaptics")
+                  as? Bool ?? true,
               UserDefaults.standard.bool(forKey: "hcWatchRestNotifications"),
               deadline > Date() else { return }
         let note = UNMutableNotificationContent()
@@ -935,7 +943,12 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
     }
 
     func refreshRestAlertPreferences() {
-        if !setHapticsEnabled { cancelBackgroundRestAlert() }
+        let restHapticsEnabled =
+            UserDefaults.standard.object(forKey: "hcWatchRestCompleteHaptics")
+                as? Bool ?? true
+        if !setHapticsEnabled || !restHapticsEnabled {
+            cancelBackgroundRestAlert()
+        }
         else if let clock = liftClock, clock.isActive, !clock.isPaused,
                 let until = clock.restEndsAt, until > Date() {
             scheduleBackgroundRestAlert(deadline: until)
@@ -953,6 +966,8 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
         // The OS owns inactive-app notification delivery. The foreground
         // Watch receives one prominent notification haptic directly.
         if setHapticsEnabled,
+           UserDefaults.standard.object(forKey: "hcWatchRestCompleteHaptics")
+               as? Bool ?? true,
            WKApplication.shared().applicationState == .active,
            Date().timeIntervalSince(deadline) < 15 {
             WKInterfaceDevice.current().play(.notification)
