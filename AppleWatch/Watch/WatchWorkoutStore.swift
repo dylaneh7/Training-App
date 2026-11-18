@@ -62,18 +62,24 @@ private final class IMUNWatchRepMotionAnalyzer {
                         r.x * 0.4, r.y * 0.4, r.z * 0.4]
         guard let began = firstTimestamp else { return }
         let elapsed = t - began
-        // Quickly select the strongest wrist axis without discarding
-        // the first couple of reps of a short set.
-        if elapsed < 0.65 {
-            for index in channels.indices {
-                axisStrengths[index] =
-                    0.96 * axisStrengths[index] + 0.04 * abs(channels[index])
-            }
-            if let strongest = axisStrengths.indices.max(by: {
-                axisStrengths[$0] < axisStrengths[$1]
-            }) { dominantAxis = strongest }
-            return
+        // Discover the strongest moving axis dynamically, including when
+        // the athlete pauses after tapping Start Set. Lock once a full rep
+        // has been found so incidental wrist gestures do not change axes.
+        for index in channels.indices {
+            axisStrengths[index] =
+                0.94 * axisStrengths[index] + 0.06 * abs(channels[index])
         }
+        if repCount == 0 && phase == 0,
+           let strongest = axisStrengths.indices.max(by: {
+               axisStrengths[$0] < axisStrengths[$1]
+           }),
+           axisStrengths[strongest] > 0.065 &&
+           axisStrengths[strongest] >
+               axisStrengths[dominantAxis] * 1.25 {
+            dominantAxis = strongest
+            filteredValue = 0
+        }
+        if elapsed < 0.45 { return }
         let raw = channels[dominantAxis]
         filteredValue = 0.7 * filteredValue + 0.3 * raw
         let threshold = dominantAxis < 3 ? 0.12 : 0.16
