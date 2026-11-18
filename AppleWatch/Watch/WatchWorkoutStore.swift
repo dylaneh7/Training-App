@@ -2623,7 +2623,7 @@ private actor HCWatchCloudFallback {
         let data = try await request(path: "/rest/v1/health_coach_watch_sets",
             query: [
                 URLQueryItem(name: "select", value:
-                    "id,workout_date,session_key,workout_title,exercise_id,exercise_name,exercise_index,set_index,weight_lb,reps,rir,completed_at,started_at,duration_seconds,source"),
+                    "id,workout_date,session_key,workout_title,exercise_id,exercise_name,exercise_index,set_index,weight_lb,reps,rir,completed_at,started_at,duration_seconds,source,working_side,motion_insight"),
                 URLQueryItem(name: "user_id", value: "eq." + session.userID),
                 URLQueryItem(name: "workout_date", value: "eq." + workout.date),
                 URLQueryItem(name: "session_key", value: "eq." + workout.sessionKey),
@@ -2821,6 +2821,13 @@ private actor HCWatchCloudFallback {
         body["rir"] = set.rir.map { $0 as Any } ?? NSNull()
         body["started_at"] = set.startedAt.map { iso.string(from: $0) as Any } ?? NSNull()
         body["duration_seconds"] = set.durationSeconds.map { $0 as Any } ?? NSNull()
+        body["working_side"] = set.side?.rawValue ?? NSNull()
+        if let insight = set.motionInsight,
+           let data = try? JSONEncoder().encode(insight),
+           let object = try? JSONSerialization.jsonObject(with: data) {
+            body["motion_insight"] = object
+        }
+
         _ = try await request(path: "/rest/v1/health_coach_watch_sets",
             query: [URLQueryItem(name: "on_conflict", value: "id")],
             method: "POST", json: [body], bearer: session.access,
