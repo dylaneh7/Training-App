@@ -198,6 +198,48 @@ enum HCSetReconciliation {
         }
     }
 
+    /// Decode historical motion sets without needing today's workout plan.
+    /// Source IDs, recorded date, physical side and motion provenance survive.
+    static func decodeMotionHistoryRows(_ rows: [[String: Any]]) -> [HCLoggedSet] {
+        rows.compactMap { row -> HCLoggedSet? in
+            guard let idRaw = row["id"] as? String, let id = UUID(uuidString: idRaw),
+                  let date = row["workout_date"] as? String, date.count == 10,
+                  let sessionKey = row["session_key"] as? String, !sessionKey.isEmpty,
+                  let exerciseID = row["exercise_id"] as? String, !exerciseID.isEmpty,
+                  let exercise = row["exercise_name"] as? String, !exercise.isEmpty,
+                  let setNumber = (row["set_index"] as? NSNumber)?.intValue,
+                  (1...300).contains(setNumber),
+                  let recordedReps = (row["reps"] as? NSNumber)?.intValue,
+                  (1...300).contains(recordedReps),
+                  let timestamp = row["completed_at"] as? String,
+                  let completed = cloudDate(timestamp),
+                  let rawInsight = row["motion_insight"], !(rawInsight is NSNull),
+                  JSONSerialization.isValidJSONObject(rawInsight),
+                  let insightData = try? JSONSerialization.data(
+                    withJSONObject: rawInsight),
+                  let insight = try? JSONDecoder().decode(
+                    HCMotionSetInsight.self, from: insightData) else { return nil }
+            let position = (row["exercise_index"] as? NSNumber)?.intValue ?? 0
+            var entry = HCLoggedSet(id: id,
+                workoutID: "historical-" + date + "-" + sessionKey,
+                workoutDate: date, sessionKey: sessionKey,
+                workoutTitle: row["workout_title"] as? String ?? "Strength workout",
+                exerciseID: exerciseID, exerciseName: exercise,
+                exerciseIndex: position, index: setNumber,
+                weightLb: (row["weight_lb"] as? NSNumber)?.doubleValue,
+                reps: recordedReps,
+                rir: (row["rir"] as? NSNumber)?.doubleValue,
+                completedAt: completed,
+                startedAt: (row["started_at"] as? String).flatMap(cloudDate),
+                durationSeconds: (row["duration_seconds"] as? NSNumber)?.doubleValue,
+                source: row["source"] as? String)
+            entry.side = (row["working_side"] as? String)
+                .flatMap(HCWorkingSide.init(rawValue:))
+            entry.motionInsight = insight
+            return entry
+        }
+    }
+
     private static func cloudDate(_ raw: String) -> Date? {
         let f = ISO8601DateFormatter()
         f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
