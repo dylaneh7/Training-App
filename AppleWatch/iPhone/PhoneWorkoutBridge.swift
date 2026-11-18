@@ -1557,10 +1557,11 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
         // or make it a prerequisite for scheduled cloud workouts.
         watchConnectionDetails =
             "Paired: " + (connection.isPaired ? "Yes" : "No") +
-            " · Companion registration: " +
-                (connection.isWatchAppInstalled ? "Recognized" : "Not confirmed") +
-            " · Live messaging: " + (connection.isReachable ? "Available" : "Unavailable") +
-            " · Cloud schedule independent"
+            " · Direct companion: " +
+                (connection.isWatchAppInstalled ? "Registered" : "Not registered") +
+            " · Live link: " + (connection.isReachable ? "Available" : "Unavailable") +
+            " · Cloud workouts: " + (signedIn ? "Signed in" : "Signed out") +
+            (signedIn ? " (independent of direct pairing)" : "")
     }
 
     /// A context update is a *pending delivery*, not proof of Watch receipt.
@@ -1759,9 +1760,15 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
                 DispatchQueue.main.async {
                     self.fetchingProgress = false
                     guard self.workout?.id == requested.id else { return }
-                    self.cloudUndoRecords = undoEntries
-                    self.cloudRecordedSets = entries
-                    self.progressSyncStatus = "Phone and Watch progress synced"
+                    let undoChanged = Set(self.cloudUndoRecords) != Set(undoEntries)
+                    let setsChanged = Set(self.cloudRecordedSets) != Set(entries)
+                    if undoChanged { self.cloudUndoRecords = undoEntries }
+                    if setsChanged { self.cloudRecordedSets = entries }
+                    if undoChanged || setsChanged {
+                        self.progressSyncStatus = "Workout updates received from cloud"
+                    } else if self.progressSyncStatus == "Progress saved locally" {
+                        self.progressSyncStatus = "Cloud workout progress connected"
+                    }
                 }
             } catch {
                 DispatchQueue.main.async {
@@ -1952,6 +1959,9 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
                 self.save(Array(self.uploadedIDs),name:"uploaded-watch-set-ids.json")
                 self.updatePendingCount()
                 self.syncingQueue = false
+                if !savedIDs.isEmpty || !confirmedUndoIDs.isEmpty {
+                    self.notifyWatchCloudProgressChanged()
+                }
                 self.refreshCloudProgress()
                 self.status = errorMessage.map {
                     "Saved offline. Sync will retry: \($0)"
@@ -1966,6 +1976,20 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
                 }
             }
         }
+    }
+
+    /// A lightweight notification AFTER a successful cloud write. It tells
+    /// a reachable Watch to fetch authoritative, de-duplicated sets and
+    /// undo events. Cloud polling remains the fallback when disconnected.
+    private func notifyWatchCloudProgressChanged() {
+        guard WCSession.isSupported() else { return }
+        let connection = WCSession.default
+        guard connection.activationState == .activated,
+              connection.isPaired, connection.isReachable else { return }
+        connection.sendMessage([
+            HCPayload.kind: HCPayload.progressCloudChanged,
+            "date": HCPlanBuilder.dateString(Date())
+        ], replyHandler: { _ in }, errorHandler: { _ in })
     }
 
     private func confirmWatchRecord(_ id: UUID) {
@@ -2003,6 +2027,16 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
                  replyHandler: @escaping ([String: Any]) -> Void) {
         guard let kind = message[HCPayload.kind] as? String else {
             replyHandler([:]); return
+        }
+        if kind == HCPayload.progressCloudChanged {
+            DispatchQueue.main.async {
+                if message["date"] as? String ==
+                    HCPlanBuilder.dateString(Date()) {
+                    self.refreshCloudProgress()
+                }
+                replyHandler(["received": true])
+            }
+            return
         }
         if kind == HCPayload.eitanRequest {
             DispatchQueue.main.async {
