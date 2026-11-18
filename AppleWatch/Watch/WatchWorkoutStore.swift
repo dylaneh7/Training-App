@@ -80,6 +80,8 @@ private final class HCMotionRepEstimator {
     }
 
     private func consume(_ sample: CMDeviceMotion) {
+        // In-flight motion callbacks can arrive just after finishing a set.
+        guard manager.isDeviceMotionActive else { return }
         let acceleration = sample.userAcceleration
         let rotation = sample.rotationRate
         let linear = sqrt(acceleration.x * acceleration.x +
