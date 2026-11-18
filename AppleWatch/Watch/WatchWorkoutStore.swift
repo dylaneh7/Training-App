@@ -62,7 +62,9 @@ private final class IMUNWatchRepMotionAnalyzer {
                         r.x * 0.4, r.y * 0.4, r.z * 0.4]
         guard let began = firstTimestamp else { return }
         let elapsed = t - began
-        if elapsed < 1.8 {
+        // Quickly select the strongest wrist axis without discarding
+        // the first couple of reps of a short set.
+        if elapsed < 0.65 {
             for index in channels.indices {
                 axisStrengths[index] =
                     0.96 * axisStrengths[index] + 0.04 * abs(channels[index])
