@@ -1519,10 +1519,10 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
         // Send compact per-set observations to IsAIah only after the athlete
         // explicitly sends a coach message. Never upload raw sensor samples
         // as chat context. Retain provenance and sensor limitations.
-        let recentMotion = combinedRecordedSets
-            .filter { $0.motionInsight != nil }
+        let fullMotionHistory = motionHistorySets
+        let recentMotion = fullMotionHistory
             .sorted { $0.completedAt > $1.completedAt }
-            .prefix(24)
+            .prefix(40)
         if !recentMotion.isEmpty {
             lines.append("EXPERIMENTAL WATCH MOTION OBSERVATIONS: These are wrist-cycle estimates, not validated exercise form, joint ROM, actual barbell velocity, or power. WHOOP did not supply real-time gyroscope data. Avoid comparing left versus right unless separately sourced samples actually exist on both sides.")
         }
@@ -1534,8 +1534,41 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
             let location = motion.wearableLocation
                 .flatMap(IMUNWearableLocation.init(rawValue:))?.title ??
                 "\(motion.wearSide) wrist (legacy position)"
-            lines.append("Motion observation: \(entry.workoutDate) \(entry.exerciseName), set \(entry.index), side \(side), source \(motion.source), recorded placement \(location); saved \(entry.reps) reps (may be corrected), detected \(motion.detectedReps) cycles, mean earlier cycle \(avg)s, last cycle \(last)s. \(motion.note)")
+            let quality = motion.analysisConfidence ?? "Unrated"
+            let gaps = motion.samplingGapCount.map(String.init) ?? "unknown"
+            let coverage = motion.sampleCoveragePercent.map {
+                String(format: "%.0f%%", $0)
+            } ?? "unknown"
+            let angular = motion.peakWristRotationDegreesPerSecond.map {
+                String(format: "%.0f deg/s", $0)
+            } ?? "unknown"
+            let tempo = motion.repTempoConsistencyPercent.map {
+                String(format: "%.0f%% relative consistency", $0)
+            } ?? "unknown"
+            lines.append("Motion observation: \(entry.workoutDate) \(entry.exerciseName), set \(entry.index), side \(side), source \(motion.source), recorded placement \(location); saved \(entry.reps) reps (may be corrected), detected \(motion.detectedReps) cycles, mean cycle \(avg)s, last cycle \(last)s, peak wrist rotation \(angular), relative tempo consistency \(tempo). Capture quality \(quality), coverage \(coverage), sampling gaps \(gaps). \(motion.note)")
         }
+        // Derive projections locally from ALL available historical sessions,
+        // rather than sending thousands of raw movement frames to the coach.
+        let recentExercises = Array(Set(
+            fullMotionHistory.sorted { $0.completedAt > $1.completedAt }
+                .prefix(150).map(\.exerciseName))).sorted()
+        for name in recentExercises.prefix(20) {
+            let locations = Set(fullMotionHistory
+                .filter { HCProgramCatalog.normalized($0.exerciseName) ==
+                    HCProgramCatalog.normalized(name) }
+                .compactMap { $0.motionInsight.map(IMUNMotionAnalytics.placement) })
+            for position in locations.sorted().prefix(3) {
+                if let estimate = IMUNMotionAnalytics.forecastMotion(
+                    fullMotionHistory, exerciseName: name, location: position) {
+                    lines.append("EXPERIMENTAL MOVEMENT TREND for \(name), placement \(position): \(estimate.sessionCount) comparable sessions; most recent mean cycle \(String(format: "%.2f", estimate.lastAverageCycleSeconds)) s, next-session simple trend projection \(String(format: "%.2f", estimate.projectedNextCycleSeconds)) s, \(estimate.confidence.lowercased()) confidence. \(estimate.explanation)")
+                }
+            }
+            if let predicted = IMUNMotionAnalytics.forecastStrength(
+                fullMotionHistory, exerciseName: name) {
+                lines.append("ARITHMETIC ESTIMATED STRENGTH TREND for \(name): last estimated 1RM \(String(format: "%.1f", predicted.lastEstimatedMaxLb)) lb, next-session trend \(String(format: "%.1f", predicted.projectedNextEstimatedMaxLb)) lb, \(predicted.confidence.lowercased()) confidence, not an observed max or a recommended load.")
+            }
+        }
+        lines.append("COACH INTERPRETATION RULES: Never infer anatomical ROM, dumbbell trajectory, measured force/power, injury diagnosis, or verified technique from these wrist signals. Do not compare different placement locations, exercises, unobserved sides or low-quality samples as equivalent. Explain forecasts as exploratory continuation of recent trends, not promised gains or training prescriptions. Prefer actual logged volume/reps plus RIR for strength progression. Explicitly state when there is insufficient data.")
         if let plan = workout {
             for exercise in plan.exercises where exercise.isUnilateral {
                 lines.append("Unilateral workout plan: \(exercise.name), \(exercise.prescribedSets) TOTAL side-specific slots, \(exercise.prescribedSets / 2) per side. When proposing or editing unilateral exercises, prescribe even total slot counts; three sets per arm means six total.")
