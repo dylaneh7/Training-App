@@ -5656,6 +5656,32 @@ private struct PremiumSettingsPage: View {
                 }
                 HCSectionTitle(title: "Connected training history")
                 HCCard {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("IMPORTED ACTIVITY SOURCES")
+                            .font(HCDesign.label(10))
+                            .foregroundStyle(HCDesign.secondary)
+                        ForEach(
+                            Array(Dictionary(grouping: coach.trainingActivities,
+                                            by: { IMUNDataProvenance.provider($0.source) })
+                                .keys).sorted(), id: \.self) { provider in
+                            let rows = coach.trainingActivities.filter {
+                                IMUNDataProvenance.provider($0.source) == provider
+                            }
+                            HStack {
+                                Text(provider)
+                                    .font(.system(size: 13, weight: .medium))
+                                Spacer()
+                                Text("\(rows.count) sessions")
+                                    .font(.system(size: 12))
+                                    .foregroundStyle(HCDesign.secondary)
+                            }
+                        }
+                        Text("A missing day from any device is unknown. Imported record counts may exclude workouts kept only inside WHOOP or Garmin Connect.")
+                            .font(.system(size: 11))
+                            .foregroundStyle(HCDesign.secondary)
+                    }
+                }
+                HCCard {
                     VStack(alignment: .leading, spacing: 13) {
                         HStack(spacing: 8) {
                             HCMetricBlock(label: "Working sets",
