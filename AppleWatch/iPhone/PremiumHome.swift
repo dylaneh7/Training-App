@@ -4572,7 +4572,55 @@ private struct PremiumCoachConversation: View {
 
     private var composer: some View {
         VStack(spacing: 9) {
-            HStack(alignment: .bottom, spacing: 8) {
+            if !pendingAttachments.isEmpty {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 7) {
+                        ForEach(pendingAttachments) { item in
+                            HStack(spacing: 6) {
+                                Image(systemName: item.kind == "image" ?
+                                      "photo" : "doc.text")
+                                Text(item.name).lineLimit(1)
+                                Button {
+                                    pendingAttachments.removeAll { $0.id == item.id }
+                                } label: {
+                                    Image(systemName: "xmark.circle.fill")
+                                }
+                                .buttonStyle(.plain)
+                                .accessibilityLabel("Remove " + item.name)
+                            }
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(HCDesign.ink)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 8)
+                            .background(HCDesign.raised,
+                                        in: Capsule())
+                        }
+                    }
+                }
+            }
+            if let attachmentError {
+                Text(attachmentError)
+                    .font(.system(size: 11))
+                    .foregroundStyle(HCDesign.caution)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            HStack(alignment: .bottom, spacing: 6) {
+                Button {
+                    showFileImporter = true
+                } label: {
+                    Image(systemName: "paperclip")
+                        .font(.system(size: 17, weight: .medium))
+                        .frame(width: 31, height: 43)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Attach a workout file")
+                PhotosPicker(selection: $selectedPhoto, matching: .images) {
+                    Image(systemName: "photo.on.rectangle")
+                        .font(.system(size: 17, weight: .medium))
+                        .frame(width: 31, height: 43)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Attach a training photo")
                 TextField("Message IsAIah…", text: $question, axis: .vertical)
                     .lineLimit(1...5)
                     .focused($composerFocused)
