@@ -136,7 +136,7 @@ enum IMUNWearablePlacementStore {
         for (id, raw) in payload {
             guard IMUNWearableCatalog.devices.contains(where: { $0.id == id }),
                   let location = IMUNWearableLocation(rawValue: raw) else { continue }
-            if self.location(id, defaults: defaults) != location {
+            if defaults.string(forKey: key(id)) != location.rawValue {
                 save(location, for: id, defaults: defaults)
                 changed = true
             }
