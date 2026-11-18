@@ -37,6 +37,16 @@ struct HCGuidedSetChoice: Codable, Equatable {
     let setNumber: Int
 }
 
+/// Persist only the editable per-set count and manual override. Recovering from
+/// suspension or relaunch must never silently invent missed sensor cycles.
+private struct HCMotionRepDraft: Codable {
+    let workoutID: String
+    let exerciseID: String
+    let startedAt: Date
+    var count: Int
+    var manuallyCorrected: Bool
+}
+
 /// Lightweight on-Watch motion-cycle estimator for active strength sets.
 /// This is explicitly experimental: it detects rhythmic wrist motion, not a
 /// verified completed repetition. It does not write sets or transmit samples.
@@ -54,6 +64,7 @@ private final class HCMotionRepEstimator {
     var onEstimate: ((Int, Double?) -> Void)?
 
     var isAvailable: Bool { manager.isDeviceMotionAvailable }
+    var isActive: Bool { manager.isDeviceMotionActive }
 
     func start() -> Bool {
         stop()
@@ -195,6 +206,9 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
     @Published private(set) var completedRuns: [HCRunFinished] = []
     @Published private(set) var liftClock: HCTrainingClock?
     @Published private(set) var motionEstimatedReps = 0
+    @Published private(set) var activeEditableReps: Int?
+    @Published private(set) var activeRepsManuallyCorrected = false
+    private var activeRepDraft: HCMotionRepDraft?
     @Published private(set) var motionRepStatus = "Motion rep estimates are off"
     @Published private(set) var motionLastRepPeriod: Double?
     @Published private(set) var lastSetMotionNote: String?
@@ -274,9 +288,19 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
     override init() {
         super.init()
         repEstimator.onEstimate = { [weak self] reps, secondsPerRep in
-            self?.motionEstimatedReps = reps
-            self?.motionLastRepPeriod = secondsPerRep
-            self?.motionRepStatus = "Apple Watch wrist cycles · editable rep count"
+            guard let self else { return }
+            self.motionEstimatedReps = reps
+            self.motionLastRepPeriod = secondsPerRep
+            if var draft = self.activeRepDraft,
+               !draft.manuallyCorrected,
+               self.motionCanTrackActiveSide,
+               self.liftClock?.setStartedAt == draft.startedAt {
+                draft.count = min(100, reps)
+                self.publishRepDraft(draft)
+            }
+            self.motionRepStatus = self.activeRepsManuallyCorrected ?
+                "Manual rep correction locked for this set" :
+                "Apple Watch wrist cycles · editable rep count"
         }
         if UserDefaults.standard.bool(forKey: "hcWatchRestNotifications") {
             restNotificationStatus =
@@ -811,6 +835,7 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
         let undo = HCWorkoutUndo.workout(workout, startedAt: clock.startedAt)
         cancelBackgroundRestAlert()
         endRepEstimate()
+        clearRepDraft()
         liftClock = nil
         selectedGuidedSet = nil
         queuedNextGuidedSet = nil
@@ -1057,8 +1082,33 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
     /// a live source even if the user has configured its worn side.
     var whoopMotionAvailable: Bool { false }
 
+    private func publishRepDraft(_ draft: HCMotionRepDraft) {
+        activeRepDraft = draft
+        activeEditableReps = draft.count
+        activeRepsManuallyCorrected = draft.manuallyCorrected
+        save(draft, name: "motion-rep-draft.json")
+    }
+
+    func adjustActiveReps(by change: Int) {
+        guard let clock = liftClock, clock.setStartedAt != nil,
+              var draft = activeRepDraft,
+              clock.setStartedAt == draft.startedAt,
+              clock.setExerciseID == draft.exerciseID else { return }
+        draft.count = min(100, max(0, draft.count + change))
+        draft.manuallyCorrected = true
+        publishRepDraft(draft)
+        motionRepStatus = "Manual rep correction locked for this set"
+    }
+
+    private func clearRepDraft() {
+        activeRepDraft = nil
+        activeEditableReps = nil
+        activeRepsManuallyCorrected = false
+        try? FileManager.default.removeItem(at:
+            directory.appendingPathComponent("motion-rep-draft.json"))
+    }
+
     private func beginRepEstimate() {
-        motionEstimatedReps = 0
         motionLastRepPeriod = nil
         lastSetMotionNote = nil
         guard motionRepEnabled else {
@@ -1071,16 +1121,37 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
             repEstimator.stop()
             return
         }
+        guard let clock = liftClock, let started = clock.setStartedAt,
+              let id = clock.setExerciseID else {
+            repEstimator.stop()
+            return
+        }
+        if let existing = activeRepDraft ?? load("motion-rep-draft.json"),
+           existing.workoutID == clock.workoutID,
+           existing.exerciseID == id, existing.startedAt == started {
+            if repEstimator.isActive { return }
+            // We cannot reconstruct cycles missed while watchOS suspended;
+            // preserve the saved count without restarting at one.
+            var frozen = existing
+            frozen.manuallyCorrected = true
+            publishRepDraft(frozen)
+            motionRepStatus = "Count restored after interruption · adjust manually"
+            return
+        }
+        motionEstimatedReps = 0
+        let draft = HCMotionRepDraft(workoutID: clock.workoutID,
+            exerciseID:id,startedAt:started,count:0,manuallyCorrected:false)
+        publishRepDraft(draft)
         motionRepStatus = repEstimator.start()
             ? "Counting wrist-motion cycles · check reps before saving"
-            : "Motion data unavailable · enter reps manually"
+            : "Motion unavailable · enter reps manually"
     }
 
     private func endRepEstimate() {
         repEstimator.stop()
     }
 
-    /// Called when the Watch Settings toggle changes mid-workout.
+    /// Called when motion or device-position preferences change mid-session.
     func refreshMotionRepPreference() {
         if motionRepEnabled, liftClock?.setStartedAt != nil {
             beginRepEstimate()
@@ -1241,6 +1312,7 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
     func endLifting() {
         guard var clock = liftClock, clock.isActive, clock.setStartedAt == nil else { return }
         endRepEstimate()
+        clearRepDraft()
         if let paused = clock.pausedAt {
             clock.pausedSeconds += Date().timeIntervalSince(paused)
             clock.pausedAt = nil
@@ -1307,6 +1379,7 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
     func cancelSet() {
         guard var clock = liftClock, clock.setStartedAt != nil else { return }
         endRepEstimate()
+        clearRepDraft()
         clock.setStartedAt = nil
         clock.setExerciseID = nil
         clock.setNumber = nil
@@ -1351,6 +1424,7 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
         entry.side = exercise.side(forSet: setNumber)
         entry.motionInsight = motionInsight
         lastSetMotionNote = motionInsight?.note
+        clearRepDraft()
         sets.append(entry)
         save(sets, name: "sets.json")
         uploadPendingCloudSets()
