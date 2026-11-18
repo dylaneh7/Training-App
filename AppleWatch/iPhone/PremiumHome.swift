@@ -4799,6 +4799,49 @@ private struct HCEitanPrimaryWearableSelector: View {
     }
 }
 
+/// Kept separate from the large Settings view for fast SwiftUI type-checking.
+private struct HCEitanCloudSyncControls: View {
+    @EnvironmentObject private var coach: PhoneWorkoutBridge
+    @Binding var consent: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Divider()
+            Toggle(isOn: $consent) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Private EITAN cloud sync")
+                        .font(.system(size: 14, weight: .semibold))
+                    Text("Use when Apple Watch says Phone not connected. Optional: publish today's EITAN score, derived factors and coaching summary to your private iMun account for the signed-in Watch to download over the internet.")
+                        .font(.system(size: 11))
+                        .foregroundStyle(HCDesign.secondary)
+                }
+            }
+            .tint(HCDesign.electric)
+            Text(consent
+                 ? "Both devices must use the same iMun account. Switching this off clears the stored EITAN health snapshot when your iPhone can reach the cloud."
+                 : "Off by default. EITAN stays on-device; regular workout cloud sync is unaffected.")
+                .font(.system(size: 11))
+                .foregroundStyle(HCDesign.secondary)
+            Text(coach.eitanCloudSyncStatus)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(HCDesign.electric)
+                .fixedSize(horizontal: false, vertical: true)
+            Button {
+                coach.refreshEitanCloudSync(force: true)
+            } label: {
+                Label(consent ? "Publish EITAN for my Watch" :
+                      "Confirm stored EITAN is cleared",
+                      systemImage: "icloud.and.arrow.up")
+            }
+            .buttonStyle(.bordered)
+            .tint(HCDesign.electric)
+            Text("Private Watch sync does not send EITAN to the AI chat. IsAIah still needs separate permission before any Health data is shared with its online conversation.")
+                .font(.system(size: 11))
+                .foregroundStyle(HCDesign.secondary)
+        }
+    }
+}
+
 // All original settings and integrations remain available through the Coach gear.
 private struct PremiumSettingsPage: View {
     @EnvironmentObject private var coach: PhoneWorkoutBridge
@@ -4932,39 +4975,7 @@ private struct PremiumSettingsPage: View {
                                     .font(.system(size: 11))
                                     .foregroundStyle(HCDesign.secondary)
                             }
-                            Divider()
-                            Toggle(isOn: $eitanCloudConsent) {
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text("Private EITAN cloud sync")
-                                        .font(.system(size: 14, weight: .semibold))
-                                    Text("Recommended when Apple Watch says Phone not connected. Optional: publishes today's EITAN score, derived factors and coaching summary to your private iMun account so your signed-in Watch can download them over the internet.")
-                                        .font(.system(size: 11))
-                                        .foregroundStyle(HCDesign.secondary)
-                                }
-                            }
-                            .tint(HCDesign.electric)
-                            Text(eitanCloudConsent
-                                 ? "Requires both devices signed into the same iMun account. Switching this off clears your stored EITAN health snapshot from the cloud when your iPhone is online."
-                                 : "Off by default. Health-derived EITAN data stays on your devices; ordinary workout cloud sync is unaffected.")
-                                .font(.system(size: 11))
-                                .foregroundStyle(HCDesign.secondary)
-                            Text(coach.eitanCloudSyncStatus)
-                                .font(.system(size: 11, weight: .medium))
-                                .foregroundStyle(HCDesign.electric)
-                                .fixedSize(horizontal: false, vertical: true)
-                            Button {
-                                coach.refreshEitanCloudSync(force: true)
-                            } label: {
-                                Label(eitanCloudConsent ?
-                                      "Publish EITAN for my Watch" :
-                                      "Confirm stored EITAN is cleared",
-                                      systemImage: "icloud.and.arrow.up")
-                            }
-                            .buttonStyle(.bordered)
-                            .tint(HCDesign.electric)
-                            Text("IsAIah still receives Health readings only when you separately opt in before sending a chat message. The private Watch sync does not send data to the AI chat.")
-                                .font(.system(size: 11))
-                                .foregroundStyle(HCDesign.secondary)
+                            HCEitanCloudSyncControls(consent: $eitanCloudConsent)
                             Divider()
                             Text(coach.eitanWatchSyncStatus)
                                 .font(.system(size: 11))
