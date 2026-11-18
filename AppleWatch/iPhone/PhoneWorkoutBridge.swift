@@ -1715,6 +1715,29 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
 
     /// Only one dated snapshot describes today's plan for BOTH devices.
     /// Never send a previously selected day's workout as today's Watch plan.
+    /// Motion-device placement can be changed on either device. Only the
+    /// newer timestamp wins; invalid placement values never enter defaults.
+    private func receiveWatchMotionPreferences(_ packet: [String: Any]) {
+        guard let stamp = packet["hcMotionPreferenceTimestamp"] as? Double,
+              stamp.isFinite && stamp > UserDefaults.standard.double(
+                  forKey:"hcMotionPreferenceTimestamp") else { return }
+        let prefs = UserDefaults.standard
+        if let value = packet["hcWatchWearSide"] as? String,
+           ["unknown","left","right"].contains(value) {
+            prefs.set(value,forKey:"hcWatchWearSide")
+        }
+        if let value = packet["hcWhoopWearSide"] as? String,
+           ["off","left","right","other"].contains(value) {
+            prefs.set(value,forKey:"hcWhoopWearSide")
+        }
+        for key in ["hcWatchMotionRepEstimate",
+                    "hcWatchMotionRecognitionEnabled"] {
+            if let flag = packet[key] as? Bool { prefs.set(flag,forKey:key) }
+        }
+        prefs.set(stamp,forKey:"hcMotionPreferenceTimestamp")
+        sendToWatch()
+    }
+
     private func watchContext() throws -> [String: Any] {
         let today = HCPlanBuilder.dateString(Date())
         let state = !signedIn ? "signedOut" :
@@ -2387,6 +2410,13 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
         guard let kind = message[HCPayload.kind] as? String else {
             replyHandler([:]); return
         }
+        if kind == "imunMotionPreferencesV1" {
+            DispatchQueue.main.async {
+                self.receiveWatchMotionPreferences(message)
+                replyHandler(["received": true])
+            }
+            return
+        }
         if kind == HCPayload.progressCloudChanged {
             DispatchQueue.main.async {
                 if message["date"] as? String ==
@@ -2546,6 +2576,12 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
     }
 
     func session(_ session: WCSession, didReceiveUserInfo userInfo: [String: Any] = [:]) {
+        if userInfo[HCPayload.kind] as? String == "imunMotionPreferencesV1" {
+            DispatchQueue.main.async {
+                self.receiveWatchMotionPreferences(userInfo)
+            }
+            return
+        }
         if userInfo[HCPayload.kind] as? String == HCPayload.eitanRequest {
             DispatchQueue.main.async { self.sendEitanToWatch(forceQueue: true) }
             return
