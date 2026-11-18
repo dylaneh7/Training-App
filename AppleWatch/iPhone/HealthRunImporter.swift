@@ -84,6 +84,11 @@ final class HCRunHealthImporter: ObservableObject {
     }
 
     func startIfAuthorized() {
+        // Health catalog permission includes workout-read authorization.
+        // Start the local importer when that existing user grant is enabled.
+        if !enabled && UserDefaults.standard.bool(forKey: "hcHealthCatalogEnabled") {
+            enabled = true
+        }
         guard enabled else { return }
         guard HKHealthStore.isHealthDataAvailable() else {
             status = "Apple Health requires a physical iPhone."
