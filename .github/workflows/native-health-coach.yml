@@ -53,6 +53,7 @@ jobs:
           swiftc \
             AppleWatch/Shared/WorkoutModels.swift \
             AppleWatch/Shared/ProgramCatalog.swift \
+            AppleWatch/Shared/HCSetReconciliation.swift \
             AppleWatch/Tests/main.swift \
             -o /tmp/health-coach-progression-tests
           /tmp/health-coach-progression-tests

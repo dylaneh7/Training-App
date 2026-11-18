@@ -63,7 +63,7 @@ jobs:
           PY
       - name: Test exercise progression
         run: |
-          swiftc AppleWatch/Shared/WorkoutModels.swift AppleWatch/Shared/ProgramCatalog.swift AppleWatch/Tests/main.swift -o /tmp/hc-progression
+          swiftc AppleWatch/Shared/WorkoutModels.swift AppleWatch/Shared/ProgramCatalog.swift AppleWatch/Shared/HCSetReconciliation.swift AppleWatch/Tests/main.swift -o /tmp/hc-progression
           /tmp/hc-progression
       - name: Build Health Coach iPhone with embedded watch
         run: |

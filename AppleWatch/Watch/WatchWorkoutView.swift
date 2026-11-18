@@ -1014,7 +1014,7 @@ private struct WatchGuidedSession: View {
     @EnvironmentObject private var health: WatchHealthSession
     @AppStorage("hcWeightIncrement") private var increment = 5.0
     @AppStorage("hcAutoStartNextSet") private var autoStartNextSet = true
-    @AppStorage("hcWatchMotionRepEstimate") private var motionRepEnabled = false
+    @AppStorage("hcWatchMotionRepEstimate") private var motionRepEnabled = true
     @State private var weight = 0.0
     @State private var hasWeight = false
     @State private var reps = 8
@@ -1035,6 +1035,12 @@ private struct WatchGuidedSession: View {
     }
     private var otherActive: Bool {
         store.liftClock?.setStartedAt != nil && !active
+    }
+    private var usingStoreRepDraft: Bool {
+        active && store.activeEditableReps != nil
+    }
+    private var displayedReps: Int {
+        usingStoreRepDraft ? (store.activeEditableReps ?? reps) : reps
     }
     private var nextSetToken: String {
         (current?.id ?? "none") + ":" + String(store.guidedSetNumber) + ":" + String(setCount)
@@ -1064,9 +1070,16 @@ private struct WatchGuidedSession: View {
                             .minimumScaleFactor(0.8)
                             .foregroundStyle(.white)
                         Spacer(minLength: 2)
-                        Text("\(store.guidedSetNumber)/\(current.prescribedSets)")
-                            .font(WTheme.metric(16))
-                            .foregroundStyle(WTheme.lime)
+                        VStack(alignment: .trailing, spacing: 2) {
+                            Text("\(store.guidedSetNumber)/\(current.prescribedSets)")
+                                .font(WTheme.metric(16))
+                                .foregroundStyle(WTheme.lime)
+                            if let side = current.side(forSet: store.guidedSetNumber) {
+                                Text(side.title.uppercased())
+                                    .font(WTheme.label(10))
+                                    .foregroundStyle(WTheme.aqua)
+                            }
+                        }
                     }
                     .padding(.bottom, 2)
 
@@ -1175,8 +1188,14 @@ private struct WatchGuidedSession: View {
                                                 showSetPicker = false
                                                 wHaptic(.click)
                                             } label: {
-                                                Image(systemName: done ? "checkmark" :
-                                                      chosen ? "arrow.forward" : "\(number).circle")
+                                                Group {
+                                                    if let side = movement.side(forSet: number) {
+                                                        Text("\(side == .left ? "L" : "R")\((number + 1) / 2)")
+                                                    } else {
+                                                        Image(systemName: done ? "checkmark" :
+                                                              chosen ? "arrow.forward" : "\(number).circle")
+                                                    }
+                                                }
                                                     .font(.system(size: 15, weight: .semibold))
                                                     .foregroundStyle(chosen && !done ?
                                                         WTheme.onAccent : done ? WTheme.muted : .white)
@@ -1188,6 +1207,7 @@ private struct WatchGuidedSession: View {
                                             .buttonStyle(.plain)
                                             .disabled(done || movement.prescribedSets < 1)
                                             .accessibilityLabel("\(movement.name) set \(number)" +
+                                                (movement.side(forSet: number).map { " · \($0.title)" } ?? "") +
                                                                 (done ? ", completed" : ", choose next"))
                                         }
                                     }
@@ -1295,55 +1315,53 @@ private struct WatchGuidedSession: View {
             )
             WQuickEditor(
                 title: "REPS",
-                value: String(reps),
+                value: String(displayedReps),
                 decrease: {
-                    reps = max(1, reps - 1)
+                    if usingStoreRepDraft {
+                        store.adjustActiveReps(by: -1)
+                    } else {
+                        reps = max(0, reps - 1)
+                    }
                     wHaptic(.click)
                 },
                 increase: {
-                    reps = min(100, reps + 1)
+                    if usingStoreRepDraft {
+                        store.adjustActiveReps(by: 1)
+                    } else {
+                        reps = min(100, reps + 1)
+                    }
                     wHaptic(.click)
                 }
             )
             if active && motionRepEnabled {
-                HStack(spacing: 7) {
+                HStack(spacing: 6) {
                     Image(systemName: "waveform.path")
                         .foregroundStyle(WTheme.aqua)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("WRIST MOTION · \(store.motionEstimatedReps) EST.")
+                    Text(store.activeRepsManuallyCorrected ? "MANUAL REPS LOCKED" :
+                        store.motionCanTrackActiveSide ?
+                        "LIVE WATCH COUNT · EDITABLE" :
+                        "WORKING WRIST NOT TRACKED")
+                        .font(WTheme.label(9))
+                        .foregroundStyle(WTheme.muted)
+                    Spacer(minLength: 2)
+                    if let period = store.motionLastRepPeriod {
+                        Text(String(format: "%.1f s", period))
                             .font(WTheme.label(10))
                             .foregroundStyle(WTheme.aqua)
-                        Text(store.motionRepStatus)
-                            .font(.system(size: 9))
-                            .foregroundStyle(WTheme.muted)
-                            .lineLimit(2)
-                    }
-                    Spacer(minLength: 2)
-                    if (1...100).contains(store.motionEstimatedReps) {
-                        Button {
-                            reps = store.motionEstimatedReps
-                            wHaptic(.click)
-                        } label: {
-                            Text("USE")
-                                .font(WTheme.label(10))
-                                .padding(.horizontal, 8)
-                                .padding(.vertical, 7)
-                                .background(WTheme.aqua.opacity(0.18),
-                                            in: RoundedRectangle(cornerRadius: 8))
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel("Use estimated \(store.motionEstimatedReps) reps")
                     }
                 }
-                .padding(8)
-                .background(WTheme.panel,
-                            in: RoundedRectangle(cornerRadius: 10))
+                .padding(.vertical, 5)
+                if let recognized = store.motionRecognitionHint {
+                    Text(recognized)
+                        .font(.system(size: 10))
+                        .foregroundStyle(WTheme.aqua)
+                }
             }
             Button {
                 if active {
                     let saved = store.stopSet(for: exercise,
                                               weightLb: hasWeight ? weight : nil,
-                                              reps: reps, rir: Double(rir))
+                                              reps: displayedReps, rir: Double(rir))
                     if saved {
                         wHaptic(.success)
                     }
@@ -1504,7 +1522,16 @@ private struct WatchPreferences: View {
     @AppStorage("hcWatchHaptics") private var haptics = true
     @AppStorage("hcWatchSetStartHaptics") private var setStartHaptics = true
     @AppStorage("hcWatchRestCompleteHaptics") private var restCompleteHaptics = true
-    @AppStorage("hcWatchMotionRepEstimate") private var motionRepEstimate = false
+    @AppStorage("hcWatchMotionRepEstimate") private var motionRepEstimate = true
+    @AppStorage("hcWatchMotionRecognitionEnabled") private var motionRecognition = false
+    @AppStorage("hcWatchWearSide") private var watchWearSide = "unknown"
+    @AppStorage("hcWhoopWearSide") private var whoopWearSide = "off"
+
+    private func motionSettingsChanged() {
+        UserDefaults.standard.set(Date().timeIntervalSince1970,
+                                  forKey: "hcMotionPreferenceTimestamp")
+        store.publishMotionPreferences()
+    }
 
     var body: some View {
         List {
@@ -1640,17 +1667,48 @@ private struct WatchPreferences: View {
                             .foregroundStyle(WTheme.muted)
                     }
                 }
-                Toggle("Estimate reps from wrist movement",
+                Toggle("Automatically count wrist-motion reps",
                        isOn: $motionRepEstimate)
                     .tint(WTheme.lime)
                     .onChange(of: motionRepEstimate) { _, _ in
-                        store.refreshMotionRepPreference()
+                        motionSettingsChanged()
                     }
-                Text("Experimental: detects repeated wrist movements during a set. You can tap USE to apply the estimate, or enter your actual reps manually. Never saves estimated reps automatically.")
+                Text("Motion counts fill the normal reps field. Editing + / − locks your correction for the rest of that set. You still save the set.")
+                    .font(.caption2)
+                    .foregroundStyle(WTheme.muted)
+                Toggle("Learn exercise patterns from saved sets",
+                       isOn: $motionRecognition)
+                    .tint(WTheme.lime)
+                    .onChange(of: motionRecognition) { _, _ in
+                        motionSettingsChanged()
+                    }
+                Text("Experimental: after several labeled sets of at least two exercises, iMun can suggest a possible movement match. It never changes your workout automatically.")
                     .font(.caption2)
                     .foregroundStyle(WTheme.muted)
                 Text("Running voice cues and automatic miles remain in the Run screen.")
                     .font(.caption2).foregroundStyle(WTheme.muted)
+            }
+            Section("WEARABLE POSITION") {
+                Picker("Apple Watch wrist", selection: $watchWearSide) {
+                    Text("Choose wrist").tag("unknown")
+                    Text("Left").tag("left")
+                    Text("Right").tag("right")
+                }
+                .onChange(of: watchWearSide) { _, _ in
+                    motionSettingsChanged()
+                }
+                Picker("WHOOP position", selection: $whoopWearSide) {
+                    Text("Not worn").tag("off")
+                    Text("Left wrist").tag("left")
+                    Text("Right wrist").tag("right")
+                    Text("Other position").tag("other")
+                }
+                .onChange(of: whoopWearSide) { _, _ in
+                    motionSettingsChanged()
+                }
+                Text("Apple Watch supplies live wrist motion. WHOOP position is recorded, but live WHOOP motion is unavailable through its official developer API.")
+                    .font(.caption2)
+                    .foregroundStyle(WTheme.muted)
             }
             WatchConnectivityDiagnostics()
         }

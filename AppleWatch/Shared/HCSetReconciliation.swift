@@ -155,7 +155,8 @@ enum HCSetReconciliation {
 
     static func decodeCloudRows(_ rows: [[String: Any]],
                                 workout: HCWorkout) -> [HCLoggedSet] {
-        let exercises = Set(workout.exercises.map(\.id))
+        let exercises = Dictionary(uniqueKeysWithValues:
+            workout.exercises.map { ($0.id, $0) })
         return rows.compactMap { row -> HCLoggedSet? in
             guard let rawID = row["id"] as? String,
                   let id = UUID(uuidString: rawID),
@@ -163,14 +164,14 @@ enum HCSetReconciliation {
                   let session = row["session_key"] as? String,
                   session == workout.sessionKey,
                   let exerciseID = row["exercise_id"] as? String,
-                  exercises.contains(exerciseID),
+                  let exercise = exercises[exerciseID],
                   let number = (row["set_index"] as? NSNumber)?.intValue, number > 0,
                   let reps = (row["reps"] as? NSNumber)?.intValue, reps > 0,
                   let recorded = row["completed_at"] as? String,
                   let completedAt = cloudDate(recorded),
                   let position = (row["exercise_index"] as? NSNumber)?.intValue
             else { return nil }
-            let entry = HCLoggedSet(id: id, workoutID: workout.id,
+            var entry = HCLoggedSet(id: id, workoutID: workout.id,
                 workoutDate: date, sessionKey: session,
                 workoutTitle: row["workout_title"] as? String ?? workout.title,
                 exerciseID: exerciseID,
@@ -183,6 +184,16 @@ enum HCSetReconciliation {
                 startedAt: (row["started_at"] as? String).flatMap(cloudDate),
                 durationSeconds: (row["duration_seconds"] as? NSNumber)?.doubleValue,
                 source: row["source"] as? String)
+            let storedSide = (row["working_side"] as? String)
+                .flatMap(HCWorkingSide.init(rawValue:))
+            entry.side = storedSide ?? exercise.side(forSet: number)
+            if let raw = row["motion_insight"],
+               !(raw is NSNull),
+               let data = try? JSONSerialization.data(withJSONObject: raw),
+               let insight = try? JSONDecoder().decode(
+                    HCMotionSetInsight.self, from: data) {
+                entry.motionInsight = insight
+            }
             return entry
         }
     }

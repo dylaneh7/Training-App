@@ -3,6 +3,40 @@ import CryptoKit
 
 // MARK: - Data shared by the iPhone and the watch
 
+enum HCWorkingSide: String, Codable, Hashable {
+    case left, right
+    var title: String { self == .left ? "Left" : "Right" }
+}
+
+/// On-device wrist-motion observations, not measured joint range or form.
+struct HCMotionSetInsight: Codable, Hashable {
+    var source: String = "Apple Watch"
+    var wearSide: String
+    var detectedReps: Int
+    var averageCycleSeconds: Double?
+    var lastCycleSeconds: Double?
+    var lastCycleSlowdownPercent: Double?
+    var lastWristMotionIntensityChangePercent: Double?
+    var note: String
+    /// Compact derived per-cycle summaries only, not raw IMU data.
+    var cycleSeconds: [Double]? = nil
+    var cycleWristMotionPeaks: [Double]? = nil
+    var cycleTimingVariabilityPercent: Double? = nil
+    /// Gyroscope magnitude and integrated wrist rotation, NOT bar velocity
+    /// or joint angle. Interpret only across comparable sets and placement.
+    var peakWristRotationDegreesPerSecond: Double? = nil
+    var meanWristRotationDegrees: Double? = nil
+    var wristRotationConsistencyPercent: Double? = nil
+    var repTempoConsistencyPercent: Double? = nil
+    var wristMotionConsistencyScore: Double? = nil
+    var relativeMotionIntensityIndex: Double? = nil
+    var estimatedOneRepMaxLb: Double? = nil
+    var repActivePhaseSeconds: [Double]? = nil
+    var cycleWristRotationDegrees: [Double]? = nil
+    var lastWristRotationChangePercent: Double? = nil
+}
+
+
 struct HCExercise: Codable, Identifiable, Hashable {
     let id: String
     let name: String
@@ -14,6 +48,38 @@ struct HCExercise: Codable, Identifiable, Hashable {
     let suggestedWeightLb: Double?
     let restSeconds: Int
     var instructions: String? = nil
+    /// For names that do not unambiguously identify a unilateral movement.
+    var movementType: String? = nil
+
+    static func isOneSidedName(_ name: String) -> Bool {
+        let n = name.lowercased().replacingOccurrences(of: "-", with: " ")
+            .replacingOccurrences(of: "—", with: " ")
+        return ["one arm", "single arm", "one hand", "single hand",
+                "one leg", "single leg", "bulgarian split squat",
+                "split squat", "unilateral ", "single sided",
+                "flat bench dumbbell row", "flat bench dumbell row",
+                "flat bench db row"].contains(where: { n.contains($0) })
+    }
+
+    var isUnilateral: Bool {
+        if movementType == "unilateral" { return true }
+        if movementType == "bilateral" { return false }
+        return Self.isOneSidedName(name)
+    }
+
+    /// Numbered slots alternate left / right. Six slots = three per side.
+    func side(forSet number: Int) -> HCWorkingSide? {
+        guard isUnilateral, number > 0 else { return nil }
+        return number.isMultiple(of: 2) ? .right : .left
+    }
+
+    var setSummary: String {
+        guard isUnilateral else { return "\(prescribedSets) sets" }
+        guard prescribedSets.isMultiple(of: 2) else {
+            return "\(prescribedSets) total · adjust for even side split"
+        }
+        return "\(prescribedSets) total · \(prescribedSets / 2) per side"
+    }
 
     var repDescription: String { "\(repMin)–\(repMax)" }
 }
@@ -57,6 +123,8 @@ struct HCLoggedSet: Codable, Identifiable, Hashable {
     var startedAt: Date? = nil
     var durationSeconds: Double? = nil
     var source: String? = nil
+    var side: HCWorkingSide? = nil
+    var motionInsight: HCMotionSetInsight? = nil
 }
 
 /// A running step that can be displayed on both iPhone and iMun Watch.

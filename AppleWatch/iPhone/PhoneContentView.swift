@@ -139,7 +139,7 @@ private struct StrengthHome: View {
                             VStack(alignment: .leading, spacing: 5) {
                                 Text(exercise.name).font(.body.weight(.semibold))
                                 HStack {
-                                    Text("\(exercise.prescribedSets) sets × \(exercise.repDescription)")
+                                    Text("\(exercise.setSummary) × \(exercise.repDescription)")
                                     Spacer()
                                     let suggestion = coach.suggestion(for: exercise, on:session.date,
                                                                        aggressive:aggressive)
@@ -182,13 +182,17 @@ private struct StrengthHome: View {
                 guard index <= 40 else { return }
                 let draft = HCExercise(
                     id:UUID().uuidString,name:item.name,originalName:item.name,
-                    exerciseIndex:index,prescribedSets:3,repMin:8,repMax:12,
+                    exerciseIndex:index,
+                    prescribedSets:HCExercise.isOneSidedName(item.name) ? 6 : 3,
+                    repMin:8,repMax:12,
                     suggestedWeightLb:nil,restSeconds:120
                 )
                 let suggestion = coach.suggestion(for:draft,on:plan.date,aggressive:aggressive)
                 var added = HCExercise(
                     id:draft.id,name:item.name,originalName:item.name,
-                    exerciseIndex:index,prescribedSets:3,repMin:8,repMax:12,
+                    exerciseIndex:index,
+                    prescribedSets:HCExercise.isOneSidedName(item.name) ? 6 : 3,
+                    repMin:8,repMax:12,
                     suggestedWeightLb:suggestion.weightLb,restSeconds:120
                 )
                 added.instructions = item.instructions
@@ -242,9 +246,16 @@ struct StrengthExerciseDetails: View {
     @State private var newWeight = ""
     @State private var newReps = 8
     @State private var newRIR = 2
+    @State private var workingSide: HCWorkingSide = .left
+    @State private var movementMode = "auto"
     @State private var showSwap = false
     @State private var editingSet: HCLoggedSet?
 
+    private var oneSidedMode: Bool {
+        movementMode == "unilateral" ||
+        (movementMode == "auto" &&
+         HCExercise.isOneSidedName(exercise?.name ?? ""))
+    }
     private var plan: HCWorkout? { coach.workout }
     private var exercise: HCExercise? {
         plan?.exercises.first { $0.id == exerciseID }
@@ -293,7 +304,25 @@ struct StrengthExerciseDetails: View {
                 }
 
                 Section("Plan Editor") {
-                    Stepper("Working sets: \(sets)",value:$sets,in:1...12)
+                    Picker("Movement pattern", selection: $movementMode) {
+                        Text("Auto detect").tag("auto")
+                        Text("Both sides together").tag("bilateral")
+                        Text("One side at a time").tag("unilateral")
+                    }
+                    .onChange(of: movementMode) { _, _ in
+                        if oneSidedMode && !sets.isMultiple(of: 2) {
+                            sets *= 2
+                        }
+                    }
+                    Stepper(oneSidedMode ?
+                            "Total sets: \(sets) (\(sets / 2) per side)" :
+                            "Working sets: \(sets)",
+                            value:$sets, in:oneSidedMode ? 2...24 : 1...12,
+                            step:oneSidedMode ? 2 : 1)
+                    if oneSidedMode {
+                        Text("Six total sets means three left + three right.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
                     Stepper("Minimum reps: \(minimum)",value:$minimum,in:1...30)
                     Stepper("Maximum reps: \(maximum)",value:$maximum,in:minimum...40)
                     Stepper("Rest: \(rest) seconds",value:$rest,in:15...360,step:15)
@@ -319,6 +348,12 @@ struct StrengthExerciseDetails: View {
                     }
                     TextField("Actual weight lb (leave empty for unrecorded)",text:$newWeight)
                         .keyboardType(.decimalPad)
+                    if exercise.isUnilateral {
+                        Picker("Working side", selection: $workingSide) {
+                            Text("Left").tag(HCWorkingSide.left)
+                            Text("Right").tag(HCWorkingSide.right)
+                        }
+                    }
                     Stepper("Actual reps: \(newReps)",value:$newReps,in:1...60)
                     Stepper("Actual RIR: \(newRIR)",value:$newRIR,in:0...6)
                     if coach.phoneSessionStartedAt == nil {
@@ -330,7 +365,8 @@ struct StrengthExerciseDetails: View {
                     } else if coach.phoneSetExerciseID == exerciseID {
                         Button("Stop & Save Set") {
                             coach.logFromPhone(exercise:exercise,
-                                weightLb:Double(newWeight),reps:newReps,rir:Double(newRIR))
+                                weightLb:Double(newWeight),reps:newReps,rir:Double(newRIR),
+                                sideOverride:exercise.isUnilateral ? workingSide : nil)
                         }
                         .buttonStyle(.borderedProminent)
                         Button("Cancel Set",role:.destructive) { coach.cancelPhoneSet() }
@@ -340,7 +376,8 @@ struct StrengthExerciseDetails: View {
                     }
                     Button("Log Set Without Timer") {
                         coach.logFromPhone(exercise:exercise,
-                            weightLb:Double(newWeight),reps:newReps,rir:Double(newRIR))
+                            weightLb:Double(newWeight),reps:newReps,rir:Double(newRIR),
+                                sideOverride:exercise.isUnilateral ? workingSide : nil)
                     }
                     if coach.phoneRestEndsAt != nil {
                         Button("Skip Rest") { coach.skipPhoneRest() }
@@ -356,19 +393,27 @@ struct StrengthExerciseDetails: View {
                             editingSet = set
                         } label: {
                             HStack {
-                                Text("Set \(set.index)")
+                                Text("Set \(set.index)" +
+                                     (set.side.map { " · \($0.title)" } ?? ""))
                                 Spacer()
                                 Text("\(set.weightLb.map{$0.formatted()+" lb"} ?? "Unrecorded") × \(set.reps)")
                                 Image(systemName:"pencil")
                             }
                         }
+                        if let insight = set.motionInsight {
+                            Text("IsAIah motion note · " + insight.note)
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
                     }
                 }
             }
         }
-        .navigationTitle("Exercise")
+        .navigationTitle("MOVEMENT")
+        .scrollContentBackground(.hidden)
+        .background(HCDesign.canvas)
+        .tint(HCDesign.electric)
         .sheet(isPresented:$showSwap) {
-            ExerciseLibraryPicker { item in swapTo(item) }
+            ExerciseLibraryPicker(replacing: exercise) { item in swapTo(item) }
         }
         .sheet(item:$editingSet) { set in
             SetCorrectionSheet(entry:set)
@@ -379,7 +424,11 @@ struct StrengthExerciseDetails: View {
 
     private func loadFromExercise() {
         guard let e = exercise else { return }
-        sets=e.prescribedSets;minimum=e.repMin;maximum=e.repMax
+        sets=e.isUnilateral && !e.prescribedSets.isMultiple(of: 2) ?
+            e.prescribedSets * 2 : e.prescribedSets
+        minimum=e.repMin;maximum=e.repMax
+        movementMode=e.movementType ?? "auto"
+        workingSide=logged.count.isMultiple(of: 2) ? .left : .right
         rest=e.restSeconds
         weightText=e.suggestedWeightLb.map{$0.formatted()} ?? ""
         instructionText=e.instructions ?? HCExerciseLibrary.all.first {
@@ -405,6 +454,7 @@ struct StrengthExerciseDetails: View {
             repMin:minimum,repMax:max(maximum,minimum),
             suggestedWeightLb:Double(weightText),restSeconds:rest)
         updated.instructions=instructionText.isEmpty ? nil : instructionText
+        updated.movementType=movementMode == "auto" ? nil : movementMode
         update(updated)
     }
 
@@ -419,6 +469,16 @@ struct StrengthExerciseDetails: View {
             repMin:minimum,repMax:maximum,
             suggestedWeightLb:suggestion.weightLb,restSeconds:rest)
         swapped.instructions=item.instructions
+        swapped.movementType=nil
+        // Converting a bilateral movement into a unilateral one should
+        // create a left/right pair for each originally planned round.
+        if swapped.isUnilateral && !e.isUnilateral {
+            swapped = HCExercise(id:e.id,name:item.name,originalName:item.name,
+                exerciseIndex:e.exerciseIndex,prescribedSets:sets * 2,
+                repMin:minimum,repMax:maximum,
+                suggestedWeightLb:suggestion.weightLb,restSeconds:rest,
+                instructions:item.instructions)
+        }
         update(swapped)
         dismiss()
     }
@@ -468,89 +528,292 @@ private struct SetCorrectionSheet: View {
     }
 }
 
+/// Native iMun catalog browser, shared by the workout builder and Smart Swap.
+/// Recommendations are local and explainable: muscle + movement family +
+/// compatible equipment, never fabricated exercise equivalences.
 struct ExerciseLibraryPicker: View {
     @Environment(\.dismiss) private var dismiss
+    let replacing: HCExercise?
     let onSelect: (HCLibraryExercise) -> Void
-    @State private var search = ""
-    @State private var category = "All"
+    @State private var query = ""
+    @State private var group = "All"
+    @State private var movementKind = "All"
+    @State private var suggestedOnly = true
+    @State private var expandedID: String?
     @State private var showingCustom = false
     @State private var customName = ""
     @State private var customInstructions = ""
     @State private var customGroup = "Other"
 
-    private var results: [HCLibraryExercise] {
-        HCExerciseLibrary.all.filter { e in
-            (category == "All" || e.group == category) &&
-            (search.isEmpty || e.name.localizedCaseInsensitiveContains(search) ||
-                e.equipment.localizedCaseInsensitiveContains(search) ||
-                e.group.localizedCaseInsensitiveContains(search))
+    init(replacing: HCExercise? = nil,
+         onSelect: @escaping (HCLibraryExercise) -> Void) {
+        self.replacing = replacing
+        self.onSelect = onSelect
+        _suggestedOnly = State(initialValue: replacing != nil)
+    }
+
+    private var recommendations: [HCLibraryExercise] {
+        guard let replacing else { return [] }
+        return HCExerciseLibrary.alternatives(for: replacing, limit: 16)
+    }
+
+    private var filtered: [HCLibraryExercise] {
+        let pool = replacing != nil && suggestedOnly ?
+            recommendations : HCExerciseLibrary.all
+        return pool.filter { item in
+            (group == "All" || item.group == group) &&
+            (movementKind == "All" || item.kind.lowercased() == movementKind.lowercased()) &&
+            (query.isEmpty || [item.name, item.equipment, item.group,
+                               item.primaryLabel, item.instructions]
+                .contains(where: { $0.localizedCaseInsensitiveContains(query) }))
         }
+    }
+
+    private func pick(_ item: HCLibraryExercise) {
+        onSelect(item)
+        dismiss()
+    }
+
+    private func chip(_ text: String, selected: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(text.uppercased())
+                .font(.system(size: 10, weight: .bold, design: .rounded))
+                .tracking(0.6)
+                .foregroundStyle(selected ? HCDesign.canvas : HCDesign.secondary)
+                .padding(.horizontal, 13).padding(.vertical, 10)
+                .background(selected ? HCDesign.electric : HCDesign.card,
+                            in: Capsule())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func resultCard(_ item: HCLibraryExercise, recommended: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 11) {
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: "figure.strengthtraining.traditional")
+                    .font(.system(size: 17))
+                    .foregroundStyle(HCDesign.electric)
+                    .frame(width: 39, height: 39)
+                    .background(HCDesign.electric.opacity(0.10),
+                                in: RoundedRectangle(cornerRadius: 11))
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(item.name)
+                        .font(.system(size: 15, weight: .bold, design: .rounded))
+                        .foregroundStyle(HCDesign.ink)
+                    Text(item.primaryLabel + "  ·  " + item.equipment)
+                        .font(.system(size: 11))
+                        .foregroundStyle(HCDesign.secondary)
+                }
+                Spacer(minLength: 2)
+                if recommended {
+                    Image(systemName: "arrow.triangle.2.circlepath")
+                        .foregroundStyle(HCDesign.aqua)
+                }
+            }
+            Text(item.instructions)
+                .font(.system(size: 12))
+                .foregroundStyle(HCDesign.secondary)
+                .lineLimit(expandedID == item.id ? nil : 2)
+                .fixedSize(horizontal: false, vertical: true)
+            if expandedID == item.id {
+                if !item.formTip.isEmpty {
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text("FORM & CONTROL")
+                            .font(.system(size: 10, weight: .bold))
+                            .tracking(1.0).foregroundStyle(HCDesign.aqua)
+                        Text(item.formTip)
+                            .font(.system(size: 12))
+                            .foregroundStyle(HCDesign.ink)
+                    }
+                }
+                Text(item.difficulty.capitalized + "  ·  " + item.kind.capitalized)
+                    .font(.system(size: 10))
+                    .foregroundStyle(HCDesign.secondary)
+            }
+            HStack(spacing: 10) {
+                Button {
+                    expandedID = expandedID == item.id ? nil : item.id
+                } label: {
+                    Label(expandedID == item.id ? "LESS" : "HOW TO",
+                          systemImage: expandedID == item.id ? "chevron.up" : "book.closed")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(HCDesign.aqua)
+                        .padding(.vertical, 9)
+                }
+                .buttonStyle(.plain)
+                Spacer()
+                Button { pick(item) } label: {
+                    Label(replacing == nil ? "ADD" : "SWAP",
+                          systemImage: replacing == nil ? "plus" :
+                              "arrow.triangle.2.circlepath")
+                        .font(.system(size: 11, weight: .bold, design: .rounded))
+                        .padding(.horizontal, 15)
+                        .padding(.vertical, 10)
+                        .foregroundStyle(HCDesign.canvas)
+                        .background(HCDesign.electric, in: Capsule())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(14)
+        .background(HCDesign.card,
+                    in: RoundedRectangle(cornerRadius: 17))
+        .overlay(RoundedRectangle(cornerRadius: 17)
+            .strokeBorder(HCDesign.outline.opacity(0.65), lineWidth: 0.7))
     }
 
     var body: some View {
         NavigationStack {
-            List {
-                Picker("Muscle group",selection:$category) {
-                    ForEach(["All","Chest","Back","Shoulders","Arms","Legs","Traps","Core"],id:\.self) { Text($0) }
-                }
-                Button {
-                    showingCustom = true
-                } label: {
-                    Label("Create Custom Exercise",systemImage:"plus")
-                }
-                ForEach(results) { item in
-                    VStack(alignment:.leading,spacing:7) {
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 13) {
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text(replacing == nil ? "MOVEMENT LIBRARY" : "SMART SWAP")
+                            .font(.system(size: 25, weight: .heavy, design: .rounded))
+                            .tracking(0.4)
+                            .foregroundStyle(HCDesign.ink)
+                        Text(replacing == nil ?
+                             "\(HCExerciseLibrary.all.count) exercises, ready offline" :
+                             "Similar muscles · matched movement patterns")
+                            .font(.subheadline).foregroundStyle(HCDesign.secondary)
+                        if let replacing {
+                            Text("REPLACING  ·  " + replacing.name.uppercased())
+                                .font(.system(size: 10, weight: .bold))
+                                .foregroundStyle(HCDesign.aqua)
+                                .padding(.top, 6)
+                            if let best = recommendations.first {
+                                Button { pick(best) } label: {
+                                    HStack(spacing: 10) {
+                                        Image(systemName: "arrow.triangle.2.circlepath")
+                                        VStack(alignment: .leading, spacing: 2) {
+                                            Text("TOP MATCH").font(.system(size: 10, weight: .bold))
+                                            Text(best.name).font(.system(size: 15, weight: .bold))
+                                        }
+                                        Spacer()
+                                        Image(systemName: "arrow.right")
+                                    }
+                                    .foregroundStyle(HCDesign.canvas)
+                                    .padding(15)
+                                    .background(HCDesign.electric,
+                                                in: RoundedRectangle(cornerRadius: 14))
+                                }
+                                .buttonStyle(.plain)
+                                .padding(.top, 6)
+                            }
+                        }
+                    }
+                    HStack(spacing: 9) {
+                        Image(systemName: "magnifyingglass")
+                            .foregroundStyle(HCDesign.secondary)
+                        TextField("Search exercises, muscles or equipment", text: $query)
+                            .font(.system(size: 13))
+                            .foregroundStyle(HCDesign.ink)
+                            .tint(HCDesign.electric)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                        if !query.isEmpty {
+                            Button { query = "" } label: {
+                                Image(systemName: "xmark.circle.fill")
+                                    .foregroundStyle(HCDesign.secondary)
+                            }.buttonStyle(.plain)
+                        }
+                    }
+                    .padding(14)
+                    .background(HCDesign.card,
+                                in: RoundedRectangle(cornerRadius: 12))
+                    if replacing != nil {
                         HStack {
-                            Text(item.name).font(.headline)
-                            Spacer()
-                            Button("Select") {
-                                onSelect(item)
-                                dismiss()
+                            chip("Best matches", selected: suggestedOnly) {
+                                suggestedOnly = true
                             }
-                            .buttonStyle(.bordered)
-                        }
-                        Text("\(item.group) · \(item.equipment)")
-                            .font(.caption).foregroundStyle(.secondary)
-                        Text(item.instructions).font(.footnote)
-                    }
-                    .padding(.vertical,3)
-                }
-            }
-            .searchable(text:$search,prompt:"Search 50 exercises")
-            .navigationTitle("Exercise Library")
-            .sheet(isPresented:$showingCustom) {
-                NavigationStack {
-                    Form {
-                        TextField("Exercise name",text:$customName)
-                        TextField("Muscle group",text:$customGroup)
-                        Section("How to perform it") {
-                            TextEditor(text:$customInstructions).frame(minHeight:130)
-                        }
-                    }
-                    .navigationTitle("New Exercise")
-                    .toolbar {
-                        ToolbarItem(placement:.cancellationAction) {
-                            Button("Cancel") {showingCustom=false}
-                        }
-                        ToolbarItem(placement:.confirmationAction) {
-                            Button("Add") {
-                                let name=customName.trimmingCharacters(in:.whitespacesAndNewlines)
-                                guard !name.isEmpty else{return}
-                                onSelect(HCLibraryExercise(
-                                    name:name,group:customGroup,
-                                    equipment:"Custom",instructions:customInstructions))
-                                showingCustom=false
-                                dismiss()
+                            chip("Full library", selected: !suggestedOnly) {
+                                suggestedOnly = false
+                                group = "All"
                             }
                         }
                     }
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 7) {
+                            ForEach(HCExerciseLibrary.groups, id: \.self) { name in
+                                chip(name, selected: group == name) { group = name }
+                            }
+                        }
+                    }
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 7) {
+                            ForEach(["All", "strength", "stretching", "plyometrics",
+                                     "cardio", "strongman", "olympic weightlifting"],
+                                    id: \.self) { name in
+                                chip(name == "All" ? "Any style" : name,
+                                     selected: movementKind == name) {
+                                    movementKind = name
+                                }
+                            }
+                        }
+                    }
+                    HStack {
+                        Text("\(filtered.count) MOVEMENTS")
+                            .font(.system(size: 10, weight: .bold)).tracking(1)
+                            .foregroundStyle(HCDesign.secondary)
+                        Spacer()
+                        if replacing == nil {
+                            Button("CUSTOM +") { showingCustom = true }
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(HCDesign.aqua)
+                        }
+                    }
+                    if filtered.isEmpty {
+                        Text("No matches. Try clearing your muscle or style filters.")
+                            .font(.subheadline)
+                            .foregroundStyle(HCDesign.secondary)
+                            .padding(22)
+                    }
+                    ForEach(filtered) { item in
+                        resultCard(item, recommended: replacing != nil && suggestedOnly)
+                    }
+                    Text("Exercise instructions are informational. Start with appropriate loads and use a spotter where needed. Free Exercise DB content is public domain (Unlicense).")
+                        .font(.system(size: 10))
+                        .foregroundStyle(HCDesign.secondary)
+                        .padding(.vertical, 12)
                 }
+                .padding(18)
             }
+            .background(HCDesign.canvas.ignoresSafeArea())
+            .navigationTitle("")
             .toolbar {
-                ToolbarItem(placement:.cancellationAction) {
-                    Button("Close") { dismiss() }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("DONE") { dismiss() }
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundStyle(HCDesign.electric)
                 }
             }
+        }
+        .preferredColorScheme(.dark)
+        .sheet(isPresented: $showingCustom) {
+            NavigationStack {
+                Form {
+                    TextField("Exercise name", text: $customName)
+                    TextField("Muscle group", text: $customGroup)
+                    Section("Steps and form cues") {
+                        TextEditor(text: $customInstructions)
+                            .frame(minHeight: 130)
+                    }
+                    Button("SAVE MOVEMENT") {
+                        let name = customName.trimmingCharacters(in: .whitespacesAndNewlines)
+                        guard !name.isEmpty else { return }
+                        pick(HCLibraryExercise(name: name, group: customGroup,
+                             equipment: "Custom", instructions: customInstructions))
+                    }
+                }
+                .scrollContentBackground(.hidden)
+                .background(HCDesign.canvas)
+                .navigationTitle("Custom Movement")
+                .toolbar {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button("CANCEL") { showingCustom = false }
+                    }
+                }
+            }
+            .preferredColorScheme(.dark)
         }
     }
 }

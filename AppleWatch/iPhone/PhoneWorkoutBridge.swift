@@ -581,6 +581,13 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
             }
             let old = exercises[index]
             let completedCount = completed.filter { $0.exerciseID == old.id }.count
+            // Set-count edits use the same total-slot convention as the
+            // Watch. Reject impossible left/right prescriptions instead of
+            // dropping a side during a coach-generated workout edit.
+            guard !old.isUnilateral || edit.sets.isMultiple(of: 2) else {
+                status = "Use an even total for one-sided exercises (for example, six total sets for three per side)."
+                return nil
+            }
             guard edit.sets >= completedCount else {
                 status = "Cannot prescribe fewer sets than have already been recorded."
                 return nil
@@ -593,6 +600,7 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
                 suggestedWeightLb: edit.suggestedWeightLb,
                 restSeconds: edit.restSeconds)
             revised.instructions = old.instructions
+            revised.movementType = old.movementType
             exercises[index] = revised
         case .add:
             let nextIndex = (exercises.map(\.exerciseIndex).max() ?? -1) + 1
@@ -602,6 +610,11 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
                       $0.name.localizedCaseInsensitiveCompare(updatedName) == .orderedSame
                   }) else {
                 status = "Select a different exercise or check the plan's exercise limit."
+                return nil
+            }
+            guard !HCExercise.isOneSidedName(updatedName) ||
+                  edit.sets.isMultiple(of: 2) else {
+                status = "One-sided movements require even total sets (three per arm is six total)."
                 return nil
             }
             var created = HCExercise(
@@ -620,6 +633,11 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
                 return nil
             }
             let old = exercises[index]
+            guard !HCExercise.isOneSidedName(updatedName) ||
+                  edit.sets.isMultiple(of: 2) else {
+                status = "One-sided movements require equal left and right sets."
+                return nil
+            }
             var replacement = HCExercise(
                 id: old.id, name: updatedName,
                 originalName: updatedName,
@@ -663,6 +681,7 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
                     suggestedWeightLb: exercise.suggestedWeightLb,
                     restSeconds: exercise.restSeconds)
                 normalized.instructions = exercise.instructions
+                normalized.movementType = exercise.movementType
                 return normalized
             }
         }
@@ -1487,6 +1506,28 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
                          label, measured.count, miles, duration / 60 / miles)
                 : label + ": no measured pace records available")
         }
+        // Send compact per-set observations to IsAIah only after the athlete
+        // explicitly sends a coach message. Never upload raw sensor samples
+        // as chat context. Retain provenance and sensor limitations.
+        let recentMotion = combinedRecordedSets
+            .filter { $0.motionInsight != nil }
+            .sorted { $0.completedAt > $1.completedAt }
+            .prefix(24)
+        if !recentMotion.isEmpty {
+            lines.append("EXPERIMENTAL WATCH MOTION OBSERVATIONS: These are wrist-cycle estimates, not validated exercise form, joint ROM, actual barbell velocity, or power. WHOOP did not supply real-time gyroscope data. Avoid comparing left versus right unless separately sourced samples actually exist on both sides.")
+        }
+        for entry in recentMotion {
+            guard let motion = entry.motionInsight else { continue }
+            let side = entry.side?.title ?? "not specified"
+            let avg = motion.averageCycleSeconds.map { String(format: "%.2f", $0) } ?? "unknown"
+            let last = motion.lastCycleSeconds.map { String(format: "%.2f", $0) } ?? "unknown"
+            lines.append("Motion observation: \(entry.workoutDate) \(entry.exerciseName), set \(entry.index), side \(side), source \(motion.source) on \(motion.wearSide) wrist; saved \(entry.reps) reps (may be corrected), detected \(motion.detectedReps) cycles, mean earlier cycle \(avg)s, last cycle \(last)s. \(motion.note)")
+        }
+        if let plan = workout {
+            for exercise in plan.exercises where exercise.isUnilateral {
+                lines.append("Unilateral workout plan: \(exercise.name), \(exercise.prescribedSets) TOTAL side-specific slots, \(exercise.prescribedSets / 2) per side. When proposing or editing unilateral exercises, prescribe even total slot counts; three sets per arm means six total.")
+            }
+        }
         let personalRecords = Dictionary(grouping: performanceHistory, by: \.exercise)
             .compactMap { name, sets -> (String, Double)? in
                 guard let maxLoad = sets.map(\.weightLb).max() else { return nil }
@@ -1674,6 +1715,29 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
 
     /// Only one dated snapshot describes today's plan for BOTH devices.
     /// Never send a previously selected day's workout as today's Watch plan.
+    /// Motion-device placement can be changed on either device. Only the
+    /// newer timestamp wins; invalid placement values never enter defaults.
+    private func receiveWatchMotionPreferences(_ packet: [String: Any]) {
+        guard let stamp = packet["hcMotionPreferenceTimestamp"] as? Double,
+              stamp.isFinite && stamp > UserDefaults.standard.double(
+                  forKey:"hcMotionPreferenceTimestamp") else { return }
+        let prefs = UserDefaults.standard
+        if let value = packet["hcWatchWearSide"] as? String,
+           ["unknown","left","right"].contains(value) {
+            prefs.set(value,forKey:"hcWatchWearSide")
+        }
+        if let value = packet["hcWhoopWearSide"] as? String,
+           ["off","left","right","other"].contains(value) {
+            prefs.set(value,forKey:"hcWhoopWearSide")
+        }
+        for key in ["hcWatchMotionRepEstimate",
+                    "hcWatchMotionRecognitionEnabled"] {
+            if let flag = packet[key] as? Bool { prefs.set(flag,forKey:key) }
+        }
+        prefs.set(stamp,forKey:"hcMotionPreferenceTimestamp")
+        sendToWatch()
+    }
+
     private func watchContext() throws -> [String: Any] {
         let today = HCPlanBuilder.dateString(Date())
         let state = !signedIn ? "signedOut" :
@@ -1720,6 +1784,16 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
         context[HCPayload.weightIncrement] = prefs.object(forKey:"hcWeightIncrement") as? Double ?? 5.0
         context[HCPayload.restOverride] = prefs.integer(forKey:"hcRestOverrideSeconds")
         context[HCPayload.watchHaptics] = prefs.object(forKey:"hcWatchHaptics") as? Bool ?? true
+        let motionStamp = prefs.double(forKey: "hcMotionPreferenceTimestamp")
+        if motionStamp > 0 {
+            context["hcMotionPreferenceTimestamp"] = motionStamp
+            context["hcWatchWearSide"] = prefs.string(forKey:"hcWatchWearSide") ?? "unknown"
+            context["hcWhoopWearSide"] = prefs.string(forKey:"hcWhoopWearSide") ?? "off"
+            context["hcWatchMotionRepEstimate"] =
+                prefs.object(forKey:"hcWatchMotionRepEstimate") as? Bool ?? true
+            context["hcWatchMotionRecognitionEnabled"] =
+                prefs.object(forKey:"hcWatchMotionRecognitionEnabled") as? Bool ?? false
+        }
         // Use the EXACT same revision and snapshot as independent EITAN
         // delivery. Workout calendar updates must not supersede EITAN with a
         // newer timestamp attached to older or empty wellness bytes.
@@ -2070,17 +2144,29 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
         }
     }
 
-    func logFromPhone(exercise: HCExercise, weightLb: Double?, reps: Int, rir: Double?) {
+    func logFromPhone(exercise: HCExercise, weightLb: Double?, reps: Int,
+                      rir: Double?, sideOverride: HCWorkingSide? = nil) {
         guard let workout, reps > 0, reps <= 300,
               weightLb == nil || (weightLb! >= 0 && weightLb! <= 3000) else { return }
-        let next = HCSetReconciliation.nextSetIndex(
-            for: exercise, workout: workout, records: combinedRecordedSets)
+        let next: Int
+        if exercise.isUnilateral, let side = sideOverride {
+            let completed = completedSets(for: workout)
+                .filter { $0.exerciseID == exercise.id }.map(\.index)
+            guard let slot = (1...max(1, exercise.prescribedSets)).first(where: {
+                exercise.side(forSet: $0) == side && !completed.contains($0)
+            }) else { return }
+            next = slot
+        } else {
+            next = HCSetReconciliation.nextSetIndex(
+                for: exercise, workout: workout, records: combinedRecordedSets)
+        }
         var entry = HCLoggedSet(id:UUID(),workoutID:workout.id,workoutDate:workout.date,
                                 sessionKey:workout.sessionKey,workoutTitle:workout.title,
                                 exerciseID:exercise.id,exerciseName:exercise.name,
                                 exerciseIndex:exercise.exerciseIndex,index:next,
                                 weightLb:weightLb,reps:reps,rir:rir,completedAt:Date())
         entry.source = "iPhone"
+        entry.side = exercise.side(forSet: next)
         if phoneSetExerciseID == exercise.id, let started = phoneSetStartedAt {
             entry.startedAt = started
             entry.durationSeconds = Date().timeIntervalSince(started)
@@ -2108,6 +2194,8 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
         corrected.startedAt=previous.startedAt
         corrected.durationSeconds=previous.durationSeconds
         corrected.source=previous.source
+        corrected.side=previous.side
+        corrected.motionInsight=previous.motionInsight
         loggedSets[index]=corrected
         save(loggedSets,name:"health-coach-watch-sets.json")
         uploadedIDs.remove(id)
@@ -2322,6 +2410,13 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
         guard let kind = message[HCPayload.kind] as? String else {
             replyHandler([:]); return
         }
+        if kind == "imunMotionPreferencesV1" {
+            DispatchQueue.main.async {
+                self.receiveWatchMotionPreferences(message)
+                replyHandler(["received": true])
+            }
+            return
+        }
         if kind == HCPayload.progressCloudChanged {
             DispatchQueue.main.async {
                 if message["date"] as? String ==
@@ -2481,6 +2576,12 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
     }
 
     func session(_ session: WCSession, didReceiveUserInfo userInfo: [String: Any] = [:]) {
+        if userInfo[HCPayload.kind] as? String == "imunMotionPreferencesV1" {
+            DispatchQueue.main.async {
+                self.receiveWatchMotionPreferences(userInfo)
+            }
+            return
+        }
         if userInfo[HCPayload.kind] as? String == HCPayload.eitanRequest {
             DispatchQueue.main.async { self.sendEitanToWatch(forceQueue: true) }
             return
