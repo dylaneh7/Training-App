@@ -32,6 +32,8 @@ struct HCMotionSetInsight: Codable, Hashable {
     var relativeMotionIntensityIndex: Double? = nil
     var estimatedOneRepMaxLb: Double? = nil
     var repActivePhaseSeconds: [Double]? = nil
+    var cycleWristRotationDegrees: [Double]? = nil
+    var lastWristRotationChangePercent: Double? = nil
 }
 
 
