@@ -990,7 +990,8 @@ private struct WatchStrengthReady: View {
                         store.startLifting()
                         if store.liftClock?.isActive == true {
                             health.start(kind: .strength)
-                            wHaptic(.start)
+                            // The Watch store already confirmed the first set
+                            // with a single start haptic.
                         }
                     }
                     .disabled(store.workout.exercises.isEmpty || store.runClock?.isActive == true)
@@ -1017,10 +1018,8 @@ private struct WatchGuidedSession: View {
     @State private var hasWeight = false
     @State private var reps = 8
     @State private var rir = 2
-    @State private var readyHapticSent = false
     @State private var showSetPicker = false
     @State private var confirmUndoWorkout = false
-    private let restPulse = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
     let onFinish: () -> Void
 
     private var current: HCExercise? { store.guidedExercise }
@@ -1078,13 +1077,8 @@ private struct WatchGuidedSession: View {
                             } else {
                                 quickSetControls(current)
                             }
-                            Color.clear.frame(height: 1)
-                                .onChange(of: timeLeft <= 0) { _, finished in
-                                    if finished && !readyHapticSent {
-                                        readyHapticSent = true
-                                        wHaptic(.notification)
-                                    }
-                                }
+                            // The shared workout store handles the one-time
+                            // rest haptic, even on another Watch screen.
                         }
                     } else {
                         quickSetControls(current)
@@ -1136,7 +1130,6 @@ private struct WatchGuidedSession: View {
                         if active {
                             Button {
                                 store.switchToQueuedSetNow()
-                                readyHapticSent = false
                                 wHaptic(.click)
                             } label: {
                                 Label("SWITCH NOW · NO SET LOGGED",
@@ -1179,7 +1172,6 @@ private struct WatchGuidedSession: View {
                                             Button {
                                                 store.selectGuidedSet(movement, setNumber: number)
                                                 showSetPicker = false
-                                                readyHapticSent = false
                                                 wHaptic(.click)
                                             } label: {
                                                 Image(systemName: done ? "checkmark" :
@@ -1266,19 +1258,8 @@ private struct WatchGuidedSession: View {
         .task(id: nextSetToken) {
             loadNextTargets()
         }
-        .onReceive(restPulse) { _ in
-            guard let until = store.liftClock?.restEndsAt,
-                  until <= Date(), store.liftClock?.isPaused == false else { return }
-            // Both modes alert once when rest ends. Only the opted-in
-            // auto mode begins the next active set without a button press.
-            if !readyHapticSent {
-                readyHapticSent = true
-                wHaptic(.notification)
-            }
-            store.advanceAfterRestIfReady()
-        }
         .onAppear {
-            store.advanceAfterRestIfReady()
+            store.processRestDeadline()
         }
         .confirmationDialog("Undo Workout?", isPresented: $confirmUndoWorkout) {
             Button("Undo Workout", role: .destructive) {
@@ -1329,12 +1310,10 @@ private struct WatchGuidedSession: View {
                                               weightLb: hasWeight ? weight : nil,
                                               reps: reps, rir: Double(rir))
                     if saved {
-                        readyHapticSent = false
                         wHaptic(.success)
                     }
                 } else if !otherActive && store.liftClock?.isPaused != true {
                     store.startSet(for: exercise)
-                    wHaptic(.start)
                 }
             } label: {
                 HStack(spacing: 7) {
@@ -1365,7 +1344,6 @@ private struct WatchGuidedSession: View {
             IMUNThemeTimerFace(seconds: seconds, countsDown: true, compact: true)
             Button {
                 store.skipRest()
-                readyHapticSent = true
                 wHaptic(.click)
             } label: {
                 Label("SKIP REST", systemImage: "forward.end.fill")
