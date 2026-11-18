@@ -99,6 +99,7 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
             " · Cloud account: " + (cloudSignedIn ? "connected" : "signed out")
     }
     private var cloudUploadedIDs: Set<UUID> = []
+    private var cloudUploadedRunIDs: Set<UUID> = []
     private var uploadedUndoIDs: Set<UUID> = []
     private var isUploadingCloudSets = false
     private var isFetchingCloudSets = false
@@ -133,6 +134,9 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
         if let s: [UUID] = load("queued-ids.json") { queuedIDs = Set(s) }
         if let s: [UUID] = load("confirmed-ids.json") { confirmedIDs = Set(s) }
         if let s: [UUID] = load("cloud-uploaded-ids.json") { cloudUploadedIDs = Set(s) }
+        if let s: [UUID] = load("cloud-uploaded-run-ids.json") {
+            cloudUploadedRunIDs = Set(s)
+        }
         if let s: HCTrainingClock = load("lifting-clock.json") { liftClock = s }
         guidedExerciseID = load("guided-exercise-id.json")
         selectedGuidedSet = load("guided-set-selection.json")
@@ -428,7 +432,11 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
             !cloudUploadedIDs.contains(item.id) &&
             !allUndoRecords.contains(where: { $0.applies(to: item) })
         }
-        guard !pendingUndo.isEmpty || !pending.isEmpty else { return }
+        let pendingRuns = completedRuns.filter {
+            !cloudUploadedRunIDs.contains($0.id)
+        }
+        guard !pendingUndo.isEmpty || !pending.isEmpty ||
+              !pendingRuns.isEmpty else { return }
         isUploadingCloudSets = true
         Task { @MainActor [weak self] in
             guard let self else { return }
@@ -468,6 +476,27 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
                         failed = true
                         DispatchQueue.main.async {
                             self.cloudStatus = "Sets saved offline; cloud retry: " +
+                                error.localizedDescription
+                        }
+                        break
+                    }
+                }
+            }
+            if !failed {
+                for run in pendingRuns {
+                    do {
+                        try await cloud.upload(run)
+                        uploadedAny = true
+                        DispatchQueue.main.async {
+                            self.cloudUploadedRunIDs.insert(run.id)
+                            self.save(Array(self.cloudUploadedRunIDs),
+                                      name: "cloud-uploaded-run-ids.json")
+                            self.cloudStatus = "Completed run saved to your account"
+                        }
+                    } catch {
+                        failed = true
+                        DispatchQueue.main.async {
+                            self.cloudStatus = "Run saved on Watch · cloud retry: " +
                                 error.localizedDescription
                         }
                         break
@@ -1063,6 +1092,7 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
             save(plan, name: "run-plan.json")
         }
         sendPending()
+        uploadPendingCloudSets()
     }
 
     // MARK: - WatchConnectivity
@@ -2167,6 +2197,37 @@ private actor HCWatchCloudFallback {
         guard let raw = rows.first?["plan"] as? [String: Any] else { return nil }
         return try JSONDecoder().decode(HCWorkout.self,
             from: JSONSerialization.data(withJSONObject: raw))
+    }
+
+    /// Same idempotent owner-scoped run write as the iPhone client. Without
+    /// this, completed Watch runs were stranded if WCSession never connected.
+    func upload(_ run: HCRunFinished) async throws {
+        let session = try await authorized()
+        let iso = ISO8601DateFormatter()
+        iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let laps: [[String: Any]] = run.splits.map {
+            ["index": $0.index,
+             "elapsedSeconds": $0.elapsedSeconds,
+             "distanceMeters": $0.distanceMeters.map { $0 as Any } ?? NSNull()]
+        }
+        _ = try await request(
+            path: "/rest/v1/health_coach_native_runs",
+            query: [URLQueryItem(name: "on_conflict", value: "id")],
+            method: "POST",
+            json: [[
+                "id": run.id.uuidString.lowercased(),
+                "user_id": session.userID,
+                "plan_id": run.planID.map { $0 as Any } ?? NSNull(),
+                "workout_date": run.date,
+                "started_at": iso.string(from: run.startedAt),
+                "ended_at": iso.string(from: run.endedAt),
+                "distance_meters": run.distanceMeters.map { $0 as Any } ?? NSNull(),
+                "avg_heart_rate_bpm": run.averageHeartRate.map { $0 as Any } ?? NSNull(),
+                "splits": laps,
+                "source": "Apple Watch"
+            ]],
+            bearer: session.access,
+            prefer: "resolution=ignore-duplicates,return=minimal")
     }
 
     func upload(_ set: HCLoggedSet) async throws {
