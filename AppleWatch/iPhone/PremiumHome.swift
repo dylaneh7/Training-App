@@ -326,9 +326,6 @@ private struct IMUNEitanCheckInEditor: View {
     var body: some View {
         DisclosureGroup(isExpanded: $expanded) {
             VStack(alignment: .leading, spacing: 9) {
-                Text("Tell IsAIah how training actually feels. All entries stay on-device until you explicitly choose to share Health details.")
-                    .font(.system(size: 11))
-                    .foregroundStyle(HCDesign.secondary)
                 Stepper("Energy \(energy)/5", value: $energy, in: 1...5)
                 Stepper("Soreness \(soreness)/5", value: $soreness, in: 1...5)
                 Stepper("Stress \(stress)/5", value: $stress, in: 1...5)
@@ -1056,11 +1053,6 @@ private struct IMUNTrainingMindsetCard: View {
                                       design: IMUNStyle.headingDesign))
                         .foregroundStyle(HCDesign.ink)
                         .fixedSize(horizontal: false, vertical: true)
-                    if source == "scripture" {
-                        Text("Reference only · read the passage in your chosen Bible.")
-                            .font(.caption2)
-                            .foregroundStyle(HCDesign.secondary)
-                    }
                 }
             }
         }
@@ -4806,6 +4798,9 @@ private struct IMUNRunImportSettings: View {
                             HCFilledButton(title: "CONNECT APPLE HEALTH", icon: "heart.fill",
                                            tint: HCDesign.aqua) { importer.connect() }
                         }
+                        Text(importer.status)
+                            .font(.caption2)
+                            .foregroundStyle(HCDesign.secondary)
                     }
                 }
     }
