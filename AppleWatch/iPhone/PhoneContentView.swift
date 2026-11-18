@@ -163,10 +163,6 @@ private struct StrengthHome: View {
                     }
                     .disabled(session.exercises.count >= 35)
                 }
-                Section {
-                    Text("Hold and drag in Edit mode to reorder. Swipe left to remove. Tap an exercise to edit its sets, suggested load, reps, directions, or swap it.")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
             } else {
                 Section("No Strength Workout Scheduled") {
                     Text("You can create a session on any date without changing your regular split.")
@@ -176,18 +172,6 @@ private struct StrengthHome: View {
                 }
             }
 
-            if coach.savingPlan || coach.cloudPendingCount > 0 {
-                Section("Sync") {
-                    if coach.savingPlan { ProgressView("Saving changes…") }
-                    Text("\(coach.cloudPendingCount) sets/runs waiting for cloud upload")
-                        .font(.caption)
-                    Button("Retry Uploads") {
-                        coach.retryPendingWorkout()
-                        coach.retryPendingCloudSets()
-                    }
-                }
-            }
-            Section { Text(coach.status).font(.footnote).foregroundStyle(.secondary) }
         }
         .navigationTitle("Strength")
         .toolbar { EditButton() }
@@ -902,12 +886,6 @@ private struct CoachSettingsHome: View {
                 } else {
                     SignInCard()
                 }
-            }
-            Section("Development") {
-                Text("Changes requested in ChatGPT can be committed to your GitHub project. To install native updates, rebuild through Xcode or a future TestFlight release.")
-                    .font(.caption).foregroundStyle(.secondary)
-                Text("Health Coach Native — iPhone and Apple Watch")
-                    .font(.caption)
             }
         }
         .navigationTitle("Coach & Settings")
