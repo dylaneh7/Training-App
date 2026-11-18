@@ -2558,6 +2558,287 @@ private struct IMUNSetHistoryPage: View {
     }
 }
 
+/// A historical workout identified by its original date/session key. Actual
+/// motion data is resolved from the live workout archive when the screen opens.
+private struct IMUNMotionSession: Identifiable {
+    let date: String
+    let sessionKey: String
+    let title: String
+    var id: String { date + "|" + sessionKey }
+
+    static func all(_ sets: [HCLoggedSet]) -> [IMUNMotionSession] {
+        let groups = Dictionary(grouping: sets, by: {
+            $0.workoutDate + "|" + $0.sessionKey
+        })
+        return groups.compactMap { _, entries -> IMUNMotionSession? in
+            guard let mostRecent = entries.max(by: {
+                $0.completedAt < $1.completedAt
+            }) else { return nil }
+            return .init(date: mostRecent.workoutDate,
+                         sessionKey: mostRecent.sessionKey,
+                         title: mostRecent.workoutTitle)
+        }.sorted { $0.date == $1.date ?
+            $0.title < $1.title : $0.date > $1.date }
+    }
+}
+
+private struct IMUNMotionExerciseTrendView: View {
+    @EnvironmentObject private var coach: PhoneWorkoutBridge
+    let exerciseName: String
+    let placement: String
+
+    private var history: [HCLoggedSet] {
+        IMUNMotionAnalytics.comparableSets(coach.motionHistorySets,
+            exerciseName: exerciseName, location: placement)
+    }
+    private var motion: IMUNMotionForecast? {
+        IMUNMotionAnalytics.forecastMotion(coach.motionHistorySets,
+            exerciseName: exerciseName, location: placement)
+    }
+    private var strength: IMUNStrengthForecast? {
+        IMUNMotionAnalytics.forecastStrength(coach.motionHistorySets,
+            exerciseName: exerciseName)
+    }
+
+    var body: some View {
+        HCCard {
+            VStack(alignment: .leading, spacing: 11) {
+                Text(exerciseName.uppercased())
+                    .font(.system(size: 12, weight: .bold, design: .rounded))
+                    .foregroundStyle(HCDesign.ink)
+                Text("SOURCE-MATCHED PROGRESS")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(HCDesign.aqua)
+                if history.count >= 2 {
+                    Chart(history, id: \.id) { entry in
+                        if let seconds = entry.motionInsight?.averageCycleSeconds {
+                            LineMark(x: .value("Session", entry.completedAt),
+                                     y: .value("Cycle duration", seconds))
+                                .foregroundStyle(HCDesign.aqua)
+                            PointMark(x: .value("Session", entry.completedAt),
+                                      y: .value("Cycle duration", seconds))
+                                .foregroundStyle(HCDesign.electric)
+                        }
+                    }
+                    .frame(height: 140)
+                    Text("Detected cycle duration across recorded sets. Comparing matching exercise and placement only.")
+                        .font(.system(size: 10))
+                        .foregroundStyle(HCDesign.secondary)
+                }
+                if let prediction = motion {
+                    HStack(alignment: .firstTextBaseline) {
+                        Text(String(format: "%.2f s", prediction.projectedNextCycleSeconds))
+                            .font(HCDesign.metric(24))
+                            .foregroundStyle(HCDesign.electric)
+                        Text("next-session cycle-time projection")
+                            .font(.system(size: 11))
+                            .foregroundStyle(HCDesign.secondary)
+                    }
+                    Text("\(prediction.sessionCount) comparable sessions · \(prediction.confidence) confidence")
+                        .font(.system(size: 11))
+                        .foregroundStyle(HCDesign.aqua)
+                    Text(prediction.explanation)
+                        .font(.system(size: 11))
+                        .foregroundStyle(HCDesign.secondary)
+                } else {
+                    Text("Motion projections need at least four comparable sessions with adequate capture quality and the same sensor position.")
+                        .font(.system(size: 11))
+                        .foregroundStyle(HCDesign.secondary)
+                }
+                if let strength {
+                    HStack(spacing: 8) {
+                        Text(String(format: "Est. 1RM: %.1f lb", strength.lastEstimatedMaxLb))
+                        Spacer(minLength: 4)
+                        Text(String(format: "Next trend: %.1f lb", strength.projectedNextEstimatedMaxLb))
+                    }
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(HCDesign.ink)
+                    Text("Arithmetic projection from \(strength.sessionCount) workouts (\(strength.confidence.lowercased()) confidence), not a prescribed lift or measured maximum.")
+                        .font(.system(size: 10))
+                        .foregroundStyle(HCDesign.secondary)
+                }
+            }
+        }
+    }
+}
+
+private struct IMUNMotionWorkoutDetail: View {
+    @EnvironmentObject private var coach: PhoneWorkoutBridge
+    let session: IMUNMotionSession
+
+    private var sets: [HCLoggedSet] {
+        coach.motionHistorySets.filter {
+            $0.workoutDate == session.date &&
+            $0.sessionKey == session.sessionKey
+        }.sorted { a, b in
+            a.exerciseIndex == b.exerciseIndex ?
+                a.index < b.index : a.exerciseIndex < b.exerciseIndex
+        }
+    }
+    private var exerciseNames: [String] {
+        Array(Set(sets.map(\.exerciseName))).sorted()
+    }
+    private var recordedReps: Int { sets.reduce(0) { $0 + $1.reps } }
+    private var detectedCycles: Int {
+        sets.reduce(0) { $0 + ($1.motionInsight?.detectedReps ?? 0) }
+    }
+    private var volume: Double {
+        sets.reduce(0) { $0 + ($1.weightLb ?? 0) * Double($1.reps) }
+    }
+    private var liftingSeconds: Double {
+        sets.reduce(0) { $0 + max(0, $1.durationSeconds ?? 0) }
+    }
+    private var restSeconds: Double {
+        let chronological = sets.sorted { $0.completedAt < $1.completedAt }
+        guard chronological.count >= 2 else { return 0 }
+        return zip(chronological.dropLast(), chronological.dropFirst())
+            .reduce(0) { sum, pair in
+                guard let nextStart = pair.1.startedAt,
+                      nextStart > pair.0.completedAt else { return sum }
+                return sum + min(7200, nextStart.timeIntervalSince(pair.0.completedAt))
+            }
+    }
+
+    var body: some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 15) {
+                PremiumHeader(eyebrow: "PROGRESS / MOTION ANALYSIS",
+                              title: session.title,
+                              subtitle: session.date + " · Experimental Apple Watch movement")
+                LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())],
+                          spacing: 9) {
+                    HCCard { HCMetricBlock(label: "Logged sets", value: "\(sets.count)") }
+                    HCCard { HCMetricBlock(label: "Saved / detected",
+                        value: "\(recordedReps) / \(detectedCycles)") }
+                    HCCard { HCMetricBlock(label: "Training volume",
+                        value: String(format: "%.0f lb", volume)) }
+                    HCCard { HCMetricBlock(label: "Active set time",
+                        value: hcDuration(liftingSeconds)) }
+                    HCCard { HCMetricBlock(label: "Rest between sets",
+                        value: hcDuration(restSeconds)) }
+                }
+                Text("Recorded reps may have been manually corrected. Detected cycles are sensor estimates; the counts need not match.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(HCDesign.secondary)
+                HCSectionTitle(title: "Exercises and rep analysis",
+                               detail: "Measured wrist signals, not joint angles")
+                ForEach(exerciseNames, id: \.self) { name in
+                    let grouped = sets.filter { $0.exerciseName == name }
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text(name.uppercased())
+                            .font(.system(size: 14, weight: .bold))
+                            .foregroundStyle(HCDesign.ink)
+                        ForEach(grouped) { set in
+                            HCCard {
+                                VStack(alignment: .leading, spacing: 9) {
+                                    HStack {
+                                        Text("SET \(set.index)" +
+                                             (set.side.map { " · \($0.title.uppercased())" } ?? ""))
+                                            .font(.system(size: 11, weight: .bold))
+                                            .foregroundStyle(HCDesign.electric)
+                                        Spacer()
+                                        Text("\(set.reps) saved reps")
+                                            .font(.system(size: 12, weight: .semibold))
+                                    }
+                                    Text("\(set.weightLb.map { String(format: "%.1f lb", $0) } ?? "No load logged") · \(set.durationSeconds.map(hcDuration) ?? "duration unavailable")")
+                                        .font(.system(size: 11))
+                                        .foregroundStyle(HCDesign.secondary)
+                                    if let insight = set.motionInsight {
+                                        IMUNSetMotionInsights(insight: insight)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                HCSectionTitle(title: "IsAIah trend projections",
+                               detail: "Comparable exercise and sensor positions only")
+                ForEach(exerciseNames, id: \.self) { name in
+                    let relevant = sets.filter { $0.exerciseName == name }
+                    let locations = Set(relevant.compactMap { entry in
+                        entry.motionInsight.map(IMUNMotionAnalytics.placement)
+                    })
+                    ForEach(Array(locations).sorted(), id: \.self) { location in
+                        IMUNMotionExerciseTrendView(exerciseName: name,
+                                                     placement: location)
+                    }
+                }
+                Text("Not available from this sensor: verified squat depth, joint range, actual dumbbell speed, force, physical power in watts, and automated form diagnosis. These require additional validated measurements.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(HCDesign.secondary)
+                Spacer(minLength: 20)
+            }
+            .padding(18)
+        }
+        .scrollIndicators(.hidden)
+        .hcPage()
+        .navigationTitle("Motion Analysis")
+    }
+}
+
+private struct IMUNMotionHistoryPage: View {
+    @EnvironmentObject private var coach: PhoneWorkoutBridge
+    private var sessions: [IMUNMotionSession] {
+        IMUNMotionSession.all(coach.motionHistorySets)
+    }
+
+    var body: some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 13) {
+                PremiumHeader(eyebrow: "PROGRESS / PERFORMANCE LAB",
+                              title: "Movement intelligence",
+                              subtitle: "Your saved rep data, session by session")
+                HCCard {
+                    Text(coach.motionHistoryStatus)
+                        .font(.system(size: 12))
+                        .foregroundStyle(HCDesign.secondary)
+                    HCOutlineButton(title: "Refresh motion history",
+                                    icon: "arrow.clockwise") {
+                        coach.refreshMotionHistory(force: true)
+                    }
+                }
+                if sessions.isEmpty {
+                    HCCard {
+                        Text("No saved motion sets yet. Complete a tracked Apple Watch lifting set to begin collecting your movement baseline.")
+                            .font(.system(size: 12))
+                            .foregroundStyle(HCDesign.secondary)
+                    }
+                }
+                ForEach(sessions) { session in
+                    NavigationLink {
+                        IMUNMotionWorkoutDetail(session: session)
+                    } label: {
+                        HCCard {
+                            HStack(spacing: 13) {
+                                Image(systemName: "waveform.path.ecg.rectangle")
+                                    .font(.system(size: 21))
+                                    .foregroundStyle(HCDesign.aqua)
+                                VStack(alignment: .leading, spacing: 5) {
+                                    Text(session.title)
+                                        .font(.system(size: 15, weight: .semibold))
+                                        .foregroundStyle(HCDesign.ink)
+                                    Text(session.date)
+                                        .font(.system(size: 11))
+                                        .foregroundStyle(HCDesign.secondary)
+                                }
+                                Spacer()
+                                Image(systemName: "chevron.right")
+                                    .foregroundStyle(HCDesign.electric)
+                            }
+                        }
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(18)
+        }
+        .scrollIndicators(.hidden)
+        .hcPage()
+        .navigationTitle("Motion History")
+        .onAppear { coach.refreshMotionHistory() }
+    }
+}
+
 private struct IMUNActivityDetails: View {
     let activity: HCTrainingActivity
 
