@@ -1234,6 +1234,42 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
             $0.id.hasPrefix("healthkit:")
         }.count
         lines.append("Exercise record coverage: \(exerciseRecords.count) source-attributed imported sessions (\(appleHealthCount) Apple Health workouts shared by consent); Tredict/Garmin and connected services appear only if synced. Oldest: \(exerciseRecords.last?.date ?? "none"), newest: \(exerciseRecords.first?.date ?? "none"). If Apple Health sharing is off, do not claim access to Apple Health exercises. An empty history does not mean the athlete never exercised.")
+        // A training day absent from a provider is UNKNOWN, not a rest day.
+        // Do not silently select Apple Watch when the athlete has switched
+        // to WHOOP or Garmin, or count the same synced workout twice.
+        lines.append("LONG-TERM SOURCE COVERAGE (imported samples only; not proof of every workout):")
+        let byProvider = Dictionary(grouping: exerciseRecords, by: {
+            IMUNDataProvenance.provider($0.source)
+        })
+        for provider in byProvider.keys.sorted() {
+            guard let sessions = byProvider[provider], !sessions.isEmpty else { continue }
+            let ordered = sessions.sorted { $0.date < $1.date }
+            let running = sessions.filter { $0.kind == "run" }
+            let lifting = sessions.filter { $0.kind == "lift" }
+            let withDistance = running.filter { ($0.distanceMeters ?? 0) > 0 }
+            let withHeart = running.filter { ($0.averageBPM ?? 0) > 0 }
+            lines.append("Provider \(provider): \(sessions.count) sessions; \(running.count) runs, \(lifting.count) lifts. From \(ordered.first?.date ?? "unknown") to \(ordered.last?.date ?? "unknown"); run distance available \(withDistance.count), run HR available \(withHeart.count). Missing values and unrecorded sessions are unknown.")
+            let byMonth = Dictionary(grouping: ordered, by: {
+                String($0.date.prefix(7))
+            })
+            lines.append("Provider \(provider) months: " +
+                byMonth.keys.sorted().map {
+                    "\($0): \(byMonth[$0]?.count ?? 0)"
+                }.joined(separator: "; "))
+        }
+        if shareRecovery {
+            let byRecoverySource = Dictionary(grouping: recoveryHistory, by: {
+                IMUNDataProvenance.provider($0.source)
+            })
+            for provider in byRecoverySource.keys.sorted() {
+                guard let rows = byRecoverySource[provider], !rows.isEmpty else { continue }
+                let ordered = rows.sorted { $0.date < $1.date }
+                lines.append("Recovery source \(provider): \(rows.count) dated records, \(ordered.first?.date ?? "unknown") to \(ordered.last?.date ?? "unknown"); reported HRV readings \(rows.filter { $0.hrvMS != nil }.count), sleep records \(rows.filter { $0.sleepSeconds != nil }.count). Separate RMSSD from SDNN and never impute a missing WHOOP day.")
+            }
+        }
+        let recoveryPreference = UserDefaults.standard.string(
+            forKey: "hcIsaiahRecoveryPriority") ?? "WHOOP"
+        lines.append("Athlete coaching-source preference: \(recoveryPreference). Prioritize that provider for comparable recovery metrics IF readings exist. Keep all other sources labeled and available for long-term context; never override missing values with incompatible numbers without disclosure. A missing WHOOP workout in Apple Health may exist only in WHOOP's native service. Do not mark the day as rest.")
         let bySport = Dictionary(grouping: exerciseRecords, by: { $0.kind.lowercased() })
         lines.append("Exercise types (complete on-device record counts): " +
             bySport.keys.sorted().map { "\($0)=\(bySport[$0]?.count ?? 0)" }
@@ -1368,13 +1404,16 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
                 lines.append(String(healthSnapshot.prefix(4_500)))
             }
             let primary = UserDefaults.standard.string(
-                forKey: "hcEitanPrimaryWearable") ?? "Auto"
-            lines.append("Primary wearable for recovery insights: " + primary +
-                ". Do not infer WHOOP HRV from Apple Watch SDNN or from Tredict Garmin history.")
-            for datum in recoveryHistory
-                .filter({ HCEitanWearableSource.accepts($0.source,
-                                                        preferred: primary) })
-                .prefix(48) {
+                forKey: "hcIsaiahRecoveryPriority") ?? "WHOOP"
+            lines.append("Preferred source for recovery interpretation: " + primary +
+                ". Other authorized sources are included as separate, labeled evidence when present. Do not infer WHOOP HRV from Apple Watch SDNN or combine different methods.")
+            let orderedRecovery = recoveryHistory.sorted {
+                let a = IMUNDataProvenance.provider($0.source) == primary
+                let b = IMUNDataProvenance.provider($1.source) == primary
+                if a != b { return a }
+                return $0.date > $1.date
+            }
+            for datum in orderedRecovery.prefix(45) {
                 let hrv = datum.hrvMS.map { String(format: "%.0f ms", $0) } ?? "missing"
                 let sleep = datum.sleepSeconds.map { String(format: "%.1f h", $0 / 3600) }
                     ?? "missing"
