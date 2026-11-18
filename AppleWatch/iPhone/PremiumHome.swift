@@ -1,6 +1,93 @@
 import SwiftUI
 import Charts
 import MapKit
+import PhotosUI
+import UniformTypeIdentifiers
+import PDFKit
+import UIKit
+
+/// A selected document or photo belongs to the pending chat composer, not
+/// to workout history. No bytes are transmitted until the athlete taps Send.
+struct IMUNCoachAttachment: Identifiable {
+    let id = UUID()
+    let name: String
+    let kind: String           // "image" or "text"
+    let content: String        // compressed JPEG base64 or extracted text
+    let bytes: Int
+
+    var requestPayload: [String: Any] {
+        ["name": String(name.prefix(120)), "kind": kind,
+         "content": content]
+    }
+    var label: String {
+        kind == "image" ? "Photo · " + name : "File · " + name
+    }
+}
+
+enum IMUNCoachAttachmentReader {
+    enum Failure: LocalizedError {
+        case tooLarge, unsupported, emptyText, invalidImage, tooMany
+        var errorDescription: String? {
+            switch self {
+            case .tooLarge: return "This file is too large for a chat attachment. Export a smaller date range or CSV."
+            case .unsupported: return "This file format cannot be read yet. Use CSV, JSON, GPX, TCX, XML, TXT, PDF or a photo. Garmin FIT requires a separate decoder."
+            case .emptyText: return "No readable text was found in the document. For a scanned PDF, attach a photo or screenshot instead."
+            case .invalidImage: return "The selected photo could not be opened."
+            case .tooMany: return "Use up to four attachments per message, including at most two photos."
+            }
+        }
+    }
+
+    static func image(data: Data, filename: String) throws -> IMUNCoachAttachment {
+        guard let source = UIImage(data: data) else { throw Failure.invalidImage }
+        let largest = max(source.size.width, source.size.height)
+        guard largest > 0 else { throw Failure.invalidImage }
+        let scale = min(CGFloat(1), CGFloat(1200) / largest)
+        let target = CGSize(width: max(1, (source.size.width * scale).rounded()),
+                            height: max(1, (source.size.height * scale).rounded()))
+        let renderer = UIGraphicsImageRenderer(size: target)
+        let jpeg = renderer.jpegData(withCompressionQuality: 0.65) { context in
+            source.draw(in: CGRect(origin: .zero, size: target))
+        }
+        guard jpeg.count <= 1_500_000 else { throw Failure.tooLarge }
+        return IMUNCoachAttachment(name: filename, kind: "image",
+                                   content: jpeg.base64EncodedString(),
+                                   bytes: jpeg.count)
+    }
+
+    static func document(at url: URL) throws -> IMUNCoachAttachment {
+        let secured = url.startAccessingSecurityScopedResource()
+        defer { if secured { url.stopAccessingSecurityScopedResource() } }
+        let resourceSize = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+        guard resourceSize <= 8_000_000 else { throw Failure.tooLarge }
+        let ext = url.pathExtension.lowercased()
+        let supportedText: Set<String> = [
+            "csv", "tsv", "txt", "json", "gpx", "tcx", "xml", "md", "log"
+        ]
+        guard ext == "pdf" || supportedText.contains(ext) ||
+              ["jpg", "jpeg", "png", "heic", "webp"].contains(ext)
+        else { throw Failure.unsupported }
+        let data = try Data(contentsOf: url, options: [.mappedIfSafe])
+        guard data.count <= 8_000_000 else { throw Failure.tooLarge }
+        if ["jpg", "jpeg", "png", "heic", "webp"].contains(ext) {
+            return try image(data: data, filename: url.lastPathComponent)
+        }
+        let extracted: String?
+        if ext == "pdf" {
+            extracted = PDFDocument(data: data)?.string
+        } else {
+            extracted = String(data: data, encoding: .utf8) ??
+                        String(data: data, encoding: .utf16)
+        }
+        guard let excerpt = extracted?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !excerpt.isEmpty else { throw Failure.emptyText }
+        // These are readable excerpts, not a complete import of giant files.
+        let bounded = String(excerpt.prefix(18_000))
+        return IMUNCoachAttachment(name: url.lastPathComponent,
+                                   kind: "text", content: bounded,
+                                   bytes: data.count)
+    }
+}
 
 // The bottom bar is organized by purpose; individual sports live inside Training.
 // Adding cycling, mobility or swimming later does not require another bottom tab.
@@ -4170,6 +4257,10 @@ private struct PremiumCoachConversation: View {
     @AppStorage("hcCoachConversationLocalV1") private var storedConversation = Data()
     @FocusState private var composerFocused: Bool
     @State private var question = ""
+    @State private var pendingAttachments: [IMUNCoachAttachment] = []
+    @State private var selectedPhoto: PhotosPickerItem?
+    @State private var showFileImporter = false
+    @State private var attachmentError: String?
     @State private var turns: [IMUNCoachTurn] = []
     @State private var isSending = false
     @State private var thinkingPhase = "IsAIah is thinking"
@@ -4210,7 +4301,8 @@ private struct PremiumCoachConversation: View {
     }
     private var canSend: Bool {
         coach.signedIn && !isSending &&
-        !question.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        (!question.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
+         !pendingAttachments.isEmpty)
     }
 
     private var shouldShowRunEvidence: Bool {
@@ -4378,6 +4470,46 @@ private struct PremiumCoachConversation: View {
                 Button("Done") { composerFocused = false }
             }
         }
+        .fileImporter(isPresented: $showFileImporter,
+                      allowedContentTypes: [.item],
+                      allowsMultipleSelection: true) { result in
+            switch result {
+            case .success(let urls):
+                for url in urls.prefix(4) {
+                    do {
+                        try addAttachment(IMUNCoachAttachmentReader.document(at: url))
+                    } catch {
+                        attachmentError = error.localizedDescription
+                    }
+                }
+            case .failure(let error):
+                attachmentError = error.localizedDescription
+            }
+        }
+        .onChange(of: selectedPhoto) { _, item in
+            guard let item else { return }
+            Task {
+                do {
+                    guard let data = try await item.loadTransferable(type: Data.self)
+                    else { throw IMUNCoachAttachmentReader.Failure.invalidImage }
+                    let uploaded = try IMUNCoachAttachmentReader.image(
+                        data: data, filename: "Training photo.jpg")
+                    try addAttachment(uploaded)
+                } catch {
+                    attachmentError = error.localizedDescription
+                }
+                selectedPhoto = nil
+            }
+        }
+    }
+
+    private func addAttachment(_ item: IMUNCoachAttachment) throws {
+        guard pendingAttachments.count < 4,
+              item.kind != "image" ||
+                pendingAttachments.filter({ $0.kind == "image" }).count < 2
+        else { throw IMUNCoachAttachmentReader.Failure.tooMany }
+        pendingAttachments.append(item)
+        attachmentError = nil
     }
 
     // One slim assistant toolbar replaces both the oversized artwork banner
@@ -4440,7 +4572,55 @@ private struct PremiumCoachConversation: View {
 
     private var composer: some View {
         VStack(spacing: 9) {
-            HStack(alignment: .bottom, spacing: 8) {
+            if !pendingAttachments.isEmpty {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 7) {
+                        ForEach(pendingAttachments) { item in
+                            HStack(spacing: 6) {
+                                Image(systemName: item.kind == "image" ?
+                                      "photo" : "doc.text")
+                                Text(item.name).lineLimit(1)
+                                Button {
+                                    pendingAttachments.removeAll { $0.id == item.id }
+                                } label: {
+                                    Image(systemName: "xmark.circle.fill")
+                                }
+                                .buttonStyle(.plain)
+                                .accessibilityLabel("Remove " + item.name)
+                            }
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(HCDesign.ink)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 8)
+                            .background(HCDesign.raised,
+                                        in: Capsule())
+                        }
+                    }
+                }
+            }
+            if let attachmentError {
+                Text(attachmentError)
+                    .font(.system(size: 11))
+                    .foregroundStyle(HCDesign.caution)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            HStack(alignment: .bottom, spacing: 6) {
+                Button {
+                    showFileImporter = true
+                } label: {
+                    Image(systemName: "paperclip")
+                        .font(.system(size: 17, weight: .medium))
+                        .frame(width: 31, height: 43)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Attach a workout file")
+                PhotosPicker(selection: $selectedPhoto, matching: .images) {
+                    Image(systemName: "photo.on.rectangle")
+                        .font(.system(size: 17, weight: .medium))
+                        .frame(width: 31, height: 43)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Attach a training photo")
                 TextField("Message IsAIah…", text: $question, axis: .vertical)
                     .lineLimit(1...5)
                     .focused($composerFocused)
@@ -4921,11 +5101,17 @@ private struct PremiumCoachConversation: View {
     }
 
     private func send() {
-        let questionText = question.trimmingCharacters(in: .whitespacesAndNewlines)
+        let originalDraft = question.trimmingCharacters(in: .whitespacesAndNewlines)
         guard canSend else { return }
-        if questionText.lowercased().contains("what can you control") ||
+        let uploads = pendingAttachments
+        let questionText = originalDraft.isEmpty ?
+            "Please analyze the attached exercise data. Explain what you can verify and what is missing." :
+            originalDraft
+        let userDisplayText = uploads.isEmpty ? questionText :
+            questionText + "\nAttachments: " + uploads.map(\.name).joined(separator: ", ")
+        if uploads.isEmpty && (questionText.lowercased().contains("what can you control") ||
            questionText.lowercased().contains("what can you do in imun") ||
-           questionText.lowercased().contains("what actions can you") {
+           questionText.lowercased().contains("what actions can you")) {
             question = ""
             composerFocused = false
             turns.append(IMUNCoachTurn(role: "user", text: questionText))
@@ -4934,7 +5120,7 @@ private struct PremiumCoachConversation: View {
             persist()
             return
         }
-        if let proposed = IMUNCoachActionInterpreter.propose(
+        if uploads.isEmpty, let proposed = IMUNCoachActionInterpreter.propose(
             questionText, sessions: coach.plannedSessions,
             workout: coach.workout, run: coach.runPlan) {
             question = ""
@@ -4953,12 +5139,13 @@ private struct PremiumCoachConversation: View {
         errorMessage = nil
         isSending = true
         thinkingPhase = "IsAIah is thinking"
-        turns.append(IMUNCoachTurn(role: "user", text: questionText))
+        turns.append(IMUNCoachTurn(role: "user", text: userDisplayText))
         persist()
         Task {
             // The service is a language classifier only: it cannot mutate
             // workouts, choose an unvalidated ID, or bypass confirmation.
-            if IMUNCoachActionInterpreter.mightNeedModelProposal(questionText) {
+            if uploads.isEmpty &&
+                IMUNCoachActionInterpreter.mightNeedModelProposal(questionText) {
                 await MainActor.run { thinkingPhase = "Reviewing your request" }
                 if let classification = try? await coach.classifyIMUNCoachAction(
                     request: questionText, screenContext: launchContext),
@@ -4984,9 +5171,11 @@ private struct PremiumCoachConversation: View {
                             selectedMetric: selectedHealthMetric,
                             question: questionText,
                             primaryWearable: UserDefaults.standard.string(
-                                forKey: "hcEitanPrimaryWearable") ?? "Auto") +
-                         eitanSharedCoachContext) : "")
+                                forKey: "hcIsaiahRecoveryPriority") ?? "WHOOP") +
+                         eitanSharedCoachContext) : "",
+                    attachments: uploads)
                 await MainActor.run {
+                    pendingAttachments.removeAll()
                     turns.append(IMUNCoachTurn(role: "assistant", text: reply))
                     isSending = false
                     persist()
@@ -4997,7 +5186,7 @@ private struct PremiumCoachConversation: View {
                     if turns.last?.role == "user" {
                         turns.removeLast()
                     }
-                    question = questionText
+                    question = originalDraft
                     errorMessage = error.localizedDescription
                     isSending = false
                     persist()

@@ -2,6 +2,9 @@ import Foundation
 import Combine
 import WatchConnectivity
 import Security
+import WatchKit
+import UserNotifications
+import CoreMotion
 
 /// Timestamp-based clocks survive wrist-down, temporary app suspension, and re-launch.
 /// Display timers calculate Date() - start rather than incrementing a foreground counter.
@@ -34,6 +37,85 @@ struct HCGuidedSetChoice: Codable, Equatable {
     let setNumber: Int
 }
 
+/// Lightweight on-Watch motion-cycle estimator for active strength sets.
+/// This is explicitly experimental: it detects rhythmic wrist motion, not a
+/// verified completed repetition. It does not write sets or transmit samples.
+private final class HCMotionRepEstimator {
+    private let manager = CMMotionManager()
+    private var smoothedEnergy = 0.0
+    private var aboveThresholdSince: TimeInterval?
+    private var motionPeakSeen = false
+    private var lastRepTime = -Double.infinity
+    private var count = 0
+    private var lastPeriod: Double?
+    var onEstimate: ((Int, Double?) -> Void)?
+
+    var isAvailable: Bool { manager.isDeviceMotionAvailable }
+
+    func start() -> Bool {
+        stop()
+        guard manager.isDeviceMotionAvailable else { return false }
+        count = 0
+        smoothedEnergy = 0
+        aboveThresholdSince = nil
+        motionPeakSeen = false
+        lastRepTime = -Double.infinity
+        lastPeriod = nil
+        manager.deviceMotionUpdateInterval = 1.0 / 25.0
+        // The Watch holds one Core Motion manager for this session. Samples
+        // are processed locally and never added to the HealthKit workout.
+        manager.startDeviceMotionUpdates(to: .main) { [weak self] sample, _ in
+            guard let self, let sample else { return }
+            self.consume(sample)
+        }
+        return true
+    }
+
+    func stop() {
+        if manager.isDeviceMotionActive {
+            manager.stopDeviceMotionUpdates()
+        }
+        aboveThresholdSince = nil
+        motionPeakSeen = false
+    }
+
+    private func consume(_ sample: CMDeviceMotion) {
+        // In-flight motion callbacks can arrive just after finishing a set.
+        guard manager.isDeviceMotionActive else { return }
+        let acceleration = sample.userAcceleration
+        let rotation = sample.rotationRate
+        let linear = sqrt(acceleration.x * acceleration.x +
+                          acceleration.y * acceleration.y +
+                          acceleration.z * acceleration.z)
+        let angular = sqrt(rotation.x * rotation.x +
+                           rotation.y * rotation.y +
+                           rotation.z * rotation.z)
+        let energy = linear + 0.08 * angular
+        smoothedEnergy = 0.7 * smoothedEnergy + 0.3 * energy
+        let now = sample.timestamp
+
+        if smoothedEnergy >= 0.24 {
+            if aboveThresholdSince == nil {
+                aboveThresholdSince = now
+            }
+            if let since = aboveThresholdSince, now - since >= 0.12 {
+                motionPeakSeen = true
+            }
+        } else if smoothedEnergy <= 0.105 {
+            if motionPeakSeen && now - lastRepTime >= 0.65 {
+                if lastRepTime.isFinite {
+                    lastPeriod = now - lastRepTime
+                }
+                lastRepTime = now
+                count += 1
+                onEstimate?(count, lastPeriod)
+            }
+            aboveThresholdSince = nil
+            motionPeakSeen = false
+        }
+    }
+}
+
 final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
     @Published private(set) var workout: HCWorkout = .unscheduled(date: WatchWorkoutStore.today())
     @Published private(set) var scheduleState = "loading"
@@ -61,6 +143,10 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
     @Published private(set) var progressSyncStatus = "Cloud progress not checked"
     @Published private(set) var completedRuns: [HCRunFinished] = []
     @Published private(set) var liftClock: HCTrainingClock?
+    @Published private(set) var motionEstimatedReps = 0
+    @Published private(set) var motionRepStatus = "Motion rep estimates are off"
+    @Published private(set) var motionLastRepPeriod: Double?
+    private let repEstimator = HCMotionRepEstimator()
     @Published private(set) var guidedExerciseID: String?
     @Published private(set) var selectedGuidedSet: HCGuidedSetChoice?
     @Published private(set) var queuedNextGuidedSet: HCGuidedSetChoice?
@@ -77,6 +163,18 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
     @Published private(set) var lastBackgroundTransfer = "No background Watch transfer result yet"
     private var lastLiftStateSignature: String?
     private var lastAutomaticResendAt = Date.distantPast
+
+    // Keep rest alerts in the Watch-owned workout store, not a particular
+    // SwiftUI screen. The root store persists when the user navigates away.
+    private var restHeartbeat: AnyCancellable?
+    private var alertedRestDeadline: Date?
+    private static let restNotificationID = "imun.watch.rest-finished"
+    @Published private(set) var restNotificationStatus =
+        "Background alerts require Watch notification permission"
+
+    private var setHapticsEnabled: Bool {
+        UserDefaults.standard.object(forKey: "hcWatchHaptics") as? Bool ?? true
+    }
 
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
@@ -123,6 +221,15 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
 
     override init() {
         super.init()
+        repEstimator.onEstimate = { [weak self] reps, secondsPerRep in
+            self?.motionEstimatedReps = reps
+            self?.motionLastRepPeriod = secondsPerRep
+            self?.motionRepStatus = "Wrist motion estimate · verify manually"
+        }
+        if UserDefaults.standard.bool(forKey: "hcWatchRestNotifications") {
+            restNotificationStatus =
+                "Background rest alerts enabled; delivery follows Watch notification settings"
+        }
         // Never revive the older hardcoded Saturday example or yesterday's cache.
         if let snapshot: HCWatchSchedule = load("latest-schedule.json"),
            snapshot.date == Self.today() {
@@ -140,6 +247,19 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
             cloudUploadedRunIDs = Set(s)
         }
         if let s: HCTrainingClock = load("lifting-clock.json") { liftClock = s }
+        if liftClock?.isActive == true, liftClock?.setStartedAt != nil {
+            beginRepEstimate()
+        }
+        // A one-second independent heartbeat also works when Training is not
+        // the visible navigation destination.
+        restHeartbeat = Timer.publish(every: 0.5, on: .main, in: .common)
+            .autoconnect().sink { [weak self] _ in
+                self?.processRestDeadline()
+            }
+        if let clock = liftClock, clock.isActive, !clock.isPaused,
+           let end = clock.restEndsAt, end > Date() {
+            scheduleBackgroundRestAlert(deadline: end)
+        }
         guidedExerciseID = load("guided-exercise-id.json")
         selectedGuidedSet = load("guided-set-selection.json")
         queuedNextGuidedSet = load("queued-guided-set.json")
@@ -613,6 +733,7 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
               !allUndoRecords.contains(where: { $0.applies(to: entry) })
         else { return }
         appendUndo(HCWorkoutUndo.set(entry), forwardToPhone: true)
+        cancelBackgroundRestAlert()
         if var clock = liftClock, clock.isActive, clock.setStartedAt == nil {
             // Return to the corrected set rather than remaining on a later
             // queued set or an unrelated rest countdown.
@@ -636,6 +757,8 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
         guard let clock = liftClock, clock.isActive,
               workout.id == clock.workoutID else { return }
         let undo = HCWorkoutUndo.workout(workout, startedAt: clock.startedAt)
+        cancelBackgroundRestAlert()
+        endRepEstimate()
         liftClock = nil
         selectedGuidedSet = nil
         queuedNextGuidedSet = nil
@@ -856,10 +979,141 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
         }
     }
 
+    // MARK: - Optional on-device motion rep estimates
+
+    private var motionRepEnabled: Bool {
+        UserDefaults.standard.bool(forKey: "hcWatchMotionRepEstimate")
+    }
+
+    private func beginRepEstimate() {
+        motionEstimatedReps = 0
+        motionLastRepPeriod = nil
+        guard motionRepEnabled else {
+            motionRepStatus = "Motion rep estimates are off"
+            repEstimator.stop()
+            return
+        }
+        motionRepStatus = repEstimator.start()
+            ? "Listening for rhythmic wrist movements…"
+            : "Motion data not available on this Watch"
+    }
+
+    private func endRepEstimate() {
+        repEstimator.stop()
+    }
+
+    /// Called when the Watch Settings toggle changes mid-workout.
+    func refreshMotionRepPreference() {
+        if motionRepEnabled, liftClock?.setStartedAt != nil {
+            beginRepEstimate()
+        } else {
+            endRepEstimate()
+            motionRepStatus = motionRepEnabled
+                ? "Starts with your next active set"
+                : "Motion rep estimates are off"
+        }
+    }
+
+    // MARK: - Watch set and recovery haptics
+
+    private func playSetHaptic() {
+        guard setHapticsEnabled,
+              UserDefaults.standard.object(forKey: "hcWatchSetStartHaptics")
+                  as? Bool ?? true else { return }
+        WKInterfaceDevice.current().play(.start)
+    }
+
+    private func cancelBackgroundRestAlert() {
+        UNUserNotificationCenter.current().removePendingNotificationRequests(
+            withIdentifiers: [Self.restNotificationID])
+    }
+
+    private func scheduleBackgroundRestAlert(deadline: Date) {
+        cancelBackgroundRestAlert()
+        guard setHapticsEnabled,
+              UserDefaults.standard.object(forKey: "hcWatchRestCompleteHaptics")
+                  as? Bool ?? true,
+              UserDefaults.standard.bool(forKey: "hcWatchRestNotifications"),
+              deadline > Date() else { return }
+        let note = UNMutableNotificationContent()
+        note.title = "Rest complete"
+        note.body = "Your next strength set is ready."
+        note.sound = .default
+        let trigger = UNTimeIntervalNotificationTrigger(
+            timeInterval: max(1, deadline.timeIntervalSinceNow),
+            repeats: false)
+        UNUserNotificationCenter.current().add(UNNotificationRequest(
+            identifier: Self.restNotificationID,
+            content: note, trigger: trigger)) { error in
+                if let error {
+                    NSLog("iMun Watch rest notification: %@", error.localizedDescription)
+                }
+            }
+    }
+
+    /// Explicit Settings action: never request notification permission simply
+    /// because the athlete started a workout.
+    func enableBackgroundRestAlerts() {
+        UNUserNotificationCenter.current().requestAuthorization(
+            options: [.alert, .sound]) { [weak self] granted, error in
+                DispatchQueue.main.async {
+                    UserDefaults.standard.set(granted, forKey: "hcWatchRestNotifications")
+                    self?.restNotificationStatus = granted
+                        ? "Rest alerts enabled when Watch is not showing iMun"
+                        : (error?.localizedDescription ??
+                           "Notification access is off. Enable iMun alerts in Watch Settings.")
+                    if granted, let until = self?.liftClock?.restEndsAt,
+                       until > Date() {
+                        self?.scheduleBackgroundRestAlert(deadline: until)
+                    }
+                }
+            }
+    }
+
+    func refreshRestAlertPreferences() {
+        let restHapticsEnabled =
+            UserDefaults.standard.object(forKey: "hcWatchRestCompleteHaptics")
+                as? Bool ?? true
+        if !setHapticsEnabled || !restHapticsEnabled {
+            cancelBackgroundRestAlert()
+        }
+        else if let clock = liftClock, clock.isActive, !clock.isPaused,
+                let until = clock.restEndsAt, until > Date() {
+            scheduleBackgroundRestAlert(deadline: until)
+        }
+    }
+
+    /// The deadline is based on wall-clock time, so it survives wrist-down
+    /// and navigation. Never send multiple haptics for one rest period.
+    func processRestDeadline() {
+        guard let clock = liftClock, clock.isActive, !clock.isPaused,
+              clock.setStartedAt == nil, let deadline = clock.restEndsAt,
+              deadline <= Date(),
+              alertedRestDeadline != deadline else { return }
+        alertedRestDeadline = deadline
+        // The OS owns inactive-app notification delivery. The foreground
+        // Watch receives one prominent notification haptic directly.
+        if setHapticsEnabled,
+           UserDefaults.standard.object(forKey: "hcWatchRestCompleteHaptics")
+               as? Bool ?? true,
+           WKApplication.shared().applicationState == .active,
+           Date().timeIntervalSince(deadline) < 15 {
+            WKInterfaceDevice.current().play(.notification)
+        }
+        if WKApplication.shared().applicationState == .active {
+            cancelBackgroundRestAlert()
+        }
+        // Automatic start is opt-in. When it happens, the rest-complete
+        // haptic replaces a second immediate start tap.
+        advanceAfterRestIfReady(playStartHaptic: false)
+    }
+
     // MARK: - Full strength session clock
 
     func startLifting() {
         invalidatePreviousDayIfNeeded()
+        cancelBackgroundRestAlert()
+        alertedRestDeadline = nil
         guard hasScheduledLift, workout.date == Self.today(), !workout.exercises.isEmpty,
               !guidedAllFinished,
               liftClock?.isActive != true && runClock?.isActive != true else { return }
@@ -886,6 +1140,7 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
               clock.setStartedAt == nil else { return }
         clock.pausedAt = Date()
         liftClock = clock
+        cancelBackgroundRestAlert()
         save(clock, name: "lifting-clock.json")
     }
 
@@ -900,16 +1155,21 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
         clock.pausedAt = nil
         liftClock = clock
         save(clock, name: "lifting-clock.json")
+        if let until = clock.restEndsAt, until > Date() {
+            scheduleBackgroundRestAlert(deadline: until)
+        }
     }
 
     func endLifting() {
         guard var clock = liftClock, clock.isActive, clock.setStartedAt == nil else { return }
+        endRepEstimate()
         if let paused = clock.pausedAt {
             clock.pausedSeconds += Date().timeIntervalSince(paused)
             clock.pausedAt = nil
         }
         clock.finishedAt = Date()
         clock.restEndsAt = nil
+        cancelBackgroundRestAlert()
         liftClock = clock
         selectedGuidedSet = nil
         queuedNextGuidedSet = nil
@@ -923,7 +1183,7 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
 
     // MARK: - Per-set clock and rest period
 
-    func startSet(for exercise: HCExercise) {
+    func startSet(for exercise: HCExercise, playStartHaptic: Bool = true) {
         guard var clock = liftClock, clock.isActive, !clock.isPaused,
               clock.setStartedAt == nil, clock.workoutID == workout.id,
               !guidedAllFinished else { return }
@@ -940,13 +1200,21 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
         save(exercise.id, name: "guided-exercise-id.json")
         clock.setStartedAt = Date()
         clock.restEndsAt = nil
+        // When auto-advance happens while the Watch is not frontmost, let
+        // watchOS deliver the already-due rest notification before clearing it.
+        if playStartHaptic ||
+           WKApplication.shared().applicationState == .active {
+            cancelBackgroundRestAlert()
+        }
         liftClock = clock
         save(clock, name: "lifting-clock.json")
+        beginRepEstimate()
+        if playStartHaptic { self.playSetHaptic() }
     }
 
     /// Rest uses wall-clock time so the next set can start after wrist-down
     /// or an app re-launch. A timer drives this while the screen is visible.
-    func advanceAfterRestIfReady() {
+    func advanceAfterRestIfReady(playStartHaptic: Bool = true) {
         // Existing default remains automatic so installed Watch behavior
         // does not change. An athlete may choose manual start in Preferences.
         guard UserDefaults.standard.object(forKey: "hcAutoStartNextSet") as? Bool ?? true
@@ -955,11 +1223,12 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
               clock.setStartedAt == nil, !guidedAllFinished,
               (clock.restEndsAt == nil || clock.restEndsAt! <= Date()) else { return }
         guard let next = guidedExercise else { return }
-        startSet(for: next)
+        startSet(for: next, playStartHaptic: playStartHaptic)
     }
 
     func cancelSet() {
         guard var clock = liftClock, clock.setStartedAt != nil else { return }
+        endRepEstimate()
         clock.setStartedAt = nil
         clock.setExerciseID = nil
         clock.setNumber = nil
@@ -981,6 +1250,7 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
               !completedSets(for: exercise, setNumber: setNumber) else { return false }
 
         let now = Date()
+        endRepEstimate()
         var entry = HCLoggedSet(
             id: UUID(),
             workoutID: workout.id,
@@ -1025,8 +1295,14 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
         let seconds = override > 0 ? override : exercise.restSeconds
         clock.restEndsAt = next != nil && seconds > 0 ?
             now.addingTimeInterval(Double(seconds)) : nil
+        alertedRestDeadline = nil
         liftClock = clock
         save(clock, name: "lifting-clock.json")
+        if let until = clock.restEndsAt {
+            scheduleBackgroundRestAlert(deadline: until)
+        } else {
+            cancelBackgroundRestAlert()
+        }
         sendPending()
         // No second tap is needed when no rest was prescribed.
         if seconds <= 0 { advanceAfterRestIfReady() }
@@ -1035,6 +1311,7 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
 
     func skipRest() {
         guard var clock = liftClock else { return }
+        cancelBackgroundRestAlert()
         clock.restEndsAt = nil
         liftClock = clock
         save(clock, name: "lifting-clock.json")

@@ -990,7 +990,8 @@ private struct WatchStrengthReady: View {
                         store.startLifting()
                         if store.liftClock?.isActive == true {
                             health.start(kind: .strength)
-                            wHaptic(.start)
+                            // The Watch store already confirmed the first set
+                            // with a single start haptic.
                         }
                     }
                     .disabled(store.workout.exercises.isEmpty || store.runClock?.isActive == true)
@@ -1013,14 +1014,13 @@ private struct WatchGuidedSession: View {
     @EnvironmentObject private var health: WatchHealthSession
     @AppStorage("hcWeightIncrement") private var increment = 5.0
     @AppStorage("hcAutoStartNextSet") private var autoStartNextSet = true
+    @AppStorage("hcWatchMotionRepEstimate") private var motionRepEnabled = false
     @State private var weight = 0.0
     @State private var hasWeight = false
     @State private var reps = 8
     @State private var rir = 2
-    @State private var readyHapticSent = false
     @State private var showSetPicker = false
     @State private var confirmUndoWorkout = false
-    private let restPulse = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
     let onFinish: () -> Void
 
     private var current: HCExercise? { store.guidedExercise }
@@ -1078,13 +1078,8 @@ private struct WatchGuidedSession: View {
                             } else {
                                 quickSetControls(current)
                             }
-                            Color.clear.frame(height: 1)
-                                .onChange(of: timeLeft <= 0) { _, finished in
-                                    if finished && !readyHapticSent {
-                                        readyHapticSent = true
-                                        wHaptic(.notification)
-                                    }
-                                }
+                            // The shared workout store handles the one-time
+                            // rest haptic, even on another Watch screen.
                         }
                     } else {
                         quickSetControls(current)
@@ -1136,7 +1131,6 @@ private struct WatchGuidedSession: View {
                         if active {
                             Button {
                                 store.switchToQueuedSetNow()
-                                readyHapticSent = false
                                 wHaptic(.click)
                             } label: {
                                 Label("SWITCH NOW · NO SET LOGGED",
@@ -1179,7 +1173,6 @@ private struct WatchGuidedSession: View {
                                             Button {
                                                 store.selectGuidedSet(movement, setNumber: number)
                                                 showSetPicker = false
-                                                readyHapticSent = false
                                                 wHaptic(.click)
                                             } label: {
                                                 Image(systemName: done ? "checkmark" :
@@ -1266,19 +1259,8 @@ private struct WatchGuidedSession: View {
         .task(id: nextSetToken) {
             loadNextTargets()
         }
-        .onReceive(restPulse) { _ in
-            guard let until = store.liftClock?.restEndsAt,
-                  until <= Date(), store.liftClock?.isPaused == false else { return }
-            // Both modes alert once when rest ends. Only the opted-in
-            // auto mode begins the next active set without a button press.
-            if !readyHapticSent {
-                readyHapticSent = true
-                wHaptic(.notification)
-            }
-            store.advanceAfterRestIfReady()
-        }
         .onAppear {
-            store.advanceAfterRestIfReady()
+            store.processRestDeadline()
         }
         .confirmationDialog("Undo Workout?", isPresented: $confirmUndoWorkout) {
             Button("Undo Workout", role: .destructive) {
@@ -1323,18 +1305,50 @@ private struct WatchGuidedSession: View {
                     wHaptic(.click)
                 }
             )
+            if active && motionRepEnabled {
+                HStack(spacing: 7) {
+                    Image(systemName: "waveform.path")
+                        .foregroundStyle(WTheme.aqua)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("WRIST MOTION · \(store.motionEstimatedReps) EST.")
+                            .font(WTheme.label(10))
+                            .foregroundStyle(WTheme.aqua)
+                        Text(store.motionRepStatus)
+                            .font(.system(size: 9))
+                            .foregroundStyle(WTheme.muted)
+                            .lineLimit(2)
+                    }
+                    Spacer(minLength: 2)
+                    if (1...100).contains(store.motionEstimatedReps) {
+                        Button {
+                            reps = store.motionEstimatedReps
+                            wHaptic(.click)
+                        } label: {
+                            Text("USE")
+                                .font(WTheme.label(10))
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 7)
+                                .background(WTheme.aqua.opacity(0.18),
+                                            in: RoundedRectangle(cornerRadius: 8))
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Use estimated \(store.motionEstimatedReps) reps")
+                    }
+                }
+                .padding(8)
+                .background(WTheme.panel,
+                            in: RoundedRectangle(cornerRadius: 10))
+            }
             Button {
                 if active {
                     let saved = store.stopSet(for: exercise,
                                               weightLb: hasWeight ? weight : nil,
                                               reps: reps, rir: Double(rir))
                     if saved {
-                        readyHapticSent = false
                         wHaptic(.success)
                     }
                 } else if !otherActive && store.liftClock?.isPaused != true {
                     store.startSet(for: exercise)
-                    wHaptic(.start)
                 }
             } label: {
                 HStack(spacing: 7) {
@@ -1365,7 +1379,6 @@ private struct WatchGuidedSession: View {
             IMUNThemeTimerFace(seconds: seconds, countsDown: true, compact: true)
             Button {
                 store.skipRest()
-                readyHapticSent = true
                 wHaptic(.click)
             } label: {
                 Label("SKIP REST", systemImage: "forward.end.fill")
@@ -1489,6 +1502,9 @@ private struct WatchPreferences: View {
     @AppStorage("hcRestOverrideSeconds") private var restOverride = 0
     @AppStorage("hcAutoStartNextSet") private var autoStartNextSet = true
     @AppStorage("hcWatchHaptics") private var haptics = true
+    @AppStorage("hcWatchSetStartHaptics") private var setStartHaptics = true
+    @AppStorage("hcWatchRestCompleteHaptics") private var restCompleteHaptics = true
+    @AppStorage("hcWatchMotionRepEstimate") private var motionRepEstimate = false
 
     var body: some View {
         List {
@@ -1595,7 +1611,44 @@ private struct WatchPreferences: View {
                     ? "The Watch will start the next set when rest finishes. The first set starts with Start Workout."
                     : "Rest still counts down and alerts you. Tap Start Set when you are ready; no next set begins on its own.")
                     .font(.caption2).foregroundStyle(WTheme.muted)
-                Toggle("Haptic feedback", isOn: $haptics).tint(WTheme.lime)
+                Toggle("Haptic feedback", isOn: $haptics)
+                    .tint(WTheme.lime)
+                    .onChange(of: haptics) { _, _ in
+                        store.refreshRestAlertPreferences()
+                    }
+                if haptics {
+                    Toggle("Tap when each set starts", isOn: $setStartHaptics)
+                        .tint(WTheme.lime)
+                    Toggle("Alert when rest finishes", isOn: $restCompleteHaptics)
+                        .tint(WTheme.lime)
+                        .onChange(of: restCompleteHaptics) { _, _ in
+                            store.refreshRestAlertPreferences()
+                        }
+                    if restCompleteHaptics {
+                        Button {
+                            store.enableBackgroundRestAlerts()
+                        } label: {
+                            Label("ENABLE BACKGROUND REST ALERTS",
+                                  systemImage: "bell.badge")
+                        }
+                        Text(store.restNotificationStatus)
+                            .font(.caption2)
+                            .foregroundStyle(WTheme.muted)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Text("Watch notifications can alert you after rest even when you leave the workout screen. Delivery follows Watch notification and Focus settings.")
+                            .font(.caption2)
+                            .foregroundStyle(WTheme.muted)
+                    }
+                }
+                Toggle("Estimate reps from wrist movement",
+                       isOn: $motionRepEstimate)
+                    .tint(WTheme.lime)
+                    .onChange(of: motionRepEstimate) { _, _ in
+                        store.refreshMotionRepPreference()
+                    }
+                Text("Experimental: detects repeated wrist movements during a set. You can tap USE to apply the estimate, or enter your actual reps manually. Never saves estimated reps automatically.")
+                    .font(.caption2)
+                    .foregroundStyle(WTheme.muted)
                 Text("Running voice cues and automatic miles remain in the Run screen.")
                     .font(.caption2).foregroundStyle(WTheme.muted)
             }
