@@ -663,6 +663,7 @@ struct WatchWorkoutView: View {
     @State private var lastCloudScheduleCheck = Date.distantPast
     @State private var lastCloudProgressCheck = Date.distantPast
     @State private var lastCloudEitanCheck = Date.distantPast
+    @State private var lastCloudRunCheck = Date.distantPast
     // Short foreground cloud reconciliation while training; never promise
     // instantaneous offline or background delivery on either platform.
     private let progressPulse = Timer.publish(
@@ -879,6 +880,7 @@ Section("YOUR TRAINING") {
             if store.cloudSignedIn {
                 store.refreshCloudWorkout()
                 store.refreshCloudSets()
+                store.refreshCloudRunHistory(force: true)
                 store.refreshCloudAppearance(force: true)
                 store.refreshCloudEitan(force: true)
             }
@@ -901,6 +903,11 @@ Section("YOUR TRAINING") {
                 lastCloudScheduleCheck = now
                 store.refreshCloudWorkout()
             }
+            if now.timeIntervalSince(lastCloudRunCheck) >=
+                (isTraining ? 24 : 60) {
+                lastCloudRunCheck = now
+                store.refreshCloudRunHistory()
+            }
             if now.timeIntervalSince(lastCloudEitanCheck) >= 30 {
                 lastCloudEitanCheck = now
                 store.refreshCloudEitan()
@@ -913,6 +920,7 @@ Section("YOUR TRAINING") {
                 store.requestCurrentSchedule()
                 if store.cloudSignedIn {
                     store.refreshCloudWorkout()
+                    store.refreshCloudRunHistory(force: true)
                     store.refreshCloudEitan(force: true)
                 }
             }
