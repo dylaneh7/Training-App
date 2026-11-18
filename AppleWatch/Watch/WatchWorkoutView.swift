@@ -1521,6 +1521,11 @@ private struct WatchPreferences: View {
     @AppStorage("hcWatchWearSide") private var watchWearSide = "unknown"
     @AppStorage("hcWhoopWearSide") private var whoopWearSide = "off"
 
+    private func motionSettingsChanged() {
+        UserDefaults.standard.set(Date().timeIntervalSince1970,
+                                  forKey: "hcMotionPreferenceTimestamp")
+        store.refreshMotionRepPreference()
+    }
 
     var body: some View {
         List {
@@ -1660,7 +1665,7 @@ private struct WatchPreferences: View {
                        isOn: $motionRepEstimate)
                     .tint(WTheme.lime)
                     .onChange(of: motionRepEstimate) { _, _ in
-                        store.refreshMotionRepPreference()
+                        motionSettingsChanged()
                     }
                 Text("Motion counts fill the normal reps field. Editing + / − locks your correction for the rest of that set. You still save the set.")
                     .font(.caption2)
@@ -1675,13 +1680,16 @@ private struct WatchPreferences: View {
                     Text("Right").tag("right")
                 }
                 .onChange(of: watchWearSide) { _, _ in
-                    store.refreshMotionRepPreference()
+                    motionSettingsChanged()
                 }
                 Picker("WHOOP position", selection: $whoopWearSide) {
                     Text("Not worn").tag("off")
                     Text("Left wrist").tag("left")
                     Text("Right wrist").tag("right")
                     Text("Other position").tag("other")
+                }
+                .onChange(of: whoopWearSide) { _, _ in
+                    motionSettingsChanged()
                 }
                 Text("Apple Watch supplies live wrist motion. WHOOP position is recorded, but live WHOOP motion is unavailable through its official developer API.")
                     .font(.caption2)
