@@ -169,6 +169,10 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
     @Published private(set) var progressSyncStatus = "Cloud progress not checked"
     @Published private(set) var completedRuns: [HCRunFinished] = []
     @Published private(set) var liftClock: HCTrainingClock?
+    @Published private(set) var estimatedMotionReps = 0
+    @Published private(set) var motionAverageRepSeconds: Double?
+    @Published private(set) var motionEstimateStatus = "Not measuring"
+    private let repMotionAnalyzer = IMUNWatchRepMotionAnalyzer()
     @Published private(set) var guidedExerciseID: String?
     @Published private(set) var selectedGuidedSet: HCGuidedSetChoice?
     @Published private(set) var queuedNextGuidedSet: HCGuidedSetChoice?
@@ -264,6 +268,7 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
             cloudUploadedRunIDs = Set(s)
         }
         if let s: HCTrainingClock = load("lifting-clock.json") { liftClock = s }
+        if liftClock?.setStartedAt != nil { beginMotionEstimate() }
         // A one-second independent heartbeat also works when Training is not
         // the visible navigation destination.
         restHeartbeat = Timer.publish(every: 0.5, on: .main, in: .common)
@@ -773,6 +778,7 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
         let undo = HCWorkoutUndo.workout(workout, startedAt: clock.startedAt)
         cancelBackgroundRestAlert()
         liftClock = nil
+        stopMotionEstimate()
         selectedGuidedSet = nil
         queuedNextGuidedSet = nil
         guidedExerciseID = workout.exercises.first?.id
@@ -992,6 +998,45 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
         }
     }
 
+    // MARK: - Optional live wrist-movement rep estimates
+
+    private var motionAssistEnabled: Bool {
+        UserDefaults.standard.object(forKey: "hcWatchMotionRepAssist")
+            as? Bool ?? false
+    }
+
+    private func beginMotionEstimate() {
+        estimatedMotionReps = 0
+        motionAverageRepSeconds = nil
+        guard motionAssistEnabled else {
+            motionEstimateStatus = "Motion assist off"
+            return
+        }
+        if repMotionAnalyzer.start({ [weak self] count, tempo in
+            guard let self else { return }
+            self.estimatedMotionReps = count
+            self.motionAverageRepSeconds = tempo
+            self.motionEstimateStatus = "Experimental estimate"
+        }) {
+            motionEstimateStatus = "Learning this movement"
+        } else {
+            motionEstimateStatus = "Watch motion unavailable"
+        }
+    }
+
+    private func stopMotionEstimate() {
+        repMotionAnalyzer.stop()
+        motionEstimateStatus = "Not measuring"
+    }
+
+    func refreshMotionRepPreference() {
+        if motionAssistEnabled, liftClock?.setStartedAt != nil {
+            beginMotionEstimate()
+        } else {
+            stopMotionEstimate()
+        }
+    }
+
     // MARK: - Watch set and recovery haptics
 
     private func playSetHaptic() {
@@ -1146,6 +1191,7 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
         }
         clock.finishedAt = Date()
         clock.restEndsAt = nil
+        stopMotionEstimate()
         cancelBackgroundRestAlert()
         liftClock = clock
         selectedGuidedSet = nil
@@ -1185,6 +1231,7 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
         }
         liftClock = clock
         save(clock, name: "lifting-clock.json")
+        beginMotionEstimate()
         if playStartHaptic { self.playSetHaptic() }
     }
 
@@ -1204,6 +1251,7 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
 
     func cancelSet() {
         guard var clock = liftClock, clock.setStartedAt != nil else { return }
+        stopMotionEstimate()
         clock.setStartedAt = nil
         clock.setExerciseID = nil
         clock.setNumber = nil
@@ -1225,6 +1273,7 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
               !completedSets(for: exercise, setNumber: setNumber) else { return false }
 
         let now = Date()
+        stopMotionEstimate()
         var entry = HCLoggedSet(
             id: UUID(),
             workoutID: workout.id,
