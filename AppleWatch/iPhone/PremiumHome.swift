@@ -1714,6 +1714,20 @@ private struct IMUNSetMotionInsights: View {
                 if let gaps = insight.samplingGapCount {
                     stat("Sensor gaps", String(gaps))
                 }
+                if let delay = insight.lastCycleSlowdownPercent,
+                   delay.isFinite {
+                    stat("Final cycle tempo", String(format: "%+.0f%%", delay))
+                }
+                if let change = insight.lastWristRotationChangePercent,
+                   change.isFinite {
+                    stat("Final wrist travel", String(format: "%+.0f%%", change))
+                }
+                if let active = insight.repActivePhaseSeconds,
+                   !active.isEmpty {
+                    stat("Active-phase avg",
+                         String(format: "%.2f s",
+                                active.reduce(0, +) / Double(active.count)))
+                }
             }
             if let cycles = insight.cycleSeconds, cycles.count >= 3 {
                 VStack(alignment: .leading, spacing: 5) {
@@ -1744,6 +1758,20 @@ private struct IMUNSetMotionInsights: View {
                     Text("Integrated wrist rotation, not the range of any joint or the dumbbell path.")
                         .font(.system(size: 10))
                         .foregroundStyle(HCDesign.secondary)
+                }
+            }
+            if let accel = insight.repAccelerationPeaksG,
+               accel.count >= 3 {
+                VStack(alignment: .leading, spacing: 5) {
+                    Text("ACCELERATION · DETECTED CYCLES")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(HCDesign.secondary)
+                    Chart(Array(accel.indices), id: \.self) { index in
+                        BarMark(x: .value("Cycle", index + 1),
+                                y: .value("Wrist acceleration", accel[index]))
+                            .foregroundStyle(HCDesign.electric)
+                    }
+                    .frame(height: 90)
                 }
             }
             if let confidence = insight.analysisConfidence {
@@ -2725,6 +2753,13 @@ private struct IMUNMotionWorkoutDetail: View {
     private var exerciseNames: [String] {
         Array(Set(sets.map(\.exerciseName))).sorted()
     }
+    private var matchedMeasuredActivity: HCTrainingActivity? {
+        coach.trainingActivities.first {
+            $0.date == session.date &&
+            HCProgramCatalog.normalized($0.title) ==
+                HCProgramCatalog.normalized(session.title)
+        }
+    }
     private var recordedReps: Int { sets.reduce(0) { $0 + $1.reps } }
     private var detectedCycles: Int {
         sets.reduce(0) { $0 + ($1.motionInsight?.detectedReps ?? 0) }
@@ -2767,6 +2802,32 @@ private struct IMUNMotionWorkoutDetail: View {
                 Text("Recorded reps may have been manually corrected. Detected cycles are sensor estimates; the counts need not match.")
                     .font(.system(size: 11))
                     .foregroundStyle(HCDesign.secondary)
+                if let measured = matchedMeasuredActivity {
+                    HCCard {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("WORKOUT PHYSIOLOGY · " + measured.source.uppercased())
+                                .font(.system(size: 10, weight: .bold))
+                                .foregroundStyle(HCDesign.aqua)
+                            HStack(spacing: 12) {
+                                if let bpm = measured.averageBPM {
+                                    HCMetricBlock(label: "Measured avg HR",
+                                                  value: "\(Int(bpm)) bpm")
+                                }
+                                if let max = measured.maxBPM {
+                                    HCMetricBlock(label: "Measured peak HR",
+                                                  value: "\(Int(max)) bpm")
+                                }
+                                if let calories = measured.calories {
+                                    HCMetricBlock(label: "Source-reported energy",
+                                                  value: "\(Int(calories)) kcal")
+                                }
+                            }
+                            Text("Only original measurements from this matched workout are shown; missing signals are not estimated.")
+                                .font(.system(size: 10))
+                                .foregroundStyle(HCDesign.secondary)
+                        }
+                    }
+                }
                 HCSectionTitle(title: "Exercises and rep analysis",
                                detail: "Measured wrist signals, not joint angles")
                 ForEach(exerciseNames, id: \.self) { name in
