@@ -289,8 +289,9 @@ enum IMUNMotionAnalytics {
                 placement(detail) == location &&
                 (detail.averageCycleSeconds ?? 0) > 0.25 &&
                 (detail.averageCycleSeconds ?? 0) < 15 &&
-                (detail.analysisConfidence != "Low") &&
-                (detail.sampleCoveragePercent ?? 100) >= 65
+                ["Moderate", "High"].contains(detail.analysisConfidence ?? "") &&
+                (detail.sampleCoveragePercent ?? 0) >= 85 &&
+                (detail.samplingGapCount ?? 1) == 0
         }.sorted { $0.completedAt < $1.completedAt }
     }
 
