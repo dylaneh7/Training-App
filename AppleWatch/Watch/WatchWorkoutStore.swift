@@ -1034,7 +1034,7 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
     // MARK: - Optional on-device motion rep estimates
 
     private var motionRepEnabled: Bool {
-        UserDefaults.standard.bool(forKey: "hcWatchMotionRepEstimate")
+        UserDefaults.standard.object(forKey:"hcWatchMotionRepEstimate") as? Bool ?? true
     }
 
     private var wornAppleWatchSide: HCWorkingSide? {
@@ -1993,6 +1993,23 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
         }
         if let haptics = context[HCPayload.watchHaptics] as? Bool {
             UserDefaults.standard.set(haptics, forKey: "hcWatchHaptics")
+        }
+        if let incoming = context["hcMotionPreferenceTimestamp"] as? Double,
+           incoming > UserDefaults.standard.double(forKey: "hcMotionPreferenceTimestamp") {
+            let prefs = UserDefaults.standard
+            if let wrist = context["hcWatchWearSide"] as? String,
+               ["unknown","left","right"].contains(wrist) {
+                prefs.set(wrist, forKey: "hcWatchWearSide")
+            }
+            if let whoop = context["hcWhoopWearSide"] as? String,
+               ["off","left","right","other"].contains(whoop) {
+                prefs.set(whoop, forKey: "hcWhoopWearSide")
+            }
+            if let enabled = context["hcWatchMotionRepEstimate"] as? Bool {
+                prefs.set(enabled, forKey: "hcWatchMotionRepEstimate")
+            }
+            prefs.set(incoming, forKey: "hcMotionPreferenceTimestamp")
+            refreshMotionRepPreference()
         }
         if let voice = context["hcRunVoiceCues"] as? Bool {
             UserDefaults.standard.set(voice, forKey: "hcRunVoiceCues")
