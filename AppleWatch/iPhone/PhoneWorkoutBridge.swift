@@ -1302,6 +1302,27 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
             if let effort = activity.perceivedEffort {
                 items.append(String(format: "RPE %.1f", effort))
             }
+            if let pace = activity.paceSecondsPerKm, pace > 0 {
+                items.append(String(format: "%.2f min/km", pace / 60))
+            }
+            if let maxKg = activity.maxSetWeightKilograms {
+                items.append(String(format: "max set %.1f kg", maxKg))
+            }
+            if let active = activity.activeSetSeconds {
+                items.append(String(format: "active sets %.0f sec", active))
+            }
+            if let rest = activity.restSeconds {
+                items.append(String(format: "rest %.0f sec", rest))
+            }
+            if let efficiency = activity.runningEffectiveness {
+                items.append(String(format: "running effectiveness %.2f", efficiency))
+            }
+            if let vo2Max = activity.vo2Max {
+                items.append(String(format: "recorded VO2max %.1f", vo2Max))
+            }
+            if let enjoyment = activity.enjoyment {
+                items.append(String(format: "enjoyment %.1f", enjoyment))
+            }
             lines.append("Exercise: " + items.joined(separator: " | "))
         }
         lines.append("Run and exercise summaries never include raw GPS coordinates. Raw GPS routes and full heart-rate traces are not sent to the AI. Missing detailed metrics are unknown, not zero.")
