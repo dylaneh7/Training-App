@@ -245,6 +245,9 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
             cloudUploadedRunIDs = Set(s)
         }
         if let s: HCTrainingClock = load("lifting-clock.json") { liftClock = s }
+        if liftClock?.isActive == true, liftClock?.setStartedAt != nil {
+            beginRepEstimate()
+        }
         // A one-second independent heartbeat also works when Training is not
         // the visible navigation destination.
         restHeartbeat = Timer.publish(every: 0.5, on: .main, in: .common)
@@ -753,6 +756,7 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
               workout.id == clock.workoutID else { return }
         let undo = HCWorkoutUndo.workout(workout, startedAt: clock.startedAt)
         cancelBackgroundRestAlert()
+        endRepEstimate()
         liftClock = nil
         selectedGuidedSet = nil
         queuedNextGuidedSet = nil
@@ -1156,6 +1160,7 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
 
     func endLifting() {
         guard var clock = liftClock, clock.isActive, clock.setStartedAt == nil else { return }
+        endRepEstimate()
         if let paused = clock.pausedAt {
             clock.pausedSeconds += Date().timeIntervalSince(paused)
             clock.pausedAt = nil
@@ -1201,6 +1206,7 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
         }
         liftClock = clock
         save(clock, name: "lifting-clock.json")
+        beginRepEstimate()
         if playStartHaptic { self.playSetHaptic() }
     }
 
@@ -1220,6 +1226,7 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
 
     func cancelSet() {
         guard var clock = liftClock, clock.setStartedAt != nil else { return }
+        endRepEstimate()
         clock.setStartedAt = nil
         clock.setExerciseID = nil
         clock.setNumber = nil
@@ -1241,6 +1248,7 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
               !completedSets(for: exercise, setNumber: setNumber) else { return false }
 
         let now = Date()
+        endRepEstimate()
         var entry = HCLoggedSet(
             id: UUID(),
             workoutID: workout.id,
