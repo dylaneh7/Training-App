@@ -562,6 +562,10 @@ private struct IMUNEitanExplanation: View {
                     .font(.system(size: 9))
                     .foregroundStyle(WTheme.muted)
                     .fixedSize(horizontal: false, vertical: true)
+                Text("Workout transfer diagnostics · " + store.lastBackgroundTransfer)
+                    .font(.system(size: 9))
+                    .foregroundStyle(WTheme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
                 Text("WATCH BUILD " +
                      (Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "?") +
                      " · PHONE " + store.eitanPhoneBuild)
