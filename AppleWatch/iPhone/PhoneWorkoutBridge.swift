@@ -1210,29 +1210,6 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
                 lines.append(summary)
             }
         }
-        // Place explicitly shared Health records before the long training
-        // history; backend request context has a bounded size.
-        lines.append("Never invent missing readings, PRs or pace comparisons.")
-        if shareRecovery {
-            // All loaded Health-screen cards, even those not scrolled into view.
-            if !healthSnapshot.isEmpty {
-                lines.append(String(healthSnapshot.prefix(16_000)))
-            }
-            let primary = UserDefaults.standard.string(
-                forKey: "hcEitanPrimaryWearable") ?? "Auto"
-            lines.append("Primary wearable for recovery insights: " + primary +
-                ". Do not infer WHOOP HRV from Apple Watch SDNN or from Tredict Garmin history.")
-            for datum in recoveryHistory
-                .filter({ HCEitanWearableSource.accepts($0.source,
-                                                        preferred: primary) })
-                .prefix(48) {
-                let hrv = datum.hrvMS.map { String(format: "%.0f ms", $0) } ?? "missing"
-                let sleep = datum.sleepSeconds.map { String(format: "%.1f h", $0 / 3600) }
-                    ?? "missing"
-                let hr = datum.dailyLowHR.map { String(format: "%.0f bpm", $0) } ?? "missing"
-                lines.append("Recovery \(datum.source) \(datum.date): HRV RMSSD \(hrv), sleep \(sleep), low HR \(hr)")
-            }
-        }
         // Apple Health exercise workouts and Tredict/Garmin exercise records
         // share one timeline. This is only the exercise history iMun actually
         // imported; missing permissions, samples and detail never become facts.
@@ -1267,8 +1244,17 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
                 "\($0)=\(yearCounts[$0]?.count ?? 0) workouts"
             }.joined(separator: ", "))
         let query = question.lowercased()
-        let terms = Set(query.split { !$0.isLetter && !$0.isNumber }
+        var terms = Set(query.split { !$0.isLetter && !$0.isNumber }
             .map(String.init).filter { $0.count >= 4 })
+        if query.contains("run") { terms.insert("run") }
+        if query.contains("lift") || query.contains("weight") ||
+           query.contains("strength") || query.contains("gym") {
+            terms.insert("lift")
+        }
+        if query.contains("cycl") || query.contains("bike") ||
+           query.contains("biking") { terms.insert("cycle") }
+        if query.contains("swim") { terms.insert("swim") }
+        if query.contains("walk") { terms.insert("walk") }
         let matching = exerciseRecords.filter { activity in
             terms.contains(where: {
                 activity.date.lowercased().contains($0) ||
@@ -1277,8 +1263,8 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
                 activity.source.lowercased().contains($0)
             })
         }
-        let selected = matching.isEmpty ? Array(exerciseRecords.prefix(40)) :
-            Array(matching.prefix(70))
+        let selected = matching.isEmpty ? Array(exerciseRecords.prefix(28)) :
+            Array(matching.prefix(50))
         lines.append("Recorded exercise examples: \(selected.count) matching or recent imported workouts. A 24k-character request context cannot include every raw exercise record at once; ask by sport, date or year for targeted history. Values below came from actual source data:")
         for activity in selected {
             var items = [activity.date, activity.kind, activity.title,
@@ -1319,6 +1305,31 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
         }
         lines.append("Run and exercise summaries never include raw GPS coordinates. Raw GPS routes and full heart-rate traces are not sent to the AI. Missing detailed metrics are unknown, not zero.")
 
+
+        // Place explicitly shared Health records before the long training
+        // history; backend request context has a bounded size.
+        lines.append("Never invent missing readings, PRs or pace comparisons.")
+        if shareRecovery {
+            // All loaded Health-screen cards, even those not scrolled into view.
+            if !healthSnapshot.isEmpty {
+                // Reserve room for the exercise records and requested chats.
+                lines.append(String(healthSnapshot.prefix(4_500)))
+            }
+            let primary = UserDefaults.standard.string(
+                forKey: "hcEitanPrimaryWearable") ?? "Auto"
+            lines.append("Primary wearable for recovery insights: " + primary +
+                ". Do not infer WHOOP HRV from Apple Watch SDNN or from Tredict Garmin history.")
+            for datum in recoveryHistory
+                .filter({ HCEitanWearableSource.accepts($0.source,
+                                                        preferred: primary) })
+                .prefix(48) {
+                let hrv = datum.hrvMS.map { String(format: "%.0f ms", $0) } ?? "missing"
+                let sleep = datum.sleepSeconds.map { String(format: "%.1f h", $0 / 3600) }
+                    ?? "missing"
+                let hr = datum.dailyLowHR.map { String(format: "%.0f bpm", $0) } ?? "missing"
+                lines.append("Recovery \(datum.source) \(datum.date): HRV RMSSD \(hrv), sleep \(sleep), low HR \(hr)")
+            }
+        }
         // Include enough actual session history to answer trends and PR queries.
         // Derived running pace uses measured distance and elapsed time only.
         let permittedRuns = runHistory.filter { shareRecovery || !$0.fromAppleHealth }
@@ -1372,8 +1383,11 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
             lines.insert("Past coach conversation and athlete-supplied context (not clinical data or model training): " +
                          String(prior.suffix(7500)), at: 1)
         }
+        // The service limits context size. Prefer question-relevant workouts
+        // and explicit memory rather than silently cutting those off.
+        let boundedContext = String(lines.joined(separator: "\n").prefix(23_500))
         return try await cloud.askIMUNCoach(question: question,
-                                            context: lines.joined(separator: "\n"),
+                                            context: boundedContext,
                                             shareRecovery: shareRecovery)
     }
 
