@@ -4257,6 +4257,10 @@ private struct PremiumCoachConversation: View {
     @AppStorage("hcCoachConversationLocalV1") private var storedConversation = Data()
     @FocusState private var composerFocused: Bool
     @State private var question = ""
+    @State private var pendingAttachments: [IMUNCoachAttachment] = []
+    @State private var selectedPhoto: PhotosPickerItem?
+    @State private var showFileImporter = false
+    @State private var attachmentError: String?
     @State private var turns: [IMUNCoachTurn] = []
     @State private var isSending = false
     @State private var thinkingPhase = "IsAIah is thinking"
@@ -4297,7 +4301,8 @@ private struct PremiumCoachConversation: View {
     }
     private var canSend: Bool {
         coach.signedIn && !isSending &&
-        !question.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        (!question.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
+         !pendingAttachments.isEmpty)
     }
 
     private var shouldShowRunEvidence: Bool {
