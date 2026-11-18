@@ -25,6 +25,7 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
     @Published private(set) var lastArchiveAt: Date?
     // Apple Health running results stay on device unless user elects to share them.
     private var importedHealthRuns: [HCProgressRun] = []
+    private var importedHealthWorkouts: [HCTrainingActivity] = []
     private var remoteRunHistory: [HCProgressRun] = []
     private var tredictScheduledRuns: [HCTredictPlannedRun] = []
     private var preferredTredictRuns: [String: String] = [:]
@@ -892,10 +893,19 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
     }
 
     private func mergeHistoricalSources() {
-        let all = tredictSnapshot.activities + cloudTrainingActivities
+        let all = tredictSnapshot.activities + cloudTrainingActivities +
+            importedHealthWorkouts
         var unique: [HCTrainingActivity] = []
+        // Group by date/sport to avoid comparing every HealthKit workout
+        // against every other historical activity.
+        var candidatesByDayAndKind: [String: [Int]] = [:]
+        var seenIDs = Set<String>()
         for entry in all.sorted(by: { $0.date > $1.date }) {
-            let duplicate = unique.contains { other in
+            guard seenIDs.insert(entry.id).inserted else { continue }
+            let grouping = entry.date + "|" + entry.kind
+            let candidateIndices = candidatesByDayAndKind[grouping] ?? []
+            let duplicate = candidateIndices.contains { index in
+                let other = unique[index]
                 if other.id == entry.id { return true }
                 guard other.date == entry.date, other.kind == entry.kind else { return false }
                 if let a = other.durationSeconds, let b = entry.durationSeconds,
@@ -907,7 +917,10 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
                 }
                 return false
             }
-            if !duplicate { unique.append(entry) }
+            if !duplicate {
+                candidatesByDayAndKind[grouping, default: []].append(unique.count)
+                unique.append(entry)
+            }
         }
         trainingActivities = unique
 
@@ -1030,6 +1043,15 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
         eitanSnapshot = snapshot
         sendEitanToWatch()
         refreshEitanCloudSync()
+    }
+
+    /// All HealthKit workout summaries, including strength, cycling and walks,
+    /// remain on-device until the athlete explicitly shares with online IsAIah.
+    func updateHealthWorkouts(_ imported: [HCTrainingActivity]) {
+        guard imported.map(\.id) != importedHealthWorkouts.map(\.id) ||
+              imported.count != importedHealthWorkouts.count else { return }
+        importedHealthWorkouts = imported
+        mergeHistoricalSources()
     }
 
     /// A matching Apple Health workout marks the planned run complete in the
@@ -1211,6 +1233,78 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
                 lines.append("Recovery \(datum.source) \(datum.date): HRV RMSSD \(hrv), sleep \(sleep), low HR \(hr)")
             }
         }
+        // Apple Health exercise workouts and Tredict/Garmin exercise records
+        // share one timeline. This is only the exercise history iMun actually
+        // imported; missing permissions, samples and detail never become facts.
+        let exerciseRecords = trainingActivities.sorted { $0.date > $1.date }
+        let appleHealthCount = exerciseRecords.filter {
+            $0.id.hasPrefix("healthkit:")
+        }.count
+        lines.append("Exercise record coverage: \(exerciseRecords.count) distinct imported sessions (\(appleHealthCount) Apple Health workouts); Tredict/Garmin and connected services appear only if synced. Oldest: \(exerciseRecords.last?.date ?? "none"), newest: \(exerciseRecords.first?.date ?? "none"). An empty history does not mean the athlete never exercised.")
+        let bySport = Dictionary(grouping: exerciseRecords, by: { $0.kind.lowercased() })
+        lines.append("Exercise types (complete on-device record counts): " +
+            bySport.keys.sorted().map { "\($0)=\(bySport[$0]?.count ?? 0)" }
+                .joined(separator: ", "))
+        let yearCounts = Dictionary(grouping: exerciseRecords, by: {
+            String($0.date.prefix(4))
+        })
+        lines.append("Exercise history by year: " +
+            yearCounts.keys.sorted().map {
+                "\($0)=\(yearCounts[$0]?.count ?? 0) workouts"
+            }.joined(separator: ", "))
+        let query = question.lowercased()
+        let terms = Set(query.split { !$0.isLetter && !$0.isNumber }
+            .map(String.init).filter { $0.count >= 4 })
+        let matching = exerciseRecords.filter { activity in
+            terms.contains(where: {
+                activity.date.lowercased().contains($0) ||
+                activity.title.lowercased().contains($0) ||
+                activity.kind.lowercased().contains($0) ||
+                activity.source.lowercased().contains($0)
+            })
+        }
+        let selected = matching.isEmpty ? Array(exerciseRecords.prefix(40)) :
+            Array(matching.prefix(70))
+        lines.append("Recorded exercise examples: \(selected.count) matching or recent workouts (not the full HealthKit database). These values were read from source data:")
+        for activity in selected {
+            var items = [activity.date, activity.kind, activity.title,
+                         "source " + activity.source]
+            if let seconds = activity.durationSeconds, seconds > 0 {
+                items.append(String(format: "%.1f min", seconds / 60))
+            }
+            if let meters = activity.distanceMeters, meters > 0 {
+                items.append(String(format: "%.2f mi", meters / 1609.344))
+            }
+            if let bpm = activity.averageBPM {
+                items.append(String(format: "avg HR %.0f", bpm))
+            }
+            if let bpm = activity.maxBPM {
+                items.append(String(format: "max HR %.0f", bpm))
+            }
+            if let energy = activity.calories {
+                items.append(String(format: "%.0f active kcal", energy))
+            }
+            if let sets = activity.strengthSetCount { items.append("\(sets) strength sets") }
+            if let reps = activity.strengthRepetitions { items.append("\(reps) reps") }
+            if let kg = activity.tonnageKilograms {
+                items.append(String(format: "%.0f kg volume", kg))
+            }
+            if let watts = activity.powerWatts {
+                items.append(String(format: "%.0f W", watts))
+            }
+            if let rate = activity.cadenceSPM {
+                items.append(String(format: "%.0f cadence", rate))
+            }
+            if let meters = activity.ascentMeters {
+                items.append(String(format: "%.0f m ascent", meters))
+            }
+            if let effort = activity.perceivedEffort {
+                items.append(String(format: "RPE %.1f", effort))
+            }
+            lines.append("Exercise: " + items.joined(separator: " | "))
+        }
+        lines.append("Run and exercise summaries never include raw GPS coordinates. Raw GPS routes and full heart-rate traces are not sent to the AI. Missing detailed metrics are unknown, not zero.")
+
         // Include enough actual session history to answer trends and PR queries.
         // Derived running pace uses measured distance and elapsed time only.
         let windows: [(String, Int, Int)] = [
@@ -1240,11 +1334,11 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
                          String(format: "%.1f lb", value) +
                          ". Actual recorded set, not estimated 1RM.")
         }
-        for entry in performanceHistory.sorted(by: { $0.date > $1.date }).prefix(55) {
+        for entry in performanceHistory.sorted(by: { $0.date > $1.date }).prefix(32) {
             lines.append("Strength set: \(entry.date) \(entry.exercise) " +
                          String(format: "%.1f lb × %d reps", entry.weightLb, entry.reps))
         }
-        for run in runHistory.sorted(by: { $0.date > $1.date }).prefix(24) {
+        for run in runHistory.sorted(by: { $0.date > $1.date }).prefix(40) {
             let distance = run.distanceMeters.map {
                 String(format: "%.2f mi", $0 / 1609.344)
             } ?? "distance unavailable"
@@ -1259,9 +1353,9 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
         }
         let prior = recentConversation.trimmingCharacters(in: .whitespacesAndNewlines)
         if !prior.isEmpty {
-            // Keep history small and device-initiated. Nothing is uploaded while idle.
-            lines.insert("Recent coach conversation (for continuity only): " +
-                         String(prior.suffix(1000)), at: 1)
+            // Chat memory is user-controlled and only uploaded with Send.
+            lines.insert("Past coach conversation and athlete-supplied context (not clinical data or model training): " +
+                         String(prior.suffix(7500)), at: 1)
         }
         return try await cloud.askIMUNCoach(question: question,
                                             context: lines.joined(separator: "\n"),
