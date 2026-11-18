@@ -184,7 +184,16 @@ enum HCSetReconciliation {
                 startedAt: (row["started_at"] as? String).flatMap(cloudDate),
                 durationSeconds: (row["duration_seconds"] as? NSNumber)?.doubleValue,
                 source: row["source"] as? String)
-            entry.side = exercise.side(forSet: number)
+            let storedSide = (row["working_side"] as? String)
+                .flatMap(HCWorkingSide.init(rawValue:))
+            entry.side = storedSide ?? exercise.side(forSet: number)
+            if let raw = row["motion_insight"],
+               !(raw is NSNull),
+               let data = try? JSONSerialization.data(withJSONObject: raw),
+               let insight = try? JSONDecoder().decode(
+                    HCMotionSetInsight.self, from: data) {
+                entry.motionInsight = insight
+            }
             return entry
         }
     }
