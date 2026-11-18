@@ -44,7 +44,8 @@ struct HCExercise: Codable, Identifiable, Hashable {
             .replacingOccurrences(of: "—", with: " ")
         return ["one arm", "single arm", "one hand", "single hand",
                 "one leg", "single leg", "bulgarian split squat",
-                "split squat", "flat bench dumbbell row",
+                "split squat", "unilateral ", "single sided",
+                "flat bench dumbbell row", "flat bench dumbell row",
                 "flat bench db row"].contains(where: { n.contains($0) })
     }
 
