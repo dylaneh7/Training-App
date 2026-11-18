@@ -1071,7 +1071,12 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
         save(exercise.id, name: "guided-exercise-id.json")
         clock.setStartedAt = Date()
         clock.restEndsAt = nil
-        cancelBackgroundRestAlert()
+        // When auto-advance happens while the Watch is not frontmost, let
+        // watchOS deliver the already-due rest notification before clearing it.
+        if playStartHaptic ||
+           WKApplication.shared().applicationState == .active {
+            cancelBackgroundRestAlert()
+        }
         liftClock = clock
         save(clock, name: "lifting-clock.json")
         if playStartHaptic { self.playSetHaptic() }
