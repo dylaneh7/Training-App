@@ -248,3 +248,124 @@ enum HCSetReconciliation {
         return f.date(from: raw)
     }
 }
+
+
+/// Descriptive trends derived from recorded sets. Forecasts are conservative
+/// arithmetic projections, NOT clinical fatigue, strength, or form assessment.
+struct IMUNMotionForecast: Hashable {
+    let exerciseName: String
+    let location: String
+    let sessionCount: Int
+    let lastAverageCycleSeconds: Double
+    let projectedNextCycleSeconds: Double
+    let trendPercentPerSession: Double
+    let confidence: String
+    let explanation: String
+}
+
+struct IMUNStrengthForecast: Hashable {
+    let exerciseName: String
+    let sessionCount: Int
+    let lastEstimatedMaxLb: Double
+    let projectedNextEstimatedMaxLb: Double
+    let confidence: String
+}
+
+enum IMUNMotionAnalytics {
+    static func placement(_ motion: HCMotionSetInsight) -> String {
+        motion.wearableLocation ??
+        IMUNWearableLocation.fromLegacy(motion.wearSide,
+            deviceID:"appleWatch").rawValue
+    }
+
+    static func comparableSets(_ records: [HCLoggedSet],
+                               exerciseName: String,
+                               location: String) -> [HCLoggedSet] {
+        let target = HCProgramCatalog.normalized(exerciseName)
+        return records.filter { entry in
+            guard let detail = entry.motionInsight else { return false }
+            return HCProgramCatalog.normalized(entry.exerciseName) == target &&
+                detail.source == "Apple Watch" &&
+                placement(detail) == location &&
+                (detail.averageCycleSeconds ?? 0) > 0.25 &&
+                (detail.averageCycleSeconds ?? 0) < 15 &&
+                (detail.analysisConfidence != "Low") &&
+                (detail.sampleCoveragePercent ?? 100) >= 65
+        }.sorted { $0.completedAt < $1.completedAt }
+    }
+
+    /// Only same-exercise and same-placement days can be compared.
+    /// Requires >= 4 different sessions; predictions are capped to avoid
+    /// extrapolating sensor noise into implausible coaching advice.
+    static func forecastMotion(_ records: [HCLoggedSet],
+                               exerciseName: String, location: String)
+        -> IMUNMotionForecast? {
+        let samples = comparableSets(records, exerciseName: exerciseName,
+                                     location: location)
+        let grouped = Dictionary(grouping: samples, by: {
+            $0.workoutDate + "/" + $0.sessionKey
+        })
+        let rows: [(date: Date, value: Double)] = grouped.compactMap { _, sets in
+            guard let date = sets.first.map(\.completedAt) else { return nil }
+            let values = sets.compactMap { $0.motionInsight?.averageCycleSeconds }
+            guard !values.isEmpty else { return nil }
+            return (date, values.reduce(0, +) / Double(values.count))
+        }.sorted { $0.date < $1.date }
+        let recent = Array(rows.suffix(8))
+        guard recent.count >= 4, let last = recent.last?.value, last > 0 else {
+            return nil
+        }
+        let values = recent.map(\.value)
+        let first = values.first ?? last
+        let span = Double(values.count - 1)
+        let slope = span > 0 ? (last - first) / span : 0
+        let maxChange = last * 0.08
+        let projected = max(0.25, last + max(-maxChange, min(maxChange, slope)))
+        let percent = last > 0 ? (projected - last) / last * 100 : 0
+        let mean = values.reduce(0, +) / Double(values.count)
+        let noise = sqrt(values.reduce(0) { $0 + pow($1 - mean, 2) } /
+            Double(values.count))
+        let stable = noise / max(0.001, mean) < 0.20
+        let confidence = recent.count >= 6 && stable ? "Moderate" : "Low"
+        return IMUNMotionForecast(
+            exerciseName: exerciseName, location: location,
+            sessionCount: recent.count,
+            lastAverageCycleSeconds: last,
+            projectedNextCycleSeconds: projected,
+            trendPercentPerSession: percent,
+            confidence: confidence,
+            explanation: "Projected from \(recent.count) recorded sessions with the same exercise and sensor placement. Cycle timing alone does not establish better technique, strength or readiness."
+        )
+    }
+
+    static func forecastStrength(_ records: [HCLoggedSet],
+                                 exerciseName: String) -> IMUNStrengthForecast? {
+        let target = HCProgramCatalog.normalized(exerciseName)
+        let eligible = records.filter {
+            HCProgramCatalog.normalized($0.exerciseName) == target &&
+            ($0.weightLb ?? 0) > 0 && (1...12).contains($0.reps)
+        }
+        let grouped = Dictionary(grouping: eligible,
+            by: { $0.workoutDate + "/" + $0.sessionKey })
+        let values: [(Date, Double)] = grouped.compactMap { _, sets in
+            guard let date = sets.map(\.completedAt).max() else { return nil }
+            let maxima = sets.compactMap { entry -> Double? in
+                guard let load = entry.weightLb else { return nil }
+                return load * (1 + Double(entry.reps) / 30)
+            }
+            guard let best = maxima.max() else { return nil }
+            return (date, best)
+        }.sorted { $0.0 < $1.0 }
+        let recent = Array(values.suffix(8))
+        guard recent.count >= 4, let first = recent.first?.1,
+              let last = recent.last?.1 else { return nil }
+        let trend = (last - first) / Double(recent.count - 1)
+        let next = max(0, last + max(-last * 0.05,
+                                   min(last * 0.05, trend)))
+        return IMUNStrengthForecast(
+            exerciseName: exerciseName, sessionCount: recent.count,
+            lastEstimatedMaxLb: last,
+            projectedNextEstimatedMaxLb: next,
+            confidence: recent.count >= 6 ? "Moderate" : "Low")
+    }
+}
