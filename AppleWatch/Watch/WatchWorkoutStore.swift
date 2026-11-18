@@ -166,15 +166,28 @@ private final class HCMotionRepEstimator {
         if observations.isEmpty {
             observations.append("Detected wrist cycles were relatively consistent")
         }
-        return HCMotionSetInsight(
+        let mean = periods.isEmpty ? nil :
+            periods.reduce(0, +) / Double(periods.count)
+        let variability: Double? = mean.flatMap { center in
+            guard center > 0, periods.count >= 3 else { return nil }
+            let variance = periods.reduce(0.0) {
+                $0 + ($1 - center) * ($1 - center)
+            } / Double(periods.count)
+            return 100 * sqrt(variance) / center
+        }
+        var result = HCMotionSetInsight(
             wearSide: wearSide,
             detectedReps: count,
             averageCycleSeconds: meanPeriod,
             lastCycleSeconds: lastPeriod,
             lastCycleSlowdownPercent: slowdown,
-            lastWristExcursionChangePercent: motionChange,
+            lastWristMotionIntensityChangePercent: motionChange,
             note: observations.joined(separator: ". ") + ". These are experimental wrist-motion estimates, not validated form or range-of-motion measurements."
         )
+        result.cycleSeconds = Array(periods.suffix(50))
+        result.cycleWristMotionPeaks = Array(peaks.suffix(50))
+        result.cycleTimingVariabilityPercent = variability
+        return result
     }
 }
 
