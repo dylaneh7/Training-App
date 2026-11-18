@@ -1158,9 +1158,12 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
         UserDefaults.standard.object(forKey:"hcWatchMotionRepEstimate") as? Bool ?? true
     }
 
+    private var watchLocation: IMUNWearableLocation {
+        IMUNWearablePlacementStore.location("appleWatch")
+    }
+
     private var wornAppleWatchSide: HCWorkingSide? {
-        HCWorkingSide(rawValue:
-            UserDefaults.standard.string(forKey: "hcWatchWearSide") ?? "")
+        watchLocation.side
     }
 
     var activeSetSide: HCWorkingSide? {
@@ -1181,8 +1184,11 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
             HCPayload.kind: "imunMotionPreferencesV1",
             "hcMotionPreferenceTimestamp": prefs.double(
                 forKey:"hcMotionPreferenceTimestamp"),
-            "hcWatchWearSide": prefs.string(forKey:"hcWatchWearSide") ?? "unknown",
-            "hcWhoopWearSide": prefs.string(forKey:"hcWhoopWearSide") ?? "off",
+            "hcWearablePlacementsV2": IMUNWearablePlacementStore.payload(defaults: prefs),
+            "hcWatchWearSide":
+                IMUNWearablePlacementStore.location("appleWatch", defaults: prefs).legacySide,
+            "hcWhoopWearSide":
+                IMUNWearablePlacementStore.location("whoop", defaults: prefs).legacySide,
             "hcWatchMotionRepEstimate": prefs.object(forKey:
                 "hcWatchMotionRepEstimate") as? Bool ?? true,
             "hcWatchMotionRecognitionEnabled": prefs.object(forKey:
@@ -1201,7 +1207,7 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
     /// No unilateral auto-count from a device on the opposite wrist.
     var motionCanTrackActiveSide: Bool {
         guard let side = activeSetSide else { return true }
-        return wornAppleWatchSide == side
+        return watchLocation.side == side
     }
 
     /// WHOOP has no supported public raw IMU stream. It is not treated as
@@ -1282,7 +1288,7 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
             return
         }
         guard motionCanTrackActiveSide else {
-            motionRepStatus = "Apple Watch is not on the working wrist · enter reps manually"
+            motionRepStatus = "Apple Watch is not on the working arm · enter reps manually"
             repEstimator.stop()
             return
         }
@@ -1566,8 +1572,9 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
               !completedSets(for: exercise, setNumber: setNumber) else { return false }
 
         let now = Date()
-        let motionInsight = motionRepEnabled && motionCanTrackActiveSide ?
+        var motionInsight = motionRepEnabled && motionCanTrackActiveSide ?
             repEstimator.insight(wearSide: wornAppleWatchSide?.rawValue ?? "unknown") : nil
+        motionInsight?.wearableLocation = watchLocation.rawValue
         endRepEstimate()
         var entry = HCLoggedSet(
             id: UUID(),
@@ -2236,13 +2243,22 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
         if let incoming = context["hcMotionPreferenceTimestamp"] as? Double,
            incoming > UserDefaults.standard.double(forKey: "hcMotionPreferenceTimestamp") {
             let prefs = UserDefaults.standard
-            if let wrist = context["hcWatchWearSide"] as? String,
-               ["unknown","left","right"].contains(wrist) {
-                prefs.set(wrist, forKey: "hcWatchWearSide")
-            }
-            if let whoop = context["hcWhoopWearSide"] as? String,
-               ["off","left","right","other"].contains(whoop) {
-                prefs.set(whoop, forKey: "hcWhoopWearSide")
+            if let placements = context["hcWearablePlacementsV2"] as? [String: String] {
+                IMUNWearablePlacementStore.apply(placements, defaults: prefs)
+            } else {
+                // Backward compatibility with older phone builds.
+                if let watch = context["hcWatchWearSide"] as? String,
+                   ["unknown","left","right"].contains(watch) {
+                    IMUNWearablePlacementStore.save(
+                        .fromLegacy(watch, deviceID: "appleWatch"),
+                        for: "appleWatch", defaults: prefs)
+                }
+                if let whoop = context["hcWhoopWearSide"] as? String,
+                   ["off","left","right","other"].contains(whoop) {
+                    IMUNWearablePlacementStore.save(
+                        .fromLegacy(whoop, deviceID: "whoop"),
+                        for: "whoop", defaults: prefs)
+                }
             }
             if let enabled = context["hcWatchMotionRepEstimate"] as? Bool {
                 prefs.set(enabled, forKey: "hcWatchMotionRepEstimate")
