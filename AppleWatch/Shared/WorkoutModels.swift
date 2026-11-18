@@ -16,8 +16,12 @@ struct HCMotionSetInsight: Codable, Hashable {
     var averageCycleSeconds: Double?
     var lastCycleSeconds: Double?
     var lastCycleSlowdownPercent: Double?
-    var lastWristExcursionChangePercent: Double?
+    var lastWristMotionIntensityChangePercent: Double?
     var note: String
+    /// Compact derived per-cycle summaries only, not raw IMU data.
+    var cycleSeconds: [Double]? = nil
+    var cycleWristMotionPeaks: [Double]? = nil
+    var cycleTimingVariabilityPercent: Double? = nil
 }
 
 
