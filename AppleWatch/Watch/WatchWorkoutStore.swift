@@ -458,8 +458,9 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
             if reps >= 4 &&
                (UserDefaults.standard.object(
                    forKey:"hcWatchMotionRecognitionEnabled") as? Bool ?? false) {
-                if let current = self.repEstimator.insight(
+                if var current = self.repEstimator.insight(
                     wearSide: self.wornAppleWatchSide?.rawValue ?? "unknown") {
+                    current.wearableLocation = self.watchLocation.rawValue
                     self.motionRecognitionHint = self.recognizeMotionProfile(current)
                 }
             }
@@ -1282,6 +1283,9 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
 
     /// No unilateral auto-count from a device on the opposite wrist.
     var motionCanTrackActiveSide: Bool {
+        // A device marked as not worn, unknown, or positioned outside the
+        // arm must never silently count an unrelated movement.
+        guard watchLocation.canAttributeArm else { return false }
         guard let side = activeSetSide else { return true }
         return watchLocation.side == side
     }
@@ -1324,8 +1328,10 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
               let rotation = current.meanWristRotationDegrees, rotation > 1
         else { return nil }
         let historical = sets.filter {
-            $0.motionInsight?.wearSide == current.wearSide &&
-            ($0.motionInsight?.detectedReps ?? 0) >= 4
+            $0.motionInsight.map(IMUNMotionAnalytics.placement) ==
+                current.wearableLocation &&
+            ($0.motionInsight?.detectedReps ?? 0) >= 4 &&
+            ($0.motionInsight?.analysisConfidence != "Low")
         }
         let grouped = Dictionary(grouping: historical) {
             HCProgramCatalog.normalized($0.exerciseName)
@@ -1364,7 +1370,9 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
             return
         }
         guard motionCanTrackActiveSide else {
-            motionRepStatus = "Apple Watch is not on the working arm · enter reps manually"
+            motionRepStatus = watchLocation.canAttributeArm ?
+                "Apple Watch is not on the working arm · enter reps manually" :
+                "Choose Apple Watch arm position in Settings before auto-counting"
             repEstimator.stop()
             return
         }
@@ -1651,6 +1659,15 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
         var motionInsight = motionRepEnabled && motionCanTrackActiveSide ?
             repEstimator.insight(wearSide: wornAppleWatchSide?.rawValue ?? "unknown") : nil
         motionInsight?.wearableLocation = watchLocation.rawValue
+        if let position = motionInsight?.wearableLocation
+            .flatMap(IMUNWearableLocation.init(rawValue:)),
+           !position.isWrist {
+            motionInsight?.analysisConfidence = "Low"
+            var warnings = motionInsight?.analysisWarnings ?? []
+            warnings.append("Watch not worn at calibrated wrist location")
+            motionInsight?.analysisWarnings = warnings
+            motionInsight?.note += " Watch arm placement is experimental and may change detection accuracy."
+        }
         endRepEstimate()
         var entry = HCLoggedSet(
             id: UUID(),
