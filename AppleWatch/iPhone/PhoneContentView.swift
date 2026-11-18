@@ -139,7 +139,7 @@ private struct StrengthHome: View {
                             VStack(alignment: .leading, spacing: 5) {
                                 Text(exercise.name).font(.body.weight(.semibold))
                                 HStack {
-                                    Text("\(exercise.prescribedSets) sets × \(exercise.repDescription)")
+                                    Text("\(exercise.setSummary) × \(exercise.repDescription)")
                                     Spacer()
                                     let suggestion = coach.suggestion(for: exercise, on:session.date,
                                                                        aggressive:aggressive)
@@ -182,13 +182,17 @@ private struct StrengthHome: View {
                 guard index <= 40 else { return }
                 let draft = HCExercise(
                     id:UUID().uuidString,name:item.name,originalName:item.name,
-                    exerciseIndex:index,prescribedSets:3,repMin:8,repMax:12,
+                    exerciseIndex:index,
+                    prescribedSets:HCExercise.isOneSidedName(item.name) ? 6 : 3,
+                    repMin:8,repMax:12,
                     suggestedWeightLb:nil,restSeconds:120
                 )
                 let suggestion = coach.suggestion(for:draft,on:plan.date,aggressive:aggressive)
                 var added = HCExercise(
                     id:draft.id,name:item.name,originalName:item.name,
-                    exerciseIndex:index,prescribedSets:3,repMin:8,repMax:12,
+                    exerciseIndex:index,
+                    prescribedSets:HCExercise.isOneSidedName(item.name) ? 6 : 3,
+                    repMin:8,repMax:12,
                     suggestedWeightLb:suggestion.weightLb,restSeconds:120
                 )
                 added.instructions = item.instructions
@@ -242,9 +246,16 @@ struct StrengthExerciseDetails: View {
     @State private var newWeight = ""
     @State private var newReps = 8
     @State private var newRIR = 2
+    @State private var workingSide: HCWorkingSide = .left
+    @State private var movementMode = "auto"
     @State private var showSwap = false
     @State private var editingSet: HCLoggedSet?
 
+    private var oneSidedMode: Bool {
+        movementMode == "unilateral" ||
+        (movementMode == "auto" &&
+         HCExercise.isOneSidedName(exercise?.name ?? ""))
+    }
     private var plan: HCWorkout? { coach.workout }
     private var exercise: HCExercise? {
         plan?.exercises.first { $0.id == exerciseID }
@@ -293,7 +304,25 @@ struct StrengthExerciseDetails: View {
                 }
 
                 Section("Plan Editor") {
-                    Stepper("Working sets: \(sets)",value:$sets,in:1...12)
+                    Picker("Movement pattern", selection: $movementMode) {
+                        Text("Auto detect").tag("auto")
+                        Text("Both sides together").tag("bilateral")
+                        Text("One side at a time").tag("unilateral")
+                    }
+                    .onChange(of: movementMode) { _, _ in
+                        if oneSidedMode && !sets.isMultiple(of: 2) {
+                            sets *= 2
+                        }
+                    }
+                    Stepper(oneSidedMode ?
+                            "Total sets: \(sets) (\(sets / 2) per side)" :
+                            "Working sets: \(sets)",
+                            value:$sets, in:oneSidedMode ? 2...24 : 1...12,
+                            step:oneSidedMode ? 2 : 1)
+                    if oneSidedMode {
+                        Text("Six total sets means three left + three right.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
                     Stepper("Minimum reps: \(minimum)",value:$minimum,in:1...30)
                     Stepper("Maximum reps: \(maximum)",value:$maximum,in:minimum...40)
                     Stepper("Rest: \(rest) seconds",value:$rest,in:15...360,step:15)
@@ -319,6 +348,12 @@ struct StrengthExerciseDetails: View {
                     }
                     TextField("Actual weight lb (leave empty for unrecorded)",text:$newWeight)
                         .keyboardType(.decimalPad)
+                    if exercise.isUnilateral {
+                        Picker("Working side", selection: $workingSide) {
+                            Text("Left").tag(HCWorkingSide.left)
+                            Text("Right").tag(HCWorkingSide.right)
+                        }
+                    }
                     Stepper("Actual reps: \(newReps)",value:$newReps,in:1...60)
                     Stepper("Actual RIR: \(newRIR)",value:$newRIR,in:0...6)
                     if coach.phoneSessionStartedAt == nil {
@@ -330,7 +365,8 @@ struct StrengthExerciseDetails: View {
                     } else if coach.phoneSetExerciseID == exerciseID {
                         Button("Stop & Save Set") {
                             coach.logFromPhone(exercise:exercise,
-                                weightLb:Double(newWeight),reps:newReps,rir:Double(newRIR))
+                                weightLb:Double(newWeight),reps:newReps,rir:Double(newRIR),
+                                sideOverride:exercise.isUnilateral ? workingSide : nil)
                         }
                         .buttonStyle(.borderedProminent)
                         Button("Cancel Set",role:.destructive) { coach.cancelPhoneSet() }
@@ -340,7 +376,8 @@ struct StrengthExerciseDetails: View {
                     }
                     Button("Log Set Without Timer") {
                         coach.logFromPhone(exercise:exercise,
-                            weightLb:Double(newWeight),reps:newReps,rir:Double(newRIR))
+                            weightLb:Double(newWeight),reps:newReps,rir:Double(newRIR),
+                                sideOverride:exercise.isUnilateral ? workingSide : nil)
                     }
                     if coach.phoneRestEndsAt != nil {
                         Button("Skip Rest") { coach.skipPhoneRest() }
@@ -356,11 +393,16 @@ struct StrengthExerciseDetails: View {
                             editingSet = set
                         } label: {
                             HStack {
-                                Text("Set \(set.index)")
+                                Text("Set \(set.index)" +
+                                     (set.side.map { " · \($0.title)" } ?? ""))
                                 Spacer()
                                 Text("\(set.weightLb.map{$0.formatted()+" lb"} ?? "Unrecorded") × \(set.reps)")
                                 Image(systemName:"pencil")
                             }
+                        }
+                        if let insight = set.motionInsight {
+                            Text("IsAIah motion note · " + insight.note)
+                                .font(.caption).foregroundStyle(.secondary)
                         }
                     }
                 }
@@ -380,6 +422,8 @@ struct StrengthExerciseDetails: View {
     private func loadFromExercise() {
         guard let e = exercise else { return }
         sets=e.prescribedSets;minimum=e.repMin;maximum=e.repMax
+        movementMode=e.movementType ?? "auto"
+        workingSide=logged.count.isMultiple(of: 2) ? .left : .right
         rest=e.restSeconds
         weightText=e.suggestedWeightLb.map{$0.formatted()} ?? ""
         instructionText=e.instructions ?? HCExerciseLibrary.all.first {
@@ -405,6 +449,7 @@ struct StrengthExerciseDetails: View {
             repMin:minimum,repMax:max(maximum,minimum),
             suggestedWeightLb:Double(weightText),restSeconds:rest)
         updated.instructions=instructionText.isEmpty ? nil : instructionText
+        updated.movementType=movementMode == "auto" ? nil : movementMode
         update(updated)
     }
 
@@ -419,6 +464,16 @@ struct StrengthExerciseDetails: View {
             repMin:minimum,repMax:maximum,
             suggestedWeightLb:suggestion.weightLb,restSeconds:rest)
         swapped.instructions=item.instructions
+        swapped.movementType=nil
+        // Converting a bilateral movement into a unilateral one should
+        // create a left/right pair for each originally planned round.
+        if swapped.isUnilateral && !e.isUnilateral {
+            swapped = HCExercise(id:e.id,name:item.name,originalName:item.name,
+                exerciseIndex:e.exerciseIndex,prescribedSets:sets * 2,
+                repMin:minimum,repMax:maximum,
+                suggestedWeightLb:suggestion.weightLb,restSeconds:rest,
+                instructions:item.instructions)
+        }
         update(swapped)
         dismiss()
     }
