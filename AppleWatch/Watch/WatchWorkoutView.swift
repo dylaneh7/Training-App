@@ -650,9 +650,12 @@ struct WatchWorkoutView: View {
     @AppStorage("hcDesignTextHex") private var visualInk = "F6F3E9"
     @Environment(\.scenePhase) private var scenePhase
     @State private var lastCloudScheduleCheck = Date.distantPast
-    // Low-rate foreground refresh: no continuous iPhone connection required.
+    @State private var lastCloudProgressCheck = Date.distantPast
+    @State private var lastCloudEitanCheck = Date.distantPast
+    // Short foreground cloud reconciliation while training; never promise
+    // instantaneous offline or background delivery on either platform.
     private let progressPulse = Timer.publish(
-        every: 15, on: .main, in: .common).autoconnect()
+        every: 6, on: .main, in: .common).autoconnect()
 
     var body: some View {
         NavigationStack {
@@ -838,16 +841,27 @@ struct WatchWorkoutView: View {
             }
         }
         .onReceive(progressPulse) { _ in
-            if scenePhase == .active && store.cloudSignedIn {
-                // iMun Watch can receive a new full schedule even if
-                // WatchConnectivity says no live iPhone route exists.
-                if Date().timeIntervalSince(lastCloudScheduleCheck) >= 60 {
-                    lastCloudScheduleCheck = Date()
-                    store.refreshCloudWorkout()
-                }
+            guard scenePhase == .active, store.cloudSignedIn else { return }
+            let now = Date()
+            let isTraining = store.liftClock?.isActive == true ||
+                             store.runClock?.isActive == true
+            // During an active session, reconcile new phone/Watch sets
+            // and undo events in seconds. Idle screens use a lighter rate.
+            if now.timeIntervalSince(lastCloudProgressCheck) >=
+                (isTraining ? 6 : 18) {
+                lastCloudProgressCheck = now
                 store.refreshCloudSets()
-                store.refreshCloudAppearance()
+                store.uploadPendingCloudSets()
+            }
+            if now.timeIntervalSince(lastCloudScheduleCheck) >=
+                (isTraining ? 12 : 30) {
+                lastCloudScheduleCheck = now
+                store.refreshCloudWorkout()
+            }
+            if now.timeIntervalSince(lastCloudEitanCheck) >= 30 {
+                lastCloudEitanCheck = now
                 store.refreshCloudEitan()
+                store.refreshCloudAppearance()
             }
         }
         .onChange(of: scenePhase) { _, phase in
