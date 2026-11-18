@@ -1656,6 +1656,9 @@ private struct PremiumExerciseSession: View {
     @State private var weight = 0.0
     @State private var reps = 8
     @State private var rir = 2
+    @State private var workingSide: HCWorkingSide = .left
+    @State private var smartSwapOpen = false
+    @State private var swapError: String?
 
     private var ex: HCExercise? { coach.workout?.exercises.first { $0.id == exerciseID } }
     private var completed: [HCLoggedSet] {
@@ -1672,7 +1675,7 @@ private struct PremiumExerciseSession: View {
                 VStack(alignment: .leading, spacing: 18) {
                     PremiumHeader(eyebrow: "STRENGTH / EXERCISE",
                                   title: ex.name,
-                                  subtitle: "\(ex.prescribedSets) sets · \(ex.repDescription) reps · \(ex.restSeconds)s rest")
+                                  subtitle: "\(ex.setSummary) · \(ex.repDescription) reps · \(ex.restSeconds)s rest")
                     HCCard(accent: HCDesign.aqua) {
                         VStack(alignment: .leading, spacing: 11) {
                             HCAccentTag(title: "INTELLIGENT TARGET", color: HCDesign.aqua)
@@ -1712,6 +1715,33 @@ private struct PremiumExerciseSession: View {
                                                 decrement: { weight = max(0, weight - 5) },
                                                 increment: { weight = min(1500, weight + 5) })
                             }
+                            if ex.isUnilateral {
+                                HStack(spacing: 10) {
+                                    ForEach([HCWorkingSide.left, HCWorkingSide.right],
+                                            id: \.self) { side in
+                                        Button {
+                                            workingSide = side
+                                        } label: {
+                                            HStack {
+                                                Text(side == .left ? "LEFT" : "RIGHT")
+                                                    .font(.system(size: 12, weight: .bold))
+                                                Spacer()
+                                                Text("\(completed.filter {
+                                                    $0.side == side
+                                                }.count)/\(ex.prescribedSets / 2)")
+                                                    .font(.system(size: 11))
+                                            }
+                                            .padding(12)
+                                            .foregroundStyle(workingSide == side ?
+                                                HCDesign.canvas : HCDesign.ink)
+                                            .background(workingSide == side ?
+                                                HCDesign.electric : HCDesign.card,
+                                                in: RoundedRectangle(cornerRadius: 11))
+                                        }
+                                        .buttonStyle(.plain)
+                                    }
+                                }
+                            }
                             HCNumberControl(label: "REPETITIONS", value: "\(reps)",
                                             decrement: { reps = max(1, reps - 1) },
                                             increment: { reps = min(60, reps + 1) })
@@ -1740,7 +1770,8 @@ private struct PremiumExerciseSession: View {
                             } else if active {
                                 HCFilledButton(title: "STOP & SAVE SET", icon: "checkmark.circle.fill") {
                                     coach.logFromPhone(exercise: ex, weightLb: hasWeight ? weight : nil,
-                                                       reps: reps, rir: Double(rir))
+                                                       reps: reps, rir: Double(rir),
+                                                       sideOverride: ex.isUnilateral ? workingSide : nil)
                                 }
                                 HCOutlineButton(title: "Cancel active set", icon: "xmark") {
                                     coach.cancelPhoneSet()
@@ -1760,7 +1791,8 @@ private struct PremiumExerciseSession: View {
                             }
                             HCOutlineButton(title: "Log without timing", icon: "plus.circle") {
                                 coach.logFromPhone(exercise: ex, weightLb: hasWeight ? weight : nil,
-                                                   reps: reps, rir: Double(rir))
+                                                   reps: reps, rir: Double(rir),
+                                                   sideOverride: ex.isUnilateral ? workingSide : nil)
                             }
                             if let last = completed.max(by: { $0.completedAt < $1.completedAt }) {
                                 HCOutlineButton(title: "Undo Set",
@@ -1776,7 +1808,8 @@ private struct PremiumExerciseSession: View {
                             HStack {
                                 Image(systemName: "checkmark.circle.fill")
                                     .foregroundStyle(HCDesign.electric)
-                                Text("SET \(set.index)")
+                                Text("SET \(set.index)" +
+                                     (set.side.map { " · \($0.title.uppercased())" } ?? ""))
                                     .font(HCDesign.label(12))
                                 Spacer()
                                 Text("\(set.weightLb?.formatted() ?? "—") lb × \(set.reps)")
@@ -1791,9 +1824,27 @@ private struct PremiumExerciseSession: View {
                                 }
                                 .buttonStyle(.plain)
                                 .accessibilityLabel("Undo Set \(set.index)")
-
+                            }
+                            if let insight = set.motionInsight {
+                                VStack(alignment: .leading, spacing: 5) {
+                                    Text("IsAIah · MOTION REVIEW")
+                                        .font(.system(size: 10, weight: .bold))
+                                        .foregroundStyle(HCDesign.aqua)
+                                    Text(insight.note)
+                                        .font(.system(size: 12))
+                                        .foregroundStyle(HCDesign.secondary)
+                                }
                             }
                         }
+                    }
+                    HCFilledButton(title: "SMART SWAP · SIMILAR MOVEMENTS",
+                                   icon: "arrow.triangle.2.circlepath") {
+                        smartSwapOpen = true
+                    }
+                    if let swapError {
+                        Text(swapError)
+                            .font(.system(size: 11))
+                            .foregroundStyle(HCDesign.aqua)
                     }
                     NavigationLink {
                         StrengthExerciseDetails(exerciseID: exerciseID)
@@ -1827,9 +1878,54 @@ private struct PremiumExerciseSession: View {
         .scrollIndicators(.hidden)
         .hcPage()
         .navigationBarTitleDisplayMode(.inline)
+        .sheet(isPresented: $smartSwapOpen) {
+            if let exercise = ex {
+                ExerciseLibraryPicker(replacing: exercise) { selected in
+                    guard let plan = coach.workout,
+                          let index = plan.exercises.firstIndex(where: {
+                              $0.id == exercise.id
+                          }) else { return }
+                    guard completed.isEmpty,
+                          coach.phoneSetExerciseID != exercise.id else {
+                        swapError = "Undo recorded or active sets before swapping this movement."
+                        return
+                    }
+                    let rounds = exercise.isUnilateral ?
+                        max(1, exercise.prescribedSets / 2) : exercise.prescribedSets
+                    let slots = selected.isUnilateral ? rounds * 2 : rounds
+                    let proto = HCExercise(id: exercise.id,
+                        name: selected.name, originalName: selected.name,
+                        exerciseIndex: exercise.exerciseIndex,
+                        prescribedSets: slots,
+                        repMin: exercise.repMin, repMax: exercise.repMax,
+                        suggestedWeightLb: nil, restSeconds: exercise.restSeconds)
+                    let load = coach.suggestion(for: proto,
+                                    on: plan.date, aggressive: aggressive).weightLb
+                    var updated = HCExercise(id: exercise.id,
+                        name: selected.name, originalName: selected.name,
+                        exerciseIndex: exercise.exerciseIndex,
+                        prescribedSets: slots, repMin: exercise.repMin,
+                        repMax: exercise.repMax,
+                        suggestedWeightLb: load, restSeconds: exercise.restSeconds)
+                    updated.instructions = selected.instructions
+                    var exercises = plan.exercises
+                    exercises[index] = updated
+                    coach.saveEditedWorkout(HCWorkout(id: plan.id,
+                        date: plan.date, sessionKey: plan.sessionKey,
+                        title: plan.title, exercises: exercises, isPreview: false))
+                }
+            }
+        }
         .onAppear {
             if let ex {
                 reps = ex.repMin
+                if ex.isUnilateral {
+                    let used = Set(completed.map(\.index))
+                    let next = (1...max(1, ex.prescribedSets)).first {
+                        !used.contains($0)
+                    } ?? 1
+                    workingSide = ex.side(forSet: next) ?? .left
+                }
                 let target = ex.suggestedWeightLb ?? coach.workout.flatMap {
                     coach.suggestion(for: ex, on: $0.date, aggressive: aggressive).weightLb
                 }
