@@ -5171,7 +5171,7 @@ private struct PremiumCoachConversation: View {
                             selectedMetric: selectedHealthMetric,
                             question: questionText,
                             primaryWearable: UserDefaults.standard.string(
-                                forKey: "hcEitanPrimaryWearable") ?? "Auto") +
+                                forKey: "hcIsaiahRecoveryPriority") ?? "WHOOP") +
                          eitanSharedCoachContext) : "",
                     attachments: uploads)
                 await MainActor.run {
