@@ -1677,7 +1677,10 @@ private struct IMUNSetMotionInsights: View {
                     .tracking(0.6)
                     .foregroundStyle(HCDesign.aqua)
                 Spacer()
-                Text(insight.source + " · " + insight.wearSide.capitalized)
+                Text(insight.source + " · " +
+                    (insight.wearableLocation
+                        .flatMap(IMUNWearableLocation.init(rawValue:))?.title ??
+                        insight.wearSide.capitalized + " wrist"))
                     .font(.system(size: 10))
                     .foregroundStyle(HCDesign.secondary)
             }
@@ -1702,6 +1705,15 @@ private struct IMUNSetMotionInsights: View {
                 if let index = insight.relativeMotionIntensityIndex {
                     stat("Motion intensity", String(format: "%.1f relative", index))
                 }
+                if let peak = insight.peakLinearAccelerationG {
+                    stat("Peak wrist acceleration", String(format: "%.2f g", peak))
+                }
+                if let percent = insight.sampleCoveragePercent {
+                    stat("Signal coverage", String(format: "%.0f%%", percent))
+                }
+                if let gaps = insight.samplingGapCount {
+                    stat("Sensor gaps", String(gaps))
+                }
             }
             if let cycles = insight.cycleSeconds, cycles.count >= 3 {
                 VStack(alignment: .leading, spacing: 5) {
@@ -1716,6 +1728,41 @@ private struct IMUNSetMotionInsights: View {
                     .frame(height: 112)
                     .accessibilityLabel("Wrist-motion cycle duration over this set")
                 }
+            }
+            if let rotation = insight.cycleWristRotationDegrees,
+               rotation.count >= 3 {
+                VStack(alignment: .leading, spacing: 5) {
+                    Text("RELATIVE WRIST ROTATION · PER CYCLE")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(HCDesign.secondary)
+                    Chart(Array(rotation.indices), id: \.self) { index in
+                        LineMark(x: .value("Cycle", index + 1),
+                                 y: .value("Rotational travel", rotation[index]))
+                            .foregroundStyle(HCDesign.aqua)
+                    }
+                    .frame(height: 105)
+                    Text("Integrated wrist rotation, not the range of any joint or the dumbbell path.")
+                        .font(.system(size: 10))
+                        .foregroundStyle(HCDesign.secondary)
+                }
+            }
+            if let confidence = insight.analysisConfidence {
+                HStack(spacing: 7) {
+                    Image(systemName: confidence == "Low" ?
+                          "exclamationmark.triangle" : "checkmark.shield")
+                    Text("Capture confidence: " + confidence)
+                    Spacer(minLength: 0)
+                    if let version = insight.motionModelVersion {
+                        Text("MODEL \(version)")
+                    }
+                }
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(HCDesign.aqua)
+            }
+            if let warnings = insight.analysisWarnings, !warnings.isEmpty {
+                Text("Sensor quality: " + warnings.joined(separator: " · "))
+                    .font(.system(size: 11))
+                    .foregroundStyle(HCDesign.secondary)
             }
             Text(insight.note)
                 .font(.system(size: 12))
@@ -2840,7 +2887,16 @@ private struct IMUNMotionHistoryPage: View {
 }
 
 private struct IMUNActivityDetails: View {
+    @EnvironmentObject private var coach: PhoneWorkoutBridge
     let activity: HCTrainingActivity
+
+    private var matchedMotionSession: IMUNMotionSession? {
+        IMUNMotionSession.all(coach.motionHistorySets).first {
+            $0.date == activity.date &&
+            HCProgramCatalog.normalized($0.title) ==
+                HCProgramCatalog.normalized(activity.title)
+        }
+    }
 
     private var measurements: [(String, String)] {
         var rows: [(String, String)] = []
@@ -2904,6 +2960,23 @@ private struct IMUNActivityDetails: View {
                                 .font(.subheadline).foregroundStyle(HCDesign.secondary)
                         }
                     }
+                }
+                if let session = matchedMotionSession {
+                    NavigationLink {
+                        IMUNMotionWorkoutDetail(session: session)
+                    } label: {
+                        HCCard {
+                            HStack {
+                                Image(systemName: "waveform.path.ecg")
+                                    .foregroundStyle(HCDesign.aqua)
+                                Text("View this workout's motion analysis")
+                                    .font(.system(size: 12, weight: .semibold))
+                                Spacer()
+                                Image(systemName: "chevron.right")
+                            }
+                        }
+                    }
+                    .buttonStyle(.plain)
                 }
                 HCCard {
                     VStack(alignment: .leading, spacing: 7) {
@@ -3254,6 +3327,31 @@ private struct PremiumProgressPage: View {
                         .buttonStyle(.plain)
                     }
                 }
+                HCSectionTitle(title: "Motion intelligence",
+                               detail: "Recorded Apple Watch sensor observations")
+                NavigationLink {
+                    IMUNMotionHistoryPage()
+                } label: {
+                    HCCard {
+                        HStack(spacing: 12) {
+                            Image(systemName: "waveform.path.ecg.rectangle")
+                                .font(.system(size: 21))
+                                .foregroundStyle(HCDesign.aqua)
+                            VStack(alignment: .leading, spacing: 5) {
+                                Text("Explore completed workout motion")
+                                    .font(.system(size: 14, weight: .semibold))
+                                    .foregroundStyle(HCDesign.ink)
+                                Text("\(coach.motionHistorySets.count) saved motion sets · tempo, rotation, consistency and trends")
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(HCDesign.secondary)
+                            }
+                            Spacer(minLength: 2)
+                            Image(systemName: "chevron.right")
+                                .foregroundStyle(HCDesign.electric)
+                        }
+                    }
+                }
+                .buttonStyle(.plain)
                 HCSectionTitle(title: "Past working sets", detail: "\(coach.performanceHistory.count) records")
                 NavigationLink {
                     IMUNSetHistoryPage()
@@ -3286,6 +3384,7 @@ private struct PremiumProgressPage: View {
         .onAppear {
             rebuildStrengthChart()
             rebuildRunChart()
+            coach.refreshMotionHistory()
         }
         .onChange(of: selectedExercise) { _, _ in rebuildStrengthChart() }
         .onReceive(coach.$performanceHistory) { _ in
