@@ -572,6 +572,17 @@ private struct IMUNEitanExplanation: View {
                     .font(.system(size: 9))
                     .foregroundStyle(WTheme.muted)
                     .fixedSize(horizontal: false, vertical: true)
+                Text("Installed Watch ID · " +
+                     (Bundle.main.bundleIdentifier ?? "unknown"))
+                    .font(.system(size: 9))
+                    .foregroundStyle(WTheme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text("Declared iPhone companion · " +
+                     (Bundle.main.infoDictionary?[
+                        "WKCompanionAppBundleIdentifier"] as? String ?? "missing"))
+                    .font(.system(size: 9))
+                    .foregroundStyle(WTheme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
                 if let received = store.eitanLastReceivedAt {
                     Text("Last received " +
                          received.formatted(date: .omitted, time: .shortened))
