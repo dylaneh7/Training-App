@@ -2217,6 +2217,9 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
             if let enabled = context["hcWatchMotionRepEstimate"] as? Bool {
                 prefs.set(enabled, forKey: "hcWatchMotionRepEstimate")
             }
+            if let recognized = context["hcWatchMotionRecognitionEnabled"] as? Bool {
+                prefs.set(recognized, forKey: "hcWatchMotionRecognitionEnabled")
+            }
             prefs.set(incoming, forKey: "hcMotionPreferenceTimestamp")
             refreshMotionRepPreference()
         }
