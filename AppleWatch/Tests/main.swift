@@ -154,3 +154,56 @@ check(Set([oldSet]) != Set([correctedSet]),
 check(Set([oldSet]) == Set([oldSet]),
       "Identical cloud sets must not force an unnecessary UI refresh")
 print("Build 50 cloud-progress signaling and change-detection checks passed.")
+
+
+// Build 62: an isolated arm is a separate prescribed set slot, not an extra
+// duplicate of a bilateral set. No HealthKit or Watch hardware is needed.
+var singleArm = HCExercise(
+    id:"single-arm-row", name:"One-arm dumbbell row",
+    originalName:"One-arm dumbbell row", exerciseIndex:0,
+    prescribedSets:6, repMin:8, repMax:12,
+    suggestedWeightLb:50, restSeconds:90)
+check(singleArm.isUnilateral,"One-arm rows must be recognized as unilateral")
+check(singleArm.side(forSet:1) == .left &&
+      singleArm.side(forSet:2) == .right &&
+      singleArm.side(forSet:5) == .left &&
+      singleArm.side(forSet:6) == .right,
+      "Six unilateral sets must alternate three left and three right")
+check(singleArm.setSummary.contains("3 per side"),
+      "Workout UI must show that six total sets means three per side")
+let sideCount = (1...singleArm.prescribedSets).reduce(into:[HCWorkingSide:Int]()) {
+    counts, slot in
+    if let side = singleArm.side(forSet:slot) {
+        counts[side,default:0] += 1
+    }
+}
+check(sideCount[.left] == 3 && sideCount[.right] == 3,
+      "No side can accidentally receive six prescribed sets")
+var cableRaise = movement("Cable lateral raise")
+check(!cableRaise.isUnilateral,
+      "An ambiguous bilateral name must not be forced one-sided")
+cableRaise.movementType = "unilateral"
+check(cableRaise.isUnilateral,"The exercise editor must be able to mark ambiguous cable moves unilateral")
+let ordinaryBench = movement("Flat dumbbell bench press")
+check(!ordinaryBench.isUnilateral && ordinaryBench.side(forSet: 1) == nil,
+      "Simultaneous dumbbell bench is bilateral even with a sensor on each wrist")
+
+// Old sets without a side or motion payload must still load after updating.
+let legacyBytes = try JSONEncoder().encode(oldSet)
+let legacyDecoded = try JSONDecoder().decode(HCLoggedSet.self,from:legacyBytes)
+check(legacyDecoded.side == nil && legacyDecoded.motionInsight == nil,
+      "Legacy recorded sets must not require new optional motion fields")
+var sideSet = oldSet
+sideSet.side = .left
+sideSet.motionInsight = HCMotionSetInsight(
+    wearSide:"left",detectedReps:6,averageCycleSeconds:1.7,
+    lastCycleSeconds:2.1,lastCycleSlowdownPercent:23.5,
+    lastWristExcursionChangePercent:-15,
+    note:"Last cycle was slower; wrist-motion proxy only")
+let restored = try JSONDecoder().decode(HCLoggedSet.self,
+                   from:JSONEncoder().encode(sideSet))
+check(restored.side == .left &&
+      restored.motionInsight?.detectedReps == 6 &&
+      restored.motionInsight?.wearSide == "left",
+      "Motion summaries must retain their physical side and source")
+print("Build 62 unilateral slots, backward decoding and motion summary tests passed.")
