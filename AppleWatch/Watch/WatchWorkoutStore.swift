@@ -379,8 +379,9 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
             guard let self else { return }
             self.motionEstimatedReps = reps
             self.motionLastRepPeriod = secondsPerRep
-            if reps >= 4 && UserDefaults.standard.object(
-                forKey:"hcWatchMotionRecognitionEnabled") as? Bool ?? false {
+            if reps >= 4 &&
+               (UserDefaults.standard.object(
+                   forKey:"hcWatchMotionRecognitionEnabled") as? Bool ?? false) {
                 if let current = self.repEstimator.insight(
                     wearSide: self.wornAppleWatchSide?.rawValue ?? "unknown") {
                     self.motionRecognitionHint = self.recognizeMotionProfile(current)
