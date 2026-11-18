@@ -103,6 +103,8 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
     private var uploadedUndoIDs: Set<UUID> = []
     private var isUploadingCloudSets = false
     private var isFetchingCloudSets = false
+    private var isFetchingCloudRuns = false
+    private var lastCloudRunHistoryCheck = Date.distantPast
     private var isFetchingCloudAppearance = false
     private var lastCloudAppearanceCheck = Date.distantPast
 
@@ -165,6 +167,7 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
                 self.cloudSignedIn = available
                 if available {
                     self.refreshCloudWorkout()
+                    self.refreshCloudRunHistory(force: true)
                     self.refreshCloudAppearance(force: true)
                     self.refreshCloudEitan(force: true)
                     self.uploadPendingCloudSets()
@@ -190,6 +193,7 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
                     self.cloudSignedIn = true
                     self.cloudStatus = "Signed in · loading today's workout"
                     self.refreshCloudWorkout()
+                    self.refreshCloudRunHistory(force: true)
                     self.refreshCloudAppearance(force: true)
                     self.refreshCloudEitan(force: true)
                     self.uploadPendingCloudSets()
@@ -442,6 +446,7 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
             guard let self else { return }
             var failed = false
             var uploadedAny = false
+            var uploadedRun = false
             for undo in pendingUndo {
                 do {
                     try await cloud.recordWorkoutUndo(undo)
@@ -487,6 +492,7 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
                     do {
                         try await cloud.upload(run)
                         uploadedAny = true
+                        uploadedRun = true
                         DispatchQueue.main.async {
                             self.cloudUploadedRunIDs.insert(run.id)
                             self.save(Array(self.cloudUploadedRunIDs),
@@ -504,9 +510,13 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
                 }
             }
             let cloudChanged = uploadedAny
+            let runChanged = uploadedRun
             DispatchQueue.main.async {
                 self.isUploadingCloudSets = false
-                if cloudChanged { self.notifyPhoneCloudProgressChanged() }
+                if cloudChanged {
+                    self.notifyPhoneCloudProgressChanged(containsRuns: runChanged)
+                }
+                if runChanged { self.refreshCloudRunHistory(force: true) }
                 self.refreshCloudSets()
                 // A correction can arrive while the previous upload is
                 // active. Process it immediately after a successful batch.
@@ -1640,14 +1650,15 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
 
     /// The cloud commit already succeeded. This is just a wake-up hint; a
     /// missing live link never blocks the persisted workout/undo record.
-    private func notifyPhoneCloudProgressChanged() {
+    private func notifyPhoneCloudProgressChanged(containsRuns: Bool = false) {
         guard WCSession.isSupported() else { return }
         let session = WCSession.default
         guard session.activationState == .activated,
               session.isReachable else { return }
         session.sendMessage([
             HCPayload.kind: HCPayload.progressCloudChanged,
-            "date": Self.today()
+            "date": Self.today(),
+            "includesRuns": containsRuns
         ], replyHandler: { _ in }, errorHandler: { _ in })
     }
 
@@ -1827,6 +1838,9 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
             DispatchQueue.main.async {
                 if message["date"] as? String == Self.today() {
                     self.refreshCloudSets()
+                    if message["includesRuns"] as? Bool == true {
+                        self.refreshCloudRunHistory(force: true)
+                    }
                 }
                 replyHandler(["received": true])
             }
