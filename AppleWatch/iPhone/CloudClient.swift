@@ -124,13 +124,16 @@ actor HCCloudClient {
     }
 
     func askIMUNCoach(question: String, context: String,
-                      shareRecovery: Bool) async throws -> String {
+                      shareRecovery: Bool,
+                      attachments: [IMUNCoachAttachment] = []) async throws -> String {
         let authenticated = try await authorizedToken()
         let data = try await send(path: "/functions/v1/imun-ai-coach",
                                   method: "POST",
                                   json: ["question": String(question.prefix(1500)),
                                          "context": String(context.prefix(24_000)),
-                                         "shareRecovery": shareRecovery],
+                                         "shareRecovery": shareRecovery,
+                                         "attachments": attachments.prefix(4)
+                                             .map(\.requestPayload)],
                                   bearer: authenticated.access)
         guard let output = try JSONSerialization.jsonObject(with: data) as? [String: Any],
               let reply = output["reply"] as? String,
