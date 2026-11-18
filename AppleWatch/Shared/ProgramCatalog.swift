@@ -132,7 +132,7 @@ enum HCProgramCatalog {
                 name: t.name,
                 originalName: t.original,
                 exerciseIndex: index,
-                prescribedSets: t.sets,
+                prescribedSets: t.sets * (HCExercise.isOneSidedName(t.name) ? 2 : 1),
                 repMin: t.lo,
                 repMax: t.hi,
                 suggestedWeightLb: load,
