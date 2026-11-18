@@ -1018,7 +1018,6 @@ private struct WatchGuidedSession: View {
     @State private var weight = 0.0
     @State private var hasWeight = false
     @State private var reps = 8
-    @State private var repManuallyAdjusted = false
     @State private var rir = 2
     @State private var showSetPicker = false
     @State private var confirmUndoWorkout = false
@@ -1036,6 +1035,12 @@ private struct WatchGuidedSession: View {
     }
     private var otherActive: Bool {
         store.liftClock?.setStartedAt != nil && !active
+    }
+    private var usingStoreRepDraft: Bool {
+        active && store.activeEditableReps != nil
+    }
+    private var displayedReps: Int {
+        usingStoreRepDraft ? (store.activeEditableReps ?? reps) : reps
     }
     private var nextSetToken: String {
         (current?.id ?? "none") + ":" + String(store.guidedSetNumber) + ":" + String(setCount)
@@ -1267,19 +1272,6 @@ private struct WatchGuidedSession: View {
         .task(id: nextSetToken) {
             loadNextTargets()
         }
-        .onChange(of: store.liftClock?.setStartedAt) { _, started in
-            if started != nil && active && motionRepEnabled &&
-                store.motionCanTrackActiveSide {
-                // Start the live count at zero rather than preset target reps.
-                reps = 0
-                repManuallyAdjusted = false
-            }
-        }
-        .onChange(of: store.motionEstimatedReps) { _, detected in
-            guard active, motionRepEnabled, store.motionCanTrackActiveSide,
-                  !repManuallyAdjusted, detected > 0 else { return }
-            reps = min(100, detected)
-        }
         .onAppear {
             store.processRestDeadline()
         }
@@ -1316,15 +1308,21 @@ private struct WatchGuidedSession: View {
             )
             WQuickEditor(
                 title: "REPS",
-                value: String(reps),
+                value: String(displayedReps),
                 decrease: {
-                    reps = max(0, reps - 1)
-                    repManuallyAdjusted = true
+                    if usingStoreRepDraft {
+                        store.adjustActiveReps(by: -1)
+                    } else {
+                        reps = max(0, reps - 1)
+                    }
                     wHaptic(.click)
                 },
                 increase: {
-                    reps = min(100, reps + 1)
-                    repManuallyAdjusted = true
+                    if usingStoreRepDraft {
+                        store.adjustActiveReps(by: 1)
+                    } else {
+                        reps = min(100, reps + 1)
+                    }
                     wHaptic(.click)
                 }
             )
@@ -1332,7 +1330,7 @@ private struct WatchGuidedSession: View {
                 HStack(spacing: 6) {
                     Image(systemName: "waveform.path")
                         .foregroundStyle(WTheme.aqua)
-                    Text(repManuallyAdjusted ? "MANUAL REPS LOCKED" :
+                    Text(store.activeRepsManuallyCorrected ? "MANUAL REPS LOCKED" :
                         store.motionCanTrackActiveSide ?
                         "LIVE WATCH COUNT · EDITABLE" :
                         "WORKING WRIST NOT TRACKED")
@@ -1351,16 +1349,12 @@ private struct WatchGuidedSession: View {
                 if active {
                     let saved = store.stopSet(for: exercise,
                                               weightLb: hasWeight ? weight : nil,
-                                              reps: reps, rir: Double(rir))
+                                              reps: displayedReps, rir: Double(rir))
                     if saved {
                         wHaptic(.success)
                     }
                 } else if !otherActive && store.liftClock?.isPaused != true {
                     store.startSet(for: exercise)
-                    if store.motionCanTrackActiveSide && motionRepEnabled {
-                        reps = 0
-                        repManuallyAdjusted = false
-                    }
                 }
             } label: {
                 HStack(spacing: 7) {
@@ -1432,7 +1426,6 @@ private struct WatchGuidedSession: View {
             hasWeight = false
         }
         reps = previous?.reps ?? next.repMin
-        repManuallyAdjusted = false
         rir = Int((previous?.rir ?? 2).rounded())
     }
 }
