@@ -1631,31 +1631,26 @@ final class HCAppleHealthReader: ObservableObject {
                                 "endurance", "vo2", "vo₂", "cycling",
                                 "performance", "progress", "plateau"]
             .contains { questionText.contains($0) }
-        // A primary recovery wearable filters HRV, sleep and resting pulse.
-        // Source-attributed training/VO2 measurements can come from another
-        // device; label them rather than silently treating them as WHOOP.
+        // IsAIah needs cross-platform evidence: retain all sources. The
+        // preferred device changes interpretive priority, not data visibility.
+        // Different metrics and methods remain source-specific.
         func isTrainingMetric(_ metric: HCHealthMetric) -> Bool {
             metric.category == "Running & Cycling" ||
                 metric.name.localizedCaseInsensitiveContains("VO2") ||
                 metric.name.localizedCaseInsensitiveContains("VO₂")
         }
-        let all = metrics.filter {
-            HCEitanWearableSource.accepts($0.source,
-                                          preferred: primaryWearable) ||
-                (exerciseQuestion && isTrainingMetric($0))
-        }.sorted {
+        let all = metrics.sorted {
             let a = ($0.category, $0.name, $0.source, $0.date)
             let b = ($1.category, $1.name, $1.source, $1.date)
             return a < b
         }
         guard !all.isEmpty else {
             return loading ? "Apple Health is still loading on this iPhone." :
-                "No authorized " + primaryWearable +
-                " measurements are currently loaded. Do not substitute data from another wearable."
+                "No authorized Apple Health measurements are currently loaded. Historical records may still exist in another connected platform; do not claim no exercise."
         }
 
         var lines = ["APPLE HEALTH: \(all.count) source-attributed Health metric cards.",
-                     "Primary recovery wearable: " + primaryWearable + ". Compare HRV/sleep only within the same method and source. Other explicitly labeled training metrics, including VO2 max, can be from separate wearables. Tredict workouts are a separate training source.",
+                     "Preferred source for interpretation: " + primaryWearable + ". All authorized source measurements remain available for longitudinal comparison; do not choose Apple Watch by default, merge HRV methods, or infer the same metric for missing WHOOP days. Tredict workouts remain separate.",
                      "Selected Health category: " + selectedCategory,
                      "Selected Health metric: " + (selectedMetric.isEmpty ? "none" : selectedMetric),
                      "Values keep their own source, method, unit and recorded date; never merge unlike sources."]
@@ -1682,12 +1677,8 @@ final class HCAppleHealthReader: ObservableObject {
                     name.contains("resting heart") ||
                     name.contains("sleep")))
         }.map(\.name))
-        let trainingMetricNames = Set(all.filter(isTrainingMetric).map(\.name))
         let histories = Dictionary(grouping: metricHistory.filter {
-            relevant.contains($0.name) &&
-            (HCEitanWearableSource.accepts($0.source,
-                                          preferred: primaryWearable) ||
-             (exerciseQuestion && trainingMetricNames.contains($0.name)))
+            relevant.contains($0.name)
         }, by: { $0.name + " | " + $0.source })
         for name in histories.keys.sorted() {
             let ordered = (histories[name] ?? []).sorted { $0.date > $1.date }
