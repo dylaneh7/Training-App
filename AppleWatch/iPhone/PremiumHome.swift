@@ -3444,6 +3444,9 @@ private struct PremiumRecoveryPage: View {
                     .fill(HCDesign.outline.opacity(0.55))
                     .frame(height: 1)
 
+                IMUNAppleHealthConnectionCard(appleHealth: appleHealth,
+                                               compact: true)
+
                 HStack(alignment: .top, spacing: 12) {
                     HCHealthSummaryStat(value: "\(allFamilies.count)",
                                         title: "Metrics")
@@ -4887,31 +4890,112 @@ private struct HCEitanCloudSyncControls: View {
     }
 }
 
-/// Opt-in integration controls live in Settings, not below today's run.
-private struct IMUNRunImportSettings: View {
+/// A single understandable Health connection surface, rather than a
+/// separate metric permission and hidden running importer.
+private struct IMUNAppleHealthConnectionCard: View {
+    @ObservedObject var appleHealth: HCAppleHealthReader
     @EnvironmentObject private var importer: HCRunHealthImporter
+    @AppStorage("hcHealthCatalogEnabled") private var hasRequestedAccess = false
+    let compact: Bool
+
+    private var whoopCount: Int {
+        importer.workouts.filter {
+            $0.source.localizedCaseInsensitiveContains("whoop")
+        }.count
+    }
+
+    private var firstWorkoutDate: String? {
+        importer.workouts.map(\.date).min()
+    }
+
+    private func connect() {
+        appleHealth.connect(onRequestCompleted: {
+            importer.startIfAuthorized()
+        })
+    }
+
+    private func refresh() {
+        appleHealth.refreshIfAuthorized(force: true)
+        importer.startIfAuthorized()
+    }
 
     var body: some View {
-                HCCard(accent: HCDesign.aqua) {
-                    VStack(alignment: .leading, spacing: 12) {
-                        HCAccentTag(title: "AUTO-IMPORT / APPLE HEALTH", color: HCDesign.aqua)
-                        Text(importer.enabled ? "Exercise history sync enabled" : "Connect Apple Health workouts")
-                            .font(.system(size: 17, weight: .bold, design: .rounded))
-                        Text("Read all authorized Apple Health exercise sessions, including runs, lifting, walks, cycling, swimming and other recorded sports. Tredict and Garmin history is handled separately. Nothing is shared with IsAIah until you enable his Health-sharing control and send a message.")
-                            .font(.system(size: 12))
+        HCCard(accent: HCDesign.aqua) {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(alignment: .center, spacing: 10) {
+                    Image(systemName: "heart.text.square.fill")
+                        .font(.system(size: 18))
+                        .foregroundStyle(HCDesign.aqua)
+                        .frame(width: 29, height: 29)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Apple Health")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundStyle(HCDesign.ink)
+                        Text(importer.workouts.isEmpty ?
+                             (hasRequestedAccess ? "Checking available records" :
+                              "Connect your exercise and recovery history") :
+                             "Workout history available")
+                            .font(.system(size: 11))
                             .foregroundStyle(HCDesign.secondary)
-                        if importer.enabled {
-                            HCOutlineButton(title: importer.refreshing ? "Checking Health…" : "Check new runs",
-                                            icon: "arrow.clockwise") { importer.refresh() }
-                        } else {
-                            HCFilledButton(title: "CONNECT APPLE HEALTH", icon: "heart.fill",
-                                           tint: HCDesign.aqua) { importer.connect() }
-                        }
-                        Text(importer.status)
-                            .font(.caption2)
+                    }
+                    Spacer(minLength: 3)
+                    if importer.refreshing || appleHealth.loading {
+                        ProgressView().tint(HCDesign.aqua)
+                    }
+                }
+
+                if !compact || !importer.workouts.isEmpty {
+                    HStack(spacing: 8) {
+                        HCMetricBlock(label: "Workouts",
+                                      value: String(importer.workouts.count))
+                        HCMetricBlock(label: "Runs",
+                                      value: String(importer.runs.count))
+                        HCMetricBlock(label: "WHOOP",
+                                      value: String(whoopCount))
+                    }
+                }
+
+                if !compact {
+                    Text("Read workouts, runs, sleep and physiological measurements from the sources Apple Health makes available. Your Garmin and Tredict connection is separate.")
+                        .font(.system(size: 12))
+                        .foregroundStyle(HCDesign.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if let firstWorkoutDate {
+                        Text("Earliest imported workout: " + firstWorkoutDate)
+                            .font(.system(size: 11))
                             .foregroundStyle(HCDesign.secondary)
                     }
                 }
+
+                HStack(spacing: 9) {
+                    HCFilledButton(
+                        title: hasRequestedAccess ? "REVIEW HEALTH ACCESS" :
+                               "CONNECT APPLE HEALTH",
+                        icon: "heart.fill", tint: HCDesign.aqua,
+                        disabled: appleHealth.loading || importer.refreshing) {
+                        connect()
+                    }
+                    if hasRequestedAccess {
+                        HCOutlineButton(title: "Sync now",
+                                        icon: "arrow.clockwise") {
+                            refresh()
+                        }
+                    }
+                }
+
+                if !compact {
+                    Text(importer.status)
+                        .font(.system(size: 11))
+                        .foregroundStyle(HCDesign.secondary)
+                    Text("Apple may not display the permission sheet again after a decision. To change access, open Health on your iPhone and find iMun under Apps or Data Access & Devices. The counts above reflect imported data—not a claim that every permission was granted.")
+                        .font(.system(size: 11))
+                        .foregroundStyle(HCDesign.secondary)
+                    Text("IsAIah uses Apple Health readings online only when you enable Health sharing in his chat and send a message.")
+                        .font(.system(size: 11))
+                        .foregroundStyle(HCDesign.secondary)
+                }
+            }
+        }
     }
 }
 
@@ -5017,6 +5101,8 @@ private struct PremiumSettingsPage: View {
                 PremiumHeader(eyebrow: "IMUN / SETTINGS",
                               title: "Your preferences.",
                               subtitle: "Fine-tune your coaching, appearance and connections.")
+                IMUNAppleHealthConnectionCard(appleHealth: appleHealth,
+                                               compact: false)
                 HCCard(accent: HCDesign.electric) {
                     VStack(alignment: .leading, spacing: 11) {
                         HCAccentTag(title: "TRAINING INTELLIGENCE")
@@ -5397,8 +5483,6 @@ private struct PremiumSettingsPage: View {
                             .foregroundStyle(HCDesign.secondary)
                     }
                 }
-                HCSectionTitle(title: "Apple Health runs", detail: "Import and permissions")
-                IMUNRunImportSettings()
                 HCSectionTitle(title: "Connections")
                 HCCard {
                     VStack(alignment: .leading, spacing: 14) {
