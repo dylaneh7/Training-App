@@ -1682,16 +1682,30 @@ final class HCAppleHealthReader: ObservableObject {
                     name.contains("resting heart") ||
                     name.contains("sleep")))
         }.map(\.name))
+        let trainingMetricNames = Set(all.filter(isTrainingMetric).map(\.name))
         let histories = Dictionary(grouping: metricHistory.filter {
             relevant.contains($0.name) &&
-            HCEitanWearableSource.accepts($0.source,
-                                         preferred: primaryWearable)
+            (HCEitanWearableSource.accepts($0.source,
+                                          preferred: primaryWearable) ||
+             (exerciseQuestion && trainingMetricNames.contains($0.name)))
         }, by: { $0.name + " | " + $0.source })
         for name in histories.keys.sorted() {
-            let recent = (histories[name] ?? []).sorted { $0.date > $1.date }.prefix(14)
-            if !recent.isEmpty {
+            let ordered = (histories[name] ?? []).sorted { $0.date > $1.date }
+            let fitnessSeries = exerciseQuestion &&
+                (name.localizedCaseInsensitiveContains("VO2") ||
+                 name.localizedCaseInsensitiveContains("VO₂"))
+            let selected: [HCHealthTrendSample]
+            if fitnessSeries && ordered.count > 14 {
+                // Early and recent measurements both matter to a plateau
+                // question, not only the last two weeks of data.
+                selected = Array(ordered.prefix(9)) + Array(ordered.suffix(5))
+            } else {
+                selected = Array(ordered.prefix(14))
+            }
+            if !selected.isEmpty {
                 lines.append("HISTORY " + name + ": " +
-                    recent.map { $0.date + "=" + String(format: "%.2f", $0.value) }
+                    selected.map { $0.date + "=" +
+                        String(format: "%.2f", $0.value) }
                         .joined(separator: ", "))
             }
         }
