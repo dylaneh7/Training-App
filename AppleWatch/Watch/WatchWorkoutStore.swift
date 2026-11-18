@@ -637,6 +637,7 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
               !allUndoRecords.contains(where: { $0.applies(to: entry) })
         else { return }
         appendUndo(HCWorkoutUndo.set(entry), forwardToPhone: true)
+        cancelBackgroundRestAlert()
         if var clock = liftClock, clock.isActive, clock.setStartedAt == nil {
             // Return to the corrected set rather than remaining on a later
             // queued set or an unrelated rest countdown.
@@ -660,6 +661,7 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
         guard let clock = liftClock, clock.isActive,
               workout.id == clock.workoutID else { return }
         let undo = HCWorkoutUndo.workout(workout, startedAt: clock.startedAt)
+        cancelBackgroundRestAlert()
         liftClock = nil
         selectedGuidedSet = nil
         queuedNextGuidedSet = nil
@@ -967,6 +969,8 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
 
     func startLifting() {
         invalidatePreviousDayIfNeeded()
+        cancelBackgroundRestAlert()
+        alertedRestDeadline = nil
         guard hasScheduledLift, workout.date == Self.today(), !workout.exercises.isEmpty,
               !guidedAllFinished,
               liftClock?.isActive != true && runClock?.isActive != true else { return }
@@ -993,6 +997,7 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
               clock.setStartedAt == nil else { return }
         clock.pausedAt = Date()
         liftClock = clock
+        cancelBackgroundRestAlert()
         save(clock, name: "lifting-clock.json")
     }
 
@@ -1007,6 +1012,9 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
         clock.pausedAt = nil
         liftClock = clock
         save(clock, name: "lifting-clock.json")
+        if let until = clock.restEndsAt, until > Date() {
+            scheduleBackgroundRestAlert(deadline: until)
+        }
     }
 
     func endLifting() {
@@ -1017,6 +1025,7 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
         }
         clock.finishedAt = Date()
         clock.restEndsAt = nil
+        cancelBackgroundRestAlert()
         liftClock = clock
         selectedGuidedSet = nil
         queuedNextGuidedSet = nil
@@ -1030,7 +1039,7 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
 
     // MARK: - Per-set clock and rest period
 
-    func startSet(for exercise: HCExercise) {
+    func startSet(for exercise: HCExercise, playStartHaptic: Bool = true) {
         guard var clock = liftClock, clock.isActive, !clock.isPaused,
               clock.setStartedAt == nil, clock.workoutID == workout.id,
               !guidedAllFinished else { return }
@@ -1047,13 +1056,15 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
         save(exercise.id, name: "guided-exercise-id.json")
         clock.setStartedAt = Date()
         clock.restEndsAt = nil
+        cancelBackgroundRestAlert()
         liftClock = clock
         save(clock, name: "lifting-clock.json")
+        if playStartHaptic { self.playSetHaptic() }
     }
 
     /// Rest uses wall-clock time so the next set can start after wrist-down
     /// or an app re-launch. A timer drives this while the screen is visible.
-    func advanceAfterRestIfReady() {
+    func advanceAfterRestIfReady(playStartHaptic: Bool = true) {
         // Existing default remains automatic so installed Watch behavior
         // does not change. An athlete may choose manual start in Preferences.
         guard UserDefaults.standard.object(forKey: "hcAutoStartNextSet") as? Bool ?? true
@@ -1062,7 +1073,7 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
               clock.setStartedAt == nil, !guidedAllFinished,
               (clock.restEndsAt == nil || clock.restEndsAt! <= Date()) else { return }
         guard let next = guidedExercise else { return }
-        startSet(for: next)
+        startSet(for: next, playStartHaptic: playStartHaptic)
     }
 
     func cancelSet() {
@@ -1132,8 +1143,14 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
         let seconds = override > 0 ? override : exercise.restSeconds
         clock.restEndsAt = next != nil && seconds > 0 ?
             now.addingTimeInterval(Double(seconds)) : nil
+        alertedRestDeadline = nil
         liftClock = clock
         save(clock, name: "lifting-clock.json")
+        if let until = clock.restEndsAt {
+            scheduleBackgroundRestAlert(deadline: until)
+        } else {
+            cancelBackgroundRestAlert()
+        }
         sendPending()
         // No second tap is needed when no rest was prescribed.
         if seconds <= 0 { advanceAfterRestIfReady() }
@@ -1142,6 +1159,7 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
 
     func skipRest() {
         guard var clock = liftClock else { return }
+        cancelBackgroundRestAlert()
         clock.restEndsAt = nil
         liftClock = clock
         save(clock, name: "lifting-clock.json")
