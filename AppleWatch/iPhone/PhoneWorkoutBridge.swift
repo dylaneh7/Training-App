@@ -581,6 +581,13 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
             }
             let old = exercises[index]
             let completedCount = completed.filter { $0.exerciseID == old.id }.count
+            // Set-count edits use the same total-slot convention as the
+            // Watch. Reject impossible left/right prescriptions instead of
+            // dropping a side during a coach-generated workout edit.
+            guard !old.isUnilateral || edit.sets.isMultiple(of: 2) else {
+                status = "Use an even total for one-sided exercises (for example, six total sets for three per side)."
+                return nil
+            }
             guard edit.sets >= completedCount else {
                 status = "Cannot prescribe fewer sets than have already been recorded."
                 return nil
@@ -593,6 +600,7 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
                 suggestedWeightLb: edit.suggestedWeightLb,
                 restSeconds: edit.restSeconds)
             revised.instructions = old.instructions
+            revised.movementType = old.movementType
             exercises[index] = revised
         case .add:
             let nextIndex = (exercises.map(\.exerciseIndex).max() ?? -1) + 1
@@ -602,6 +610,11 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
                       $0.name.localizedCaseInsensitiveCompare(updatedName) == .orderedSame
                   }) else {
                 status = "Select a different exercise or check the plan's exercise limit."
+                return nil
+            }
+            guard !HCExercise.isOneSidedName(updatedName) ||
+                  edit.sets.isMultiple(of: 2) else {
+                status = "One-sided movements require even total sets (three per arm is six total)."
                 return nil
             }
             var created = HCExercise(
@@ -620,6 +633,11 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
                 return nil
             }
             let old = exercises[index]
+            guard !HCExercise.isOneSidedName(updatedName) ||
+                  edit.sets.isMultiple(of: 2) else {
+                status = "One-sided movements require equal left and right sets."
+                return nil
+            }
             var replacement = HCExercise(
                 id: old.id, name: updatedName,
                 originalName: updatedName,
@@ -663,6 +681,7 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
                     suggestedWeightLb: exercise.suggestedWeightLb,
                     restSeconds: exercise.restSeconds)
                 normalized.instructions = exercise.instructions
+                normalized.movementType = exercise.movementType
                 return normalized
             }
         }
@@ -1486,6 +1505,28 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
                 ? String(format: "%@: %d measured runs, %.1f miles, %.2f min/mi distance-weighted pace",
                          label, measured.count, miles, duration / 60 / miles)
                 : label + ": no measured pace records available")
+        }
+        // Send compact per-set observations to IsAIah only after the athlete
+        // explicitly sends a coach message. Never upload raw sensor samples
+        // as chat context. Retain provenance and sensor limitations.
+        let recentMotion = combinedRecordedSets
+            .filter { $0.motionInsight != nil }
+            .sorted { $0.completedAt > $1.completedAt }
+            .prefix(24)
+        if !recentMotion.isEmpty {
+            lines.append("EXPERIMENTAL WATCH MOTION OBSERVATIONS: These are wrist-cycle estimates, not validated exercise form, joint ROM, actual barbell velocity, or power. WHOOP did not supply real-time gyroscope data. Avoid comparing left versus right unless separately sourced samples actually exist on both sides.")
+        }
+        for entry in recentMotion {
+            guard let motion = entry.motionInsight else { continue }
+            let side = entry.side?.title ?? "not specified"
+            let avg = motion.averageCycleSeconds.map { String(format: "%.2f", $0) } ?? "unknown"
+            let last = motion.lastCycleSeconds.map { String(format: "%.2f", $0) } ?? "unknown"
+            lines.append("Motion observation: \(entry.workoutDate) \(entry.exerciseName), set \(entry.index), side \(side), source \(motion.source) on \(motion.wearSide) wrist; saved \(entry.reps) reps (may be corrected), detected \(motion.detectedReps) cycles, mean earlier cycle \(avg)s, last cycle \(last)s. \(motion.note)")
+        }
+        if let plan = workout {
+            for exercise in plan.exercises where exercise.isUnilateral {
+                lines.append("Unilateral workout plan: \(exercise.name), \(exercise.prescribedSets) TOTAL side-specific slots, \(exercise.prescribedSets / 2) per side. When proposing or editing unilateral exercises, prescribe even total slot counts; three sets per arm means six total.")
+            }
         }
         let personalRecords = Dictionary(grouping: performanceHistory, by: \.exercise)
             .compactMap { name, sets -> (String, Double)? in
