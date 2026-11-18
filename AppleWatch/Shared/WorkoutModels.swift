@@ -22,6 +22,16 @@ struct HCMotionSetInsight: Codable, Hashable {
     var cycleSeconds: [Double]? = nil
     var cycleWristMotionPeaks: [Double]? = nil
     var cycleTimingVariabilityPercent: Double? = nil
+    /// Gyroscope magnitude and integrated wrist rotation, NOT bar velocity
+    /// or joint angle. Interpret only across comparable sets and placement.
+    var peakWristRotationDegreesPerSecond: Double? = nil
+    var meanWristRotationDegrees: Double? = nil
+    var wristRotationConsistencyPercent: Double? = nil
+    var repTempoConsistencyPercent: Double? = nil
+    var wristMotionConsistencyScore: Double? = nil
+    var relativeMotionIntensityIndex: Double? = nil
+    var estimatedOneRepMaxLb: Double? = nil
+    var repActivePhaseSeconds: [Double]? = nil
 }
 
 
