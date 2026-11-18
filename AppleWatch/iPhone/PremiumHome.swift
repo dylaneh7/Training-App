@@ -5238,6 +5238,7 @@ private struct PremiumSettingsPage: View {
     @AppStorage("hcEitanCoachingEnabled") private var eitanCoachingEnabled = true
     @AppStorage("hcEitanCoachStyle") private var eitanCoachStyle = "driven"
     @AppStorage("hcEitanPrimaryWearable") private var primaryWearable = "Auto"
+    @AppStorage("hcIsaiahRecoveryPriority") private var isaiahRecoveryPriority = "WHOOP"
     @EnvironmentObject private var tredict: HCTredictImporter
     @State private var tredictToken = ""
     @AppStorage("hcAggressiveProgression") private var aggressive = true
@@ -5313,6 +5314,24 @@ private struct PremiumSettingsPage: View {
                         .tint(HCDesign.electric)
                         Text("Movement changes use conservative estimates, confidence labels, and your subsequent actual performance.")
                             .font(.caption2).foregroundStyle(HCDesign.secondary)
+                    }
+                }
+                HCSectionTitle(title: "IsAIah sources", detail: "Your recovery, across devices")
+                HCCard {
+                    VStack(alignment: .leading, spacing: 11) {
+                        Picker("Preferred recovery source", selection: $isaiahRecoveryPriority) {
+                            Text("WHOOP first").tag("WHOOP")
+                            Text("Garmin first").tag("Garmin")
+                            Text("Apple Watch first").tag("Apple Watch")
+                            Text("All sources, labeled").tag("Auto")
+                        }
+                        .tint(HCDesign.electric)
+                        Text("This prioritizes the source IsAIah discusses first—not the only data he can read. WHOOP, Apple Watch, Garmin and Tredict remain separate in long-term comparisons. Missing workouts are unknown, not rest days.")
+                            .font(.system(size: 12))
+                            .foregroundStyle(HCDesign.secondary)
+                        Text("EITAN has a separate primary-wearable setting below for its daily wellness score.")
+                            .font(.system(size: 11))
+                            .foregroundStyle(HCDesign.secondary)
                     }
                 }
                 HCSectionTitle(title: "IsAIah memory", detail: "Conversation continuity")
@@ -5636,6 +5655,32 @@ private struct PremiumSettingsPage: View {
                     }
                 }
                 HCSectionTitle(title: "Connected training history")
+                HCCard {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("IMPORTED ACTIVITY SOURCES")
+                            .font(HCDesign.label(10))
+                            .foregroundStyle(HCDesign.secondary)
+                        ForEach(
+                            Array(Dictionary(grouping: coach.trainingActivities,
+                                            by: { IMUNDataProvenance.provider($0.source) })
+                                .keys).sorted(), id: \.self) { provider in
+                            let rows = coach.trainingActivities.filter {
+                                IMUNDataProvenance.provider($0.source) == provider
+                            }
+                            HStack {
+                                Text(provider)
+                                    .font(.system(size: 13, weight: .medium))
+                                Spacer()
+                                Text("\(rows.count) sessions")
+                                    .font(.system(size: 12))
+                                    .foregroundStyle(HCDesign.secondary)
+                            }
+                        }
+                        Text("A missing day from any device is unknown. Imported record counts may exclude workouts kept only inside WHOOP or Garmin Connect.")
+                            .font(.system(size: 11))
+                            .foregroundStyle(HCDesign.secondary)
+                    }
+                }
                 HCCard {
                     VStack(alignment: .leading, spacing: 13) {
                         HStack(spacing: 8) {
