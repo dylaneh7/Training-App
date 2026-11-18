@@ -388,7 +388,7 @@ if coachingEnabled {
                                 .foregroundStyle(HCDesign.secondary)
                                 .fixedSize(horizontal: false, vertical: true)
                             ForEach(strategy.cues.prefix(2), id: \.self) { cue in
-                                Label(cue, systemImage: "circle.small.fill")
+                                Label(cue, systemImage: "circle.fill")
                                     .font(.system(size: 11))
                                     .foregroundStyle(HCDesign.ink)
                                     .fixedSize(horizontal: false, vertical: true)
