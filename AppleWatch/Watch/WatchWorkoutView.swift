@@ -1530,7 +1530,7 @@ private struct WatchPreferences: View {
     private func motionSettingsChanged() {
         UserDefaults.standard.set(Date().timeIntervalSince1970,
                                   forKey: "hcMotionPreferenceTimestamp")
-        store.refreshMotionRepPreference()
+        store.publishMotionPreferences()
     }
 
     var body: some View {
