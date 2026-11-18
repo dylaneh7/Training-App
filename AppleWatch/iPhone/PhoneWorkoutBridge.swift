@@ -100,6 +100,8 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
     private var uploadedUndoIDs: Set<UUID> = []
     private var syncingQueue = false
     private var fetchingProgress = false
+    private var fetchingCloudRunHistory = false
+    private var lastCloudRunHistoryCheck = Date.distantPast
     private var pendingEditedWorkout: HCWorkout?
     // A plan is authoritative only after today's Command Center refresh succeeds.
     private var confirmedScheduleDate: String?
@@ -1780,6 +1782,33 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
         }
     }
 
+    /// Cloud-native completed runs are shared by iPhone and Watch even when
+    /// direct WatchConnectivity registration is missing. Keep unsent local
+    /// and attributed Health/Tredict records during reconciliation.
+    func refreshCloudRunHistory(force: Bool = false) {
+        guard signedIn, !fetchingCloudRunHistory,
+              force || Date().timeIntervalSince(lastCloudRunHistoryCheck) >= 30
+        else { return }
+        fetchingCloudRunHistory = true
+        lastCloudRunHistoryCheck = Date()
+        Task {
+            do {
+                let runs = try await cloud.fetchRunHistory()
+                DispatchQueue.main.async {
+                    self.fetchingCloudRunHistory = false
+                    self.remoteRunHistory = runs
+                    self.mergeRunHistory()
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    self.fetchingCloudRunHistory = false
+                    self.status = "Run history kept locally · cloud error: " +
+                        error.localizedDescription
+                }
+            }
+        }
+    }
+
     func logFromPhone(exercise: HCExercise, weightLb: Double?, reps: Int, rir: Double?) {
         guard let workout, reps > 0, reps <= 300,
               weightLb == nil || (weightLb! >= 0 && weightLb! <= 3000) else { return }
@@ -1960,7 +1989,10 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
                 self.updatePendingCount()
                 self.syncingQueue = false
                 if !savedIDs.isEmpty || !confirmedUndoIDs.isEmpty {
-                    self.notifyWatchCloudProgressChanged()
+                    let runIDs = Set(pendingRuns.map(.id))
+                    let includesRuns = savedIDs.contains { runIDs.contains($0) }
+                    self.notifyWatchCloudProgressChanged(containsRuns: includesRuns)
+                    if includesRuns { self.refreshCloudRunHistory(force: true) }
                 }
                 self.refreshCloudProgress()
                 self.status = errorMessage.map {
@@ -1981,14 +2013,15 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
     /// A lightweight notification AFTER a successful cloud write. It tells
     /// a reachable Watch to fetch authoritative, de-duplicated sets and
     /// undo events. Cloud polling remains the fallback when disconnected.
-    private func notifyWatchCloudProgressChanged() {
+    private func notifyWatchCloudProgressChanged(containsRuns: Bool = false) {
         guard WCSession.isSupported() else { return }
         let connection = WCSession.default
         guard connection.activationState == .activated,
               connection.isPaired, connection.isReachable else { return }
         connection.sendMessage([
             HCPayload.kind: HCPayload.progressCloudChanged,
-            "date": HCPlanBuilder.dateString(Date())
+            "date": HCPlanBuilder.dateString(Date()),
+            "includesRuns": containsRuns
         ], replyHandler: { _ in }, errorHandler: { _ in })
     }
 
@@ -2033,6 +2066,9 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
                 if message["date"] as? String ==
                     HCPlanBuilder.dateString(Date()) {
                     self.refreshCloudProgress()
+                    if message["includesRuns"] as? Bool == true {
+                        self.refreshCloudRunHistory(force: true)
+                    }
                 }
                 replyHandler(["received": true])
             }
