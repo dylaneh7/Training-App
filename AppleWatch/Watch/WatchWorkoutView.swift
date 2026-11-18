@@ -588,6 +588,40 @@ private struct IMUNEitanExplanation: View {
                 }
                 .buttonStyle(.bordered)
                 .tint(WTheme.lime)
+                Divider()
+                Text("PRIVATE CLOUD · NO IPHONE CONNECTION REQUIRED")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(WTheme.lime)
+                Text(store.eitanCloudStatus)
+                    .font(.system(size: 10))
+                    .foregroundStyle(WTheme.aqua)
+                    .fixedSize(horizontal: false, vertical: true)
+                if store.cloudSignedIn {
+                    Button {
+                        store.refreshCloudEitan(force: true)
+                    } label: {
+                        Label("LOAD EITAN FROM PRIVATE CLOUD",
+                              systemImage: "icloud.and.arrow.down")
+                            .font(.system(size: 10, weight: .semibold))
+                            .frame(maxWidth: .infinity, minHeight: 40)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(WTheme.lime)
+                } else {
+                    NavigationLink {
+                        WatchCloudBackupSetup()
+                    } label: {
+                        Label("SIGN IN TO IMUN CLOUD",
+                              systemImage: "icloud")
+                            .font(.system(size: 11, weight: .semibold))
+                            .frame(maxWidth: .infinity, minHeight: 40)
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(WTheme.aqua)
+                    Text("Use the same iMun account as the iPhone. On iPhone, enable Private EITAN cloud sync in Settings. No paired iPhone link is needed after sign-in.")
+                        .font(.system(size: 10))
+                        .foregroundStyle(WTheme.muted)
+                }
                 Text("Change EITAN and Health preferences in iPhone Settings.")
                     .font(.system(size: 10))
                     .foregroundStyle(WTheme.aqua)
@@ -800,6 +834,7 @@ struct WatchWorkoutView: View {
                 store.refreshCloudWorkout()
                 store.refreshCloudSets()
                 store.refreshCloudAppearance(force: true)
+                store.refreshCloudEitan(force: true)
             }
         }
         .onReceive(progressPulse) { _ in
@@ -812,6 +847,7 @@ struct WatchWorkoutView: View {
                 }
                 store.refreshCloudSets()
                 store.refreshCloudAppearance()
+                store.refreshCloudEitan()
             }
         }
         .onChange(of: scenePhase) { _, phase in
@@ -820,6 +856,7 @@ struct WatchWorkoutView: View {
                 store.requestCurrentSchedule()
                 if store.cloudSignedIn {
                     store.refreshCloudWorkout()
+                    store.refreshCloudEitan(force: true)
                 }
             }
         }
@@ -2137,7 +2174,7 @@ private struct WatchCloudBackupSetup: View {
                 Text("DIRECT CLOUD SYNC")
                     .font(.system(size: 11, weight: .bold))
                     .foregroundStyle(WTheme.aqua)
-                Text("Sign in to your existing iMun account once. Your Watch can then download today's workout even if the iPhone link isn't available.")
+                Text("Sign in to your existing iMun account once. The Watch can download workouts and, when enabled on the iPhone, your private EITAN wellness score—even when WatchConnectivity says Phone not connected.")
                     .font(.system(size: 11))
                     .foregroundStyle(WTheme.muted)
                 TextField("Account email", text: $email)

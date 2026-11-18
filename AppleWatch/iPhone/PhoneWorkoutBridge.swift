@@ -32,6 +32,12 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
     private var locallyCreatedRun: HCRunPlan?
     @Published private(set) var recoveryHistory: [HCRecoveryDatum] = []
     @Published private(set) var eitanSnapshot: HCEitanSnapshot?
+    @Published private(set) var eitanCloudSyncStatus =
+        "Private EITAN cloud sync is off"
+    private var lastCloudEitanFingerprint: Data?
+    private var uploadingCloudEitan = false
+    private var pendingCloudEitan: (snapshot: HCEitanSnapshot?,
+                                   enabled: Bool, fingerprint: Data)?
     @Published private(set) var eitanCheckIns: [HCEitanDailyCheckIn] = []
     var todayEitanCheckIn: HCEitanDailyCheckIn? {
         eitanCheckIns.first { $0.date == HCPlanBuilder.dateString(Date()) }
@@ -192,7 +198,10 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
             let user = await cloud.signedInUserID
             DispatchQueue.main.async {
                 self.signedIn = user != nil
-                if user != nil { self.refresh(date: Date()) }
+                if user != nil {
+                    self.refresh(date: Date())
+                    self.refreshEitanCloudSync(force: true)
+                }
             }
         }
     }
@@ -212,6 +221,7 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
                     self.loading = false
                     self.status = "Signed in to Health Coach"
                     self.refresh(date: date)
+                    self.refreshEitanCloudSync(force: true)
                 }
             } catch {
                 DispatchQueue.main.async {
@@ -933,6 +943,82 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
         save(eitanCheckIns, name: "imun-eitan-check-ins.json")
     }
 
+    /// EITAN's optional private-cloud transport, independent of WCSession.
+    /// Never publish Health-derived data until a user explicitly opts in.
+    /// Disabled state publishes an empty tombstone only if the user previously
+    /// opted in; that clears the snapshot on the Watch's next cloud fetch.
+    func refreshEitanCloudSync(force: Bool = false) {
+        let prefs = UserDefaults.standard
+        let consent = prefs.bool(forKey: "hcEitanCloudSyncEnabled")
+        let previouslyEnabled = prefs.bool(forKey: "hcEitanCloudWasEnabled")
+        guard consent || previouslyEnabled else {
+            eitanCloudSyncStatus = "Off · EITAN stays on your devices"
+            return
+        }
+        guard signedIn else {
+            eitanCloudSyncStatus = "Sign in on iPhone to use private EITAN cloud sync"
+            return
+        }
+        if consent && !previouslyEnabled {
+            prefs.set(true, forKey: "hcEitanCloudWasEnabled")
+        }
+        let publishHealth = consent &&
+            (prefs.object(forKey: "hcEitanEnabled") as? Bool ?? true) &&
+            (prefs.object(forKey: "hcEitanUseHealth") as? Bool ?? true)
+        let current = publishHealth && eitanSnapshot?.date ==
+            HCPlanBuilder.dateString(Date()) ? eitanSnapshot : nil
+        let bytes = current.flatMap { try? encoder.encode($0) } ?? Data()
+        let fingerprint = Data([publishHealth ? 1 : 0]) + bytes
+        guard force || lastCloudEitanFingerprint != fingerprint else { return }
+        let request = (snapshot: current, enabled: publishHealth,
+                       fingerprint: fingerprint)
+        if uploadingCloudEitan {
+            pendingCloudEitan = request
+            return
+        }
+        uploadEitanToPrivateCloud(request)
+    }
+
+    private func uploadEitanToPrivateCloud(_ request: (
+        snapshot: HCEitanSnapshot?, enabled: Bool, fingerprint: Data)) {
+        uploadingCloudEitan = true
+        eitanCloudSyncStatus = request.enabled ?
+            "Publishing EITAN privately for Apple Watch…" :
+            "Clearing EITAN from private cloud…"
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                try await cloud.publishEitanForWatch(
+                    request.snapshot, enabled: request.enabled)
+                DispatchQueue.main.async {
+                    self.lastCloudEitanFingerprint = request.fingerprint
+                    self.eitanCloudSyncStatus = request.enabled ?
+                        "Private cloud updated · open EITAN on Watch to refresh" :
+                        "Private cloud EITAN data cleared"
+                    self.uploadingCloudEitan = false
+                    if let next = self.pendingCloudEitan {
+                        self.pendingCloudEitan = nil
+                        // Always flush a pending opt-out *after* a previous
+                        // in-flight upload to prevent restoring private data.
+                        if next.fingerprint != self.lastCloudEitanFingerprint {
+                            self.uploadEitanToPrivateCloud(next)
+                        }
+                    }
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    self.uploadingCloudEitan = false
+                    self.eitanCloudSyncStatus =
+                        "EITAN private cloud error: " + error.localizedDescription
+                    if let next = self.pendingCloudEitan {
+                        self.pendingCloudEitan = nil
+                        self.uploadEitanToPrivateCloud(next)
+                    }
+                }
+            }
+        }
+    }
+
     /// Recompute locally from authorized data; send only a compact summary
     /// to the paired Watch. Keep existing workout reconciliation untouched.
     func updateEitan(_ snapshot: HCEitanSnapshot?) {
@@ -941,6 +1027,7 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
         guard previous != incoming else { return }
         eitanSnapshot = snapshot
         sendEitanToWatch()
+        refreshEitanCloudSync()
     }
 
     /// A matching Apple Health workout marks the planned run complete in the
