@@ -2,6 +2,8 @@ import Foundation
 import Combine
 import WatchConnectivity
 import Security
+import WatchKit
+import UserNotifications
 
 /// Timestamp-based clocks survive wrist-down, temporary app suspension, and re-launch.
 /// Display timers calculate Date() - start rather than incrementing a foreground counter.
@@ -78,6 +80,18 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
     private var lastLiftStateSignature: String?
     private var lastAutomaticResendAt = Date.distantPast
 
+    // Keep rest alerts in the Watch-owned workout store, not a particular
+    // SwiftUI screen. The root store persists when the user navigates away.
+    private var restHeartbeat: AnyCancellable?
+    private var alertedRestDeadline: Date?
+    private static let restNotificationID = "imun.watch.rest-finished"
+    @Published private(set) var restNotificationStatus =
+        "Background alerts require Watch notification permission"
+
+    private var setHapticsEnabled: Bool {
+        UserDefaults.standard.object(forKey: "hcWatchHaptics") as? Bool ?? true
+    }
+
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
     private var queuedIDs: Set<UUID> = []
@@ -140,6 +154,16 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
             cloudUploadedRunIDs = Set(s)
         }
         if let s: HCTrainingClock = load("lifting-clock.json") { liftClock = s }
+        // A one-second independent heartbeat also works when Training is not
+        // the visible navigation destination.
+        restHeartbeat = Timer.publish(every: 0.5, on: .main, in: .common)
+            .autoconnect().sink { [weak self] _ in
+                self?.processRestDeadline()
+            }
+        if let clock = liftClock, clock.isActive, !clock.isPaused,
+           let end = clock.restEndsAt, end > Date() {
+            scheduleBackgroundRestAlert(deadline: end)
+        }
         guidedExerciseID = load("guided-exercise-id.json")
         selectedGuidedSet = load("guided-set-selection.json")
         queuedNextGuidedSet = load("queued-guided-set.json")
@@ -854,6 +878,89 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
             session.sendMessage(packet, replyHandler: { _ in },
                                 errorHandler: { _ in })
         }
+    }
+
+    // MARK: - Watch set and recovery haptics
+
+    private func playSetHaptic() {
+        guard setHapticsEnabled else { return }
+        WKInterfaceDevice.current().play(.start)
+    }
+
+    private func cancelBackgroundRestAlert() {
+        UNUserNotificationCenter.current().removePendingNotificationRequests(
+            withIdentifiers: [Self.restNotificationID])
+    }
+
+    private func scheduleBackgroundRestAlert(deadline: Date) {
+        cancelBackgroundRestAlert()
+        guard setHapticsEnabled,
+              UserDefaults.standard.bool(forKey: "hcWatchRestNotifications"),
+              deadline > Date() else { return }
+        let note = UNMutableNotificationContent()
+        note.title = "Rest complete"
+        note.body = "Your next strength set is ready."
+        note.sound = .default
+        let trigger = UNTimeIntervalNotificationTrigger(
+            timeInterval: max(1, deadline.timeIntervalSinceNow),
+            repeats: false)
+        UNUserNotificationCenter.current().add(UNNotificationRequest(
+            identifier: Self.restNotificationID,
+            content: note, trigger: trigger)) { error in
+                if let error {
+                    NSLog("iMun Watch rest notification: %@", error.localizedDescription)
+                }
+            }
+    }
+
+    /// Explicit Settings action: never request notification permission simply
+    /// because the athlete started a workout.
+    func enableBackgroundRestAlerts() {
+        UNUserNotificationCenter.current().requestAuthorization(
+            options: [.alert, .sound]) { [weak self] granted, error in
+                DispatchQueue.main.async {
+                    UserDefaults.standard.set(granted, forKey: "hcWatchRestNotifications")
+                    self?.restNotificationStatus = granted
+                        ? "Rest alerts enabled when Watch is not showing iMun"
+                        : (error?.localizedDescription ??
+                           "Notification access is off. Enable iMun alerts in Watch Settings.")
+                    if granted, let until = self?.liftClock?.restEndsAt,
+                       until > Date() {
+                        self?.scheduleBackgroundRestAlert(deadline: until)
+                    }
+                }
+            }
+    }
+
+    func refreshRestAlertPreferences() {
+        if !setHapticsEnabled { cancelBackgroundRestAlert() }
+        else if let clock = liftClock, clock.isActive, !clock.isPaused,
+                let until = clock.restEndsAt, until > Date() {
+            scheduleBackgroundRestAlert(deadline: until)
+        }
+    }
+
+    /// The deadline is based on wall-clock time, so it survives wrist-down
+    /// and navigation. Never send multiple haptics for one rest period.
+    func processRestDeadline() {
+        guard let clock = liftClock, clock.isActive, !clock.isPaused,
+              clock.setStartedAt == nil, let deadline = clock.restEndsAt,
+              deadline <= Date(),
+              alertedRestDeadline != deadline else { return }
+        alertedRestDeadline = deadline
+        // The OS owns inactive-app notification delivery. The foreground
+        // Watch receives one prominent notification haptic directly.
+        if setHapticsEnabled,
+           WKApplication.shared().applicationState == .active,
+           Date().timeIntervalSince(deadline) < 15 {
+            WKInterfaceDevice.current().play(.notification)
+        }
+        if WKApplication.shared().applicationState == .active {
+            cancelBackgroundRestAlert()
+        }
+        // Automatic start is opt-in. When it happens, the rest-complete
+        // haptic replaces a second immediate start tap.
+        advanceAfterRestIfReady(playStartHaptic: false)
     }
 
     // MARK: - Full strength session clock
