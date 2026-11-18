@@ -239,6 +239,12 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
                         "Watch already has a newer EITAN snapshot than private cloud."
                     return
                 }
+                // This cloud row was uploaded only after the athlete
+                // enabled Health-based EITAN and private Watch sync on iPhone.
+                // Reconcile Watch's old preference cache so the received
+                // wellness score is actually visible on the opening tile.
+                UserDefaults.standard.set(true, forKey: "hcEitanEnabled")
+                UserDefaults.standard.set(true, forKey: "hcEitanUseHealth")
                 self.eitanSnapshot = snapshot
                 self.save(snapshot, name: "eitan-snapshot.json")
                 self.eitanCloudReceivedAt = Date()
@@ -1330,6 +1336,20 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
             eitanSyncStatus = "Received older EITAN revision · previous data preserved"
             eitanTransportDetails += " · older than Watch's last accepted timestamp"
             return false
+        }
+        // An unrelated iPhone schedule refresh might carry an empty
+        // wellness payload while its Health importer is loading. Do not
+        // erase an already authenticated same-day cloud EITAN merely
+        // because the older live transport has no score. Explicit opt-out
+        // flags still clear it immediately below.
+        if bytes.isEmpty,
+           packet["hcEitanEnabled"] as? Bool != false,
+           packet["hcEitanUseHealth"] as? Bool != false,
+           eitanCloudReceivedAt != nil,
+           eitanSnapshot?.date == Self.today() {
+            eitanSyncStatus = "Showing private-cloud EITAN while iPhone importer loads"
+            eitanTransportDetails += " · empty phone update ignored; cloud retained"
+            return true
         }
         let reading: HCEitanSnapshot?
         if bytes.isEmpty {
