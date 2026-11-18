@@ -4416,6 +4416,22 @@ private struct PremiumCoachConversation: View {
                 .foregroundStyle(HCDesign.secondary)
             }
             .tint(HCDesign.electric)
+            if shareRecovery && runImporter.workouts.isEmpty &&
+                !runImporter.refreshing {
+                HStack(spacing: 9) {
+                    Text("No Apple Health workout history loaded yet.")
+                        .font(.system(size: 11))
+                        .foregroundStyle(HCDesign.secondary)
+                    Spacer(minLength: 4)
+                    Button("Connect") {
+                        appleHealth.connect(onRequestCompleted: {
+                            runImporter.startIfAuthorized()
+                        })
+                    }
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(HCDesign.aqua)
+                }
+            }
             Toggle("Use relevant previous IsAIah chats", isOn: $rememberChats)
                 .font(.system(size: 11))
                 .tint(HCDesign.electric)
