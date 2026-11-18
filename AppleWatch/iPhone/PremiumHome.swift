@@ -4470,6 +4470,46 @@ private struct PremiumCoachConversation: View {
                 Button("Done") { composerFocused = false }
             }
         }
+        .fileImporter(isPresented: $showFileImporter,
+                      allowedContentTypes: [.item],
+                      allowsMultipleSelection: true) { result in
+            switch result {
+            case .success(let urls):
+                for url in urls.prefix(4) {
+                    do {
+                        try addAttachment(IMUNCoachAttachmentReader.document(at: url))
+                    } catch {
+                        attachmentError = error.localizedDescription
+                    }
+                }
+            case .failure(let error):
+                attachmentError = error.localizedDescription
+            }
+        }
+        .onChange(of: selectedPhoto) { _, item in
+            guard let item else { return }
+            Task {
+                do {
+                    guard let data = try await item.loadTransferable(type: Data.self)
+                    else { throw IMUNCoachAttachmentReader.Failure.invalidImage }
+                    let uploaded = try IMUNCoachAttachmentReader.image(
+                        data: data, filename: "Training photo.jpg")
+                    addAttachment(uploaded)
+                } catch {
+                    attachmentError = error.localizedDescription
+                }
+                selectedPhoto = nil
+            }
+        }
+    }
+
+    private func addAttachment(_ item: IMUNCoachAttachment) throws {
+        guard pendingAttachments.count < 4,
+              item.kind != "image" ||
+                pendingAttachments.filter({ $0.kind == "image" }).count < 2
+        else { throw IMUNCoachAttachmentReader.Failure.tooMany }
+        pendingAttachments.append(item)
+        attachmentError = nil
     }
 
     // One slim assistant toolbar replaces both the oversized artwork banner
