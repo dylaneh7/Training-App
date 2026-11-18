@@ -1351,6 +1351,11 @@ private struct WatchGuidedSession: View {
                     }
                 }
                 .padding(.vertical, 5)
+                if let recognized = store.motionRecognitionHint {
+                    Text(recognized)
+                        .font(.system(size: 10))
+                        .foregroundStyle(WTheme.aqua)
+                }
             }
             Button {
                 if active {
@@ -1518,6 +1523,7 @@ private struct WatchPreferences: View {
     @AppStorage("hcWatchSetStartHaptics") private var setStartHaptics = true
     @AppStorage("hcWatchRestCompleteHaptics") private var restCompleteHaptics = true
     @AppStorage("hcWatchMotionRepEstimate") private var motionRepEstimate = true
+    @AppStorage("hcWatchMotionRecognitionEnabled") private var motionRecognition = false
     @AppStorage("hcWatchWearSide") private var watchWearSide = "unknown"
     @AppStorage("hcWhoopWearSide") private var whoopWearSide = "off"
 
@@ -1668,6 +1674,15 @@ private struct WatchPreferences: View {
                         motionSettingsChanged()
                     }
                 Text("Motion counts fill the normal reps field. Editing + / − locks your correction for the rest of that set. You still save the set.")
+                    .font(.caption2)
+                    .foregroundStyle(WTheme.muted)
+                Toggle("Learn exercise patterns from saved sets",
+                       isOn: $motionRecognition)
+                    .tint(WTheme.lime)
+                    .onChange(of: motionRecognition) { _, _ in
+                        motionSettingsChanged()
+                    }
+                Text("Experimental: after several labeled sets of at least two exercises, iMun can suggest a possible movement match. It never changes your workout automatically.")
                     .font(.caption2)
                     .foregroundStyle(WTheme.muted)
                 Text("Running voice cues and automatic miles remain in the Run screen.")
