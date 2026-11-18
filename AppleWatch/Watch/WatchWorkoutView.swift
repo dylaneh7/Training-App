@@ -1609,13 +1609,31 @@ private struct WatchPreferences: View {
 
 /// Connection tests are intentionally isolated in Settings rather than
 /// presenting implementation detail under fitness and wellness cards.
+/// Only Settings holds connectivity metadata; each component is deliberately
+/// small enough for SwiftUI's watchOS compiler to type-check independently.
 private struct WatchConnectivityDiagnostics: View {
+    var body: some View {
+        Section("CONNECTIVITY & DIAGNOSTICS") {
+            WatchEitanSyncSettings()
+            WatchTransportConnectionSettings()
+        }
+    }
+}
+
+private struct WatchEitanSyncSettings: View {
+    var body: some View {
+        DisclosureGroup("EITAN & WATCH DETAILS") {
+            WatchEitanTransportDetails()
+            WatchEitanRecoveryControls()
+        }
+    }
+}
+
+private struct WatchEitanTransportDetails: View {
     @EnvironmentObject private var store: WatchWorkoutStore
 
     var body: some View {
-        Section("CONNECTIVITY & DIAGNOSTICS") {
-
-                DisclosureGroup("EITAN & WATCH DETAILS") {
+        VStack(alignment: .leading, spacing: 7) {
                 Text(store.eitanSyncStatus)
                     .font(.system(size: 10))
                     .foregroundStyle(WTheme.aqua)
@@ -1651,6 +1669,15 @@ private struct WatchConnectivityDiagnostics: View {
                         .font(.system(size: 10))
                         .foregroundStyle(WTheme.muted)
                 }
+        }
+    }
+}
+
+private struct WatchEitanRecoveryControls: View {
+    @EnvironmentObject private var store: WatchWorkoutStore
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 9) {
                 Button {
                     store.requestEitanSync()
                 } label: {
@@ -1698,7 +1725,15 @@ private struct WatchConnectivityDiagnostics: View {
                 Text("Change EITAN and Health preferences in iPhone Settings.")
                     .font(.system(size: 10))
                     .foregroundStyle(WTheme.aqua)
-                }
+        }
+    }
+}
+
+private struct WatchTransportConnectionSettings: View {
+    @EnvironmentObject private var store: WatchWorkoutStore
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 9) {
                 Text("Watch build " +
                      (Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "?"))
                     .font(.system(size: 10))
@@ -1752,8 +1787,7 @@ private struct WatchConnectivityDiagnostics: View {
                 }
                 Text(store.status)
                     .font(.system(size: 10)).foregroundStyle(WTheme.muted)
-                    .fixedSize(horizontal: false, vertical: true)
-        }
+                    .fixedSize(horizontal: false, vertical: true)        }
     }
 }
 
