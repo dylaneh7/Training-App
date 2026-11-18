@@ -4892,9 +4892,9 @@ private struct IMUNRunImportSettings: View {
                 HCCard(accent: HCDesign.aqua) {
                     VStack(alignment: .leading, spacing: 12) {
                         HCAccentTag(title: "AUTO-IMPORT / APPLE HEALTH", color: HCDesign.aqua)
-                        Text(importer.enabled ? "Runs sync automatically" : "Connect completed workouts")
+                        Text(importer.enabled ? "Exercise history sync enabled" : "Connect Apple Health workouts")
                             .font(.system(size: 17, weight: .bold, design: .rounded))
-                        Text("Bring in running workouts from Apple Workout and WHOOP when they appear in Apple Health. Individual metrics depend on what each source shares.")
+                        Text("Read all authorized Apple Health exercise sessions, including runs, lifting, walks, cycling, swimming and other recorded sports. Tredict and Garmin history is handled separately. Nothing is shared with IsAIah until you enable his Health-sharing control and send a message.")
                             .font(.system(size: 12))
                             .foregroundStyle(HCDesign.secondary)
                         if importer.enabled {
@@ -4909,6 +4909,39 @@ private struct IMUNRunImportSettings: View {
                             .foregroundStyle(HCDesign.secondary)
                     }
                 }
+    }
+}
+
+private struct IMUNIsaiahMemorySettings: View {
+    @AppStorage("hcIsaiahRememberChats") private var rememberChats = true
+    @State private var confirmClearMemory = false
+
+    var body: some View {
+        HCCard {
+            VStack(alignment: .leading, spacing: 12) {
+                Toggle("Remember past IsAIah conversations", isOn: $rememberChats)
+                    .font(.system(size: 14, weight: .semibold))
+                    .tint(HCDesign.electric)
+                Text("IsAIah keeps your prior chat messages on this iPhone. When enabled, relevant excerpts are shared with the online coach only after you send a new message. Past chats may contain personal details.")
+                    .font(.system(size: 12))
+                    .foregroundStyle(HCDesign.secondary)
+                Button(role: .destructive) {
+                    confirmClearMemory = true
+                } label: {
+                    Label("Clear remembered conversations", systemImage: "trash")
+                }
+                .font(.system(size: 12, weight: .medium))
+                .confirmationDialog("Clear saved IsAIah memory?",
+                                    isPresented: $confirmClearMemory,
+                                    titleVisibility: .visible) {
+                    Button("Clear remembered conversations", role: .destructive) {
+                        IMUNCoachLocalMemory.clear()
+                    }
+                } message: {
+                    Text("This removes the stored long-term chat archive from this iPhone. The visible chat and your workout history are not deleted.")
+                }
+            }
+        }
     }
 }
 
@@ -4997,6 +5030,8 @@ private struct PremiumSettingsPage: View {
                             .font(.caption2).foregroundStyle(HCDesign.secondary)
                     }
                 }
+                HCSectionTitle(title: "IsAIah memory", detail: "Conversation continuity")
+                IMUNIsaiahMemorySettings()
                 HCSectionTitle(title: "EITAN", detail: "Wellness & adaptive coaching")
                 HCCard {
                     VStack(alignment: .leading, spacing: 13) {
