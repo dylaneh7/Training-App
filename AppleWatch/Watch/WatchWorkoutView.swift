@@ -1014,6 +1014,7 @@ private struct WatchGuidedSession: View {
     @EnvironmentObject private var health: WatchHealthSession
     @AppStorage("hcWeightIncrement") private var increment = 5.0
     @AppStorage("hcAutoStartNextSet") private var autoStartNextSet = true
+    @AppStorage("hcWatchMotionRepAssist") private var motionRepAssist = false
     @State private var weight = 0.0
     @State private var hasWeight = false
     @State private var reps = 8
@@ -1304,6 +1305,49 @@ private struct WatchGuidedSession: View {
                     wHaptic(.click)
                 }
             )
+            if active && motionRepAssist {
+                VStack(alignment: .leading, spacing: 7) {
+                    HStack(spacing: 5) {
+                        Image(systemName: "waveform.path")
+                            .foregroundStyle(WTheme.aqua)
+                        Text("WATCH MOTION ESTIMATE")
+                            .font(WTheme.label(9))
+                            .foregroundStyle(WTheme.muted)
+                    }
+                    HStack(alignment: .center, spacing: 9) {
+                        Text("\(store.estimatedMotionReps)")
+                            .font(WTheme.metric(28))
+                            .foregroundStyle(WTheme.lime)
+                            .contentTransition(.numericText())
+                        Spacer(minLength: 4)
+                        Button {
+                            reps = min(100, max(1, store.estimatedMotionReps))
+                            wHaptic(.click)
+                        } label: {
+                            Text("USE ESTIMATE")
+                                .font(WTheme.label(10))
+                                .foregroundStyle(WTheme.onAccent)
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 9)
+                                .background(WTheme.lime,
+                                            in: Capsule())
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(store.estimatedMotionReps < 1)
+                    }
+                    if let tempo = store.motionAverageRepSeconds {
+                        Text(String(format: "Around %.1f sec/rep", tempo))
+                            .font(.system(size: 11))
+                            .foregroundStyle(WTheme.muted)
+                    }
+                    Text("Experimental · Confirm reps before saving")
+                        .font(.system(size: 10))
+                        .foregroundStyle(WTheme.muted)
+                }
+                .padding(11)
+                .background(WTheme.panel,
+                            in: RoundedRectangle(cornerRadius: 13))
+            }
             Button {
                 if active {
                     let saved = store.stopSet(for: exercise,
@@ -1469,6 +1513,7 @@ private struct WatchPreferences: View {
     @AppStorage("hcWatchHaptics") private var haptics = true
     @AppStorage("hcWatchSetStartHaptics") private var setStartHaptics = true
     @AppStorage("hcWatchRestCompleteHaptics") private var restCompleteHaptics = true
+    @AppStorage("hcWatchMotionRepAssist") private var motionRepAssist = false
 
     var body: some View {
         List {
@@ -1604,6 +1649,15 @@ private struct WatchPreferences: View {
                             .foregroundStyle(WTheme.muted)
                     }
                 }
+                Toggle("Experimental motion rep estimate",
+                       isOn: $motionRepAssist)
+                    .tint(WTheme.lime)
+                    .onChange(of: motionRepAssist) { _, _ in
+                        store.refreshMotionRepPreference()
+                    }
+                Text("Uses Watch wrist motion only while you perform a strength set. Counts are suggestions; you choose or edit reps before saving. Best for distinct, rhythmic arm movements; less reliable for many lifts.")
+                    .font(.caption2)
+                    .foregroundStyle(WTheme.muted)
                 Text("Running voice cues and automatic miles remain in the Run screen.")
                     .font(.caption2).foregroundStyle(WTheme.muted)
             }
