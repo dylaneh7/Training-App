@@ -5449,6 +5449,12 @@ private struct PremiumSettingsPage: View {
     @AppStorage("hcRunIntervals") private var runIntervals = false
     @AppStorage("hcRunCueMinutes") private var runCueMinutes = 5
 
+    private func syncMotionConfiguration() {
+        UserDefaults.standard.set(Date().timeIntervalSince1970,
+                                  forKey: "hcMotionPreferenceTimestamp")
+        coach.sendToWatch()
+    }
+
     private var export: String {
         var lines = ["# IMUN Training Export",
                      "Aggressive progression: \(aggressive)",
@@ -5513,12 +5519,18 @@ private struct PremiumSettingsPage: View {
                     VStack(alignment: .leading, spacing: 11) {
                         Toggle("Automatic rep counting", isOn: $motionAutoReps)
                             .tint(HCDesign.electric)
+                            .onChange(of: motionAutoReps) { _, _ in
+                                syncMotionConfiguration()
+                            }
                         Picker("Apple Watch wrist", selection: $motionWatchWrist) {
                             Text("Not configured").tag("unknown")
                             Text("Left wrist").tag("left")
                             Text("Right wrist").tag("right")
                         }
                         .tint(HCDesign.electric)
+                        .onChange(of: motionWatchWrist) { _, _ in
+                            syncMotionConfiguration()
+                        }
                         Picker("WHOOP position", selection: $motionWhoopPosition) {
                             Text("Not worn").tag("off")
                             Text("Left wrist").tag("left")
@@ -5526,6 +5538,9 @@ private struct PremiumSettingsPage: View {
                             Text("Other location").tag("other")
                         }
                         .tint(HCDesign.electric)
+                        .onChange(of: motionWhoopPosition) { _, _ in
+                            syncMotionConfiguration()
+                        }
                         Text("Apple Watch: live Core Motion available during active tracked sets. WHOOP: physiological and workout data only through supported integrations; official live gyroscope/accelerometer streaming is not available.")
                             .font(.caption)
                             .foregroundStyle(HCDesign.secondary)
