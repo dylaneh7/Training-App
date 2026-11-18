@@ -249,3 +249,28 @@ check(inferred.count == 1 && inferred[0].side == .left &&
       inferred[0].motionInsight == nil,
       "Legacy cloud rows infer side without inventing movement data")
 print("Build 62 cloud side and motion summary decoding tests passed.")
+
+
+// Build 63: the complete offline exercise catalog, form cues and intelligent
+// swaps must remain usable without any remote API.
+check(HCExerciseLibrary.all.count >= 800,
+      "iMun exercise library should include the expanded offline catalog")
+check(HCExerciseLibrary.all.allSatisfy { !$0.name.isEmpty &&
+      !$0.instructions.isEmpty },
+      "Every browseable exercise must provide how-to instructions")
+check(HCExerciseLibrary.all.contains {
+    $0.source.contains("Free Exercise DB") && !$0.formTip.isEmpty &&
+    !$0.primaryMuscles.isEmpty
+}, "Imported exercise records must include muscles and form tips")
+let rowChoices = HCExerciseLibrary.alternatives(for: singleArm, limit: 10)
+check(!rowChoices.isEmpty,
+      "Smart Swap should find muscle-matched alternatives for a one-arm row")
+check(rowChoices.allSatisfy {
+    $0.kind == "strength" &&
+    HCProgramCatalog.normalized($0.name) !=
+        HCProgramCatalog.normalized(singleArm.name)
+}, "Smart Swap must not use unrelated cardio/stretches in a lifting plan")
+let chestBench = movement("Flat barbell bench press")
+check(!HCExerciseLibrary.alternatives(for: chestBench, limit: 5).isEmpty,
+      "Horizontal press movements should have appropriate substitutions")
+print("Build 63 offline catalog, instructions and smart swap tests passed: \(HCExerciseLibrary.all.count) unique movements.")
