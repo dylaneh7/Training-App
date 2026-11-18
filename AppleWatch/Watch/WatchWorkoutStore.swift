@@ -299,6 +299,7 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
     @Published private(set) var motionRepStatus = "Motion rep estimates are off"
     @Published private(set) var motionLastRepPeriod: Double?
     @Published private(set) var lastSetMotionNote: String?
+    @Published private(set) var motionRecognitionHint: String?
     private let repEstimator = HCMotionRepEstimator()
     @Published private(set) var guidedExerciseID: String?
     @Published private(set) var selectedGuidedSet: HCGuidedSetChoice?
@@ -378,6 +379,13 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
             guard let self else { return }
             self.motionEstimatedReps = reps
             self.motionLastRepPeriod = secondsPerRep
+            if reps >= 4 && UserDefaults.standard.object(
+                forKey:"hcWatchMotionRecognitionEnabled") as? Bool ?? false {
+                if let current = self.repEstimator.insight(
+                    wearSide: self.wornAppleWatchSide?.rawValue ?? "unknown") {
+                    self.motionRecognitionHint = self.recognizeMotionProfile(current)
+                }
+            }
             if var draft = self.activeRepDraft,
                !draft.manuallyCorrected,
                self.motionCanTrackActiveSide,
@@ -1195,8 +1203,47 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
             directory.appendingPathComponent("motion-rep-draft.json"))
     }
 
+    /// Personal baseline comparison; not an untrained generic exercise
+    /// classifier. Requires at least three prior labeled sets PER exercise
+    /// from the same wrist plus a distinct second exercise profile.
+    private func recognizeMotionProfile(_ current: HCMotionSetInsight) -> String? {
+        guard let tempo = current.averageCycleSeconds, tempo > 0.2,
+              let rotation = current.meanWristRotationDegrees, rotation > 1
+        else { return nil }
+        let historical = sets.filter {
+            $0.motionInsight?.wearSide == current.wearSide &&
+            ($0.motionInsight?.detectedReps ?? 0) >= 4
+        }
+        let grouped = Dictionary(grouping: historical) {
+            HCProgramCatalog.normalized($0.exerciseName)
+        }
+        var candidates: [(name: String, distance: Double)] = []
+        for (_, records) in grouped where records.count >= 3 {
+            let m = records.compactMap(\.motionInsight).filter {
+                ($0.averageCycleSeconds ?? 0) > 0.2 &&
+                ($0.meanWristRotationDegrees ?? 0) > 1
+            }
+            guard m.count >= 3 else { continue }
+            let period = m.compactMap(\.averageCycleSeconds).reduce(0,+) /
+                Double(m.count)
+            let spin = m.compactMap(\.meanWristRotationDegrees).reduce(0,+) /
+                Double(m.count)
+            guard period > 0, spin > 0 else { continue }
+            let distance = abs(log(tempo / period)) * 0.55 +
+                           abs(log(rotation / spin)) * 0.45
+            candidates.append((records[0].exerciseName, distance))
+        }
+        guard candidates.count >= 2 else { return nil }
+        candidates.sort { $0.distance < $1.distance }
+        let first = candidates[0], second = candidates[1]
+        guard first.distance < 0.25,
+              second.distance - first.distance > 0.10 else { return nil }
+        return "Pattern resembles \(first.name) · unverified"
+    }
+
     private func beginRepEstimate() {
         motionLastRepPeriod = nil
+        motionRecognitionHint = nil
         lastSetMotionNote = nil
         guard motionRepEnabled else {
             motionRepStatus = "Motion rep estimates are off"
