@@ -676,7 +676,7 @@ if let recovery = store.recoverySummary {
                     }
                 } else {
                     Section("HEALTH") {
-                        Text("No connected recovery readings yet. Check iPhone Health sync.")
+                        Text("Recovery measurements will appear here when available.")
                             .font(.system(size: 11))
                             .foregroundStyle(WTheme.muted)
                             .listRowBackground(WTheme.panel)
@@ -1599,7 +1599,21 @@ private struct WatchPreferences: View {
                 Text("Running voice cues and automatic miles remain in the Run screen.")
                     .font(.caption2).foregroundStyle(WTheme.muted)
             }
-            Section("CONNECTIVITY & DIAGNOSTICS") {
+            WatchConnectivityDiagnostics()
+        }
+        .listStyle(.plain)
+        .navigationTitle("Settings")
+        .background(WTheme.bg.ignoresSafeArea())
+    }
+}
+
+/// Connection tests are intentionally isolated in Settings rather than
+/// presenting implementation detail under fitness and wellness cards.
+private struct WatchConnectivityDiagnostics: View {
+    @EnvironmentObject private var store: WatchWorkoutStore
+
+    var body: some View {
+        Section("CONNECTIVITY & DIAGNOSTICS") {
 
                 DisclosureGroup("EITAN & WATCH DETAILS") {
                 Text(store.eitanSyncStatus)
@@ -1689,15 +1703,6 @@ private struct WatchPreferences: View {
                      (Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "?"))
                     .font(.system(size: 10))
                     .foregroundStyle(WTheme.muted)
-                Text(store.eitanSyncStatus)
-                    .font(.system(size: 10))
-                    .foregroundStyle(WTheme.aqua)
-                    .fixedSize(horizontal: false, vertical: true)
-                Button {
-                    store.requestEitanSync()
-                } label: {
-                    Label("Sync EITAN score", systemImage: "arrow.triangle.2.circlepath")
-                }
                 Button {
                     store.checkPhoneConnection()
                 } label: {
@@ -1748,11 +1753,7 @@ private struct WatchPreferences: View {
                 Text(store.status)
                     .font(.system(size: 10)).foregroundStyle(WTheme.muted)
                     .fixedSize(horizontal: false, vertical: true)
-            }
         }
-        .listStyle(.plain)
-        .navigationTitle("Settings")
-        .background(WTheme.bg.ignoresSafeArea())
     }
 }
 
@@ -2079,7 +2080,7 @@ private struct WatchRunScreen: View {
                     }
                 }
                 if store.runHistory.isEmpty {
-                    Text("Completed runs will appear after syncing Apple Health on iPhone.")
+                    Text("No completed runs yet.")
                         .font(.system(size: 12)).foregroundStyle(WTheme.muted)
                 }
             }
