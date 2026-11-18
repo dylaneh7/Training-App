@@ -689,7 +689,7 @@ Section("PREFERENCES") {
                     NavigationLink {
                         WatchPreferences()
                     } label: {
-                        Label("SETTINGS & DIAGNOSTICS", systemImage: "gearshape")
+                        Label("SETTINGS", systemImage: "gearshape")
                             .font(.system(size: 12, weight: .bold))
                     }
                 }
