@@ -398,12 +398,14 @@ private struct IMUNEitanHomeTile: View {
                         .font(.system(size: 8, weight: .medium))
                         .foregroundStyle(WTheme.muted)
                         .lineLimit(1)
-                    Text(wellness.status)
+                    Text(wellness.value == nil ?
+                         "Synced · personal wellness baseline incomplete" :
+                         wellness.status)
                         .font(.system(size: 10, weight: .medium))
                         .foregroundStyle(WTheme.aqua)
                         .lineLimit(2)
                 } else {
-                    Text("Sync iPhone Health to build your personal baseline")
+                    Text("No iPhone EITAN snapshot · tap to see connection details")
                         .font(.system(size: 10))
                         .foregroundStyle(WTheme.muted)
                         .fixedSize(horizontal: false, vertical: true)
@@ -518,7 +520,7 @@ private struct IMUNEitanExplanation: View {
                                 .fixedSize(horizontal: false, vertical: true)
                         }
                     } else {
-                        Text("Open iMun on iPhone to sync authorized Health measurements. EITAN needs comparable readings to show a wellness score.")
+                        Text("No EITAN snapshot received. Open iMun on the iPhone and Watch, then tap Sync below. If the iPhone already shows a score, check the phone/watch build versions and connection status here.")
                             .font(.system(size: 11))
                             .foregroundStyle(WTheme.muted)
                     }
@@ -555,6 +557,16 @@ private struct IMUNEitanExplanation: View {
                 Text(store.eitanSyncStatus)
                     .font(.system(size: 10))
                     .foregroundStyle(WTheme.aqua)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text(store.eitanTransportDetails)
+                    .font(.system(size: 9))
+                    .foregroundStyle(WTheme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text("WATCH BUILD " +
+                     (Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "?") +
+                     " · PHONE " + store.eitanPhoneBuild)
+                    .font(.system(size: 9))
+                    .foregroundStyle(WTheme.muted)
                     .fixedSize(horizontal: false, vertical: true)
                 if let received = store.eitanLastReceivedAt {
                     Text("Last received " +

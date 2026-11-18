@@ -316,7 +316,20 @@ private struct IMUNEitanTodayCard: View {
                         .buttonStyle(.bordered)
                         .tint(HCDesign.electric)
                     }
-                    Text("EITAN is delivered separately from workout syncing. A confirmation means the Watch received the data, even if the personal baseline is still being established.")
+                    Text("iPhone wellness: " +
+                         (coach.eitanSnapshot?.value.map { "\($0)/100" } ??
+                          (coach.eitanSnapshot == nil ? "not calculated" : "baseline incomplete")) +
+                         " · " + (coach.eitanSnapshot?.coverage ?? "No score to send"))
+                        .font(.system(size: 10))
+                        .foregroundStyle(HCDesign.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text("iPhone build " +
+                         (Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "unknown") +
+                         " · " + coach.watchConnectionDetails)
+                        .font(.system(size: 10))
+                        .foregroundStyle(HCDesign.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text("EITAN uses one versioned snapshot. A Watch acknowledgment proves the data was accepted; a delivered score can still be blank if a personal baseline is missing.")
                         .font(.system(size: 10))
                         .foregroundStyle(HCDesign.secondary)
                     Text("Personal trends and coaching suggestions are informational, not medical diagnoses.")
@@ -4910,6 +4923,10 @@ private struct PremiumSettingsPage: View {
                             Divider()
                             Text(coach.eitanWatchSyncStatus)
                                 .font(.system(size: 11))
+                                .foregroundStyle(HCDesign.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                            Text(coach.watchConnectionDetails)
+                                .font(.system(size: 10))
                                 .foregroundStyle(HCDesign.secondary)
                                 .fixedSize(horizontal: false, vertical: true)
                             Button {
