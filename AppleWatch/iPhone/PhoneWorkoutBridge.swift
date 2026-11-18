@@ -10,6 +10,8 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
     @Published private(set) var preferredTredictRunID: String?
     @Published private(set) var loggedSets: [HCLoggedSet] = []
     @Published private(set) var cloudRecordedSets: [HCLoggedSet] = []
+    @Published private(set) var cloudMotionHistorySets: [HCLoggedSet] = []
+    @Published private(set) var motionHistoryStatus = "Motion history available after syncing"
     @Published private(set) var undoRecords: [HCWorkoutUndo] = []
     @Published private(set) var cloudUndoRecords: [HCWorkoutUndo] = []
     @Published private(set) var progressSyncStatus = "Progress saved locally"
@@ -101,6 +103,9 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
     private var uploadedUndoIDs: Set<UUID> = []
     private var syncingQueue = false
     private var fetchingProgress = false
+    private var fetchingMotionHistory = false
+    private var lastMotionHistoryCheck = Date.distantPast
+    private var motionHistoryGeneration = 0
     private var fetchingCloudRunHistory = false
     private var lastCloudRunHistoryCheck = Date.distantPast
     private var pendingEditedWorkout: HCWorkout?
@@ -224,6 +229,7 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
                     self.loading = false
                     self.status = "Signed in to Health Coach"
                     self.refresh(date: date)
+                    self.refreshMotionHistory(force: true)
                     self.refreshEitanCloudSync(force: true)
                 }
             } catch {
@@ -238,6 +244,9 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
     func logout() {
         Task { await cloud.signOut() }
         signedIn = false
+        motionHistoryGeneration += 1
+        cloudMotionHistorySets = []
+        motionHistoryStatus = "Sign in to sync motion history"
         confirmedScheduleDate = nil
         workout = nil
         runPlan = nil
@@ -325,6 +334,7 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
                     }
                     self.performanceHistory = history
                     self.refreshCloudProgress()
+                    self.refreshMotionHistory()
                     self.remoteRunHistory = priorRuns
                     self.mergeRunHistory()
                     self.cloudRecoveryHistory = recovery
@@ -2096,6 +2106,52 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
     var combinedRecordedSets: [HCLoggedSet] {
         HCSetReconciliation.allRecords(local: loggedSets, cloud: cloudRecordedSets,
                                       undos: combinedUndoRecords)
+    }
+
+    /// Recorded per-set motion summaries across all workout dates, with
+    /// one UUID per set and undo corrections applied. Does not expose
+    /// raw accelerometer/gyroscope samples.
+    var motionHistorySets: [HCLoggedSet] {
+        HCSetReconciliation.allRecords(
+            local: loggedSets, cloud: cloudRecordedSets + cloudMotionHistorySets,
+            undos: combinedUndoRecords
+        ).filter { $0.motionInsight != nil }
+    }
+
+    /// Load detailed past sessions separately from today's progress refresh.
+    /// Never discard local history when a cloud request fails.
+    func refreshMotionHistory(force: Bool = false) {
+        guard signedIn, !fetchingMotionHistory,
+              force || Date().timeIntervalSince(lastMotionHistoryCheck) >= 120
+        else { return }
+        fetchingMotionHistory = true
+        lastMotionHistoryCheck = Date()
+        motionHistoryGeneration += 1
+        let generation = motionHistoryGeneration
+        motionHistoryStatus = "Syncing movement history…"
+        Task {
+            do {
+                let rows = try await cloud.fetchMotionHistory()
+                DispatchQueue.main.async {
+                    guard self.signedIn,
+                          generation == self.motionHistoryGeneration else { return }
+                    self.fetchingMotionHistory = false
+                    if Set(self.cloudMotionHistorySets) != Set(rows) {
+                        self.cloudMotionHistorySets = rows
+                    }
+                    self.motionHistoryStatus =
+                        "\(self.motionHistorySets.count) movement sets available"
+                }
+            } catch {
+                DispatchQueue.main.async {
+                    guard generation == self.motionHistoryGeneration else { return }
+                    self.fetchingMotionHistory = false
+                    self.motionHistoryStatus =
+                        "Saved movement history is available offline. Cloud: " +
+                        error.localizedDescription
+                }
+            }
+        }
     }
 
     func completedSets(for plan: HCWorkout) -> [HCLoggedSet] {
