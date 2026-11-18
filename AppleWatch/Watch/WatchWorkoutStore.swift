@@ -136,7 +136,7 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
             applyContext(WCSession.default.receivedApplicationContext)
             requestCurrentSchedule()
         }
-        Task { [weak self] in
+        Task { @MainActor [weak self] in
             guard let self else { return }
             let available = await cloud.hasSession()
             DispatchQueue.main.async {
@@ -159,7 +159,7 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
             return
         }
         cloudStatus = "Signing in securely…"
-        Task { [weak self] in
+        Task { @MainActor [weak self] in
             guard let self else { return }
             do {
                 try await cloud.signIn(email: cleanEmail, password: password)
@@ -187,7 +187,7 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
         loadingCloudSchedule = true
         let day = Self.today()
         cloudStatus = "Downloading today's strength and running plans…"
-        Task { [weak self] in
+        Task { @MainActor [weak self] in
             guard let self else { return }
             do {
                 // New complete plan (includes no-lift days with scheduled runs).
@@ -254,7 +254,7 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
         isFetchingCloudAppearance = true
         lastCloudAppearanceCheck = Date()
         designCloudStatus = "Checking cloud appearance…"
-        Task { [weak self] in
+        Task { @MainActor [weak self] in
             guard let self else { return }
             do {
                 let value = try await cloud.fetchVisualPreferences()
@@ -287,7 +287,7 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
               !isFetchingCloudSets else { return }
         let requested = workout
         isFetchingCloudSets = true
-        Task { [weak self] in
+        Task { @MainActor [weak self] in
             guard let self else { return }
             do {
                 let undoEntries = try await cloud.fetchWorkoutUndos(for: requested)
@@ -321,7 +321,7 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
         }
         guard !pendingUndo.isEmpty || !pending.isEmpty else { return }
         isUploadingCloudSets = true
-        Task { [weak self] in
+        Task { @MainActor [weak self] in
             guard let self else { return }
             var failed = false
             for undo in pendingUndo {
