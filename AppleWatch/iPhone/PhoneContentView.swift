@@ -421,7 +421,9 @@ struct StrengthExerciseDetails: View {
 
     private func loadFromExercise() {
         guard let e = exercise else { return }
-        sets=e.prescribedSets;minimum=e.repMin;maximum=e.repMax
+        sets=e.isUnilateral && !e.prescribedSets.isMultiple(of: 2) ?
+            e.prescribedSets * 2 : e.prescribedSets
+        minimum=e.repMin;maximum=e.repMax
         movementMode=e.movementType ?? "auto"
         workingSide=logged.count.isMultiple(of: 2) ? .left : .right
         rest=e.restSeconds
