@@ -1014,6 +1014,7 @@ private struct WatchGuidedSession: View {
     @EnvironmentObject private var health: WatchHealthSession
     @AppStorage("hcWeightIncrement") private var increment = 5.0
     @AppStorage("hcAutoStartNextSet") private var autoStartNextSet = true
+    @AppStorage("hcWatchMotionRepEstimate") private var motionRepEnabled = false
     @State private var weight = 0.0
     @State private var hasWeight = false
     @State private var reps = 8
@@ -1304,6 +1305,40 @@ private struct WatchGuidedSession: View {
                     wHaptic(.click)
                 }
             )
+            if active && motionRepEnabled {
+                HStack(spacing: 7) {
+                    Image(systemName: "waveform.path")
+                        .foregroundStyle(WTheme.aqua)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("WRIST MOTION · \(store.motionEstimatedReps) EST.")
+                            .font(WTheme.label(10))
+                            .foregroundStyle(WTheme.aqua)
+                        Text(store.motionRepStatus)
+                            .font(.system(size: 9))
+                            .foregroundStyle(WTheme.muted)
+                            .lineLimit(2)
+                    }
+                    Spacer(minLength: 2)
+                    if (1...100).contains(store.motionEstimatedReps) {
+                        Button {
+                            reps = store.motionEstimatedReps
+                            wHaptic(.click)
+                        } label: {
+                            Text("USE")
+                                .font(WTheme.label(10))
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 7)
+                                .background(WTheme.aqua.opacity(0.18),
+                                            in: RoundedRectangle(cornerRadius: 8))
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Use estimated \(store.motionEstimatedReps) reps")
+                    }
+                }
+                .padding(8)
+                .background(WTheme.panel,
+                            in: RoundedRectangle(cornerRadius: 10))
+            }
             Button {
                 if active {
                     let saved = store.stopSet(for: exercise,
@@ -1469,6 +1504,7 @@ private struct WatchPreferences: View {
     @AppStorage("hcWatchHaptics") private var haptics = true
     @AppStorage("hcWatchSetStartHaptics") private var setStartHaptics = true
     @AppStorage("hcWatchRestCompleteHaptics") private var restCompleteHaptics = true
+    @AppStorage("hcWatchMotionRepEstimate") private var motionRepEstimate = false
 
     var body: some View {
         List {
@@ -1604,6 +1640,15 @@ private struct WatchPreferences: View {
                             .foregroundStyle(WTheme.muted)
                     }
                 }
+                Toggle("Estimate reps from wrist movement",
+                       isOn: $motionRepEstimate)
+                    .tint(WTheme.lime)
+                    .onChange(of: motionRepEstimate) { _, _ in
+                        store.refreshMotionRepPreference()
+                    }
+                Text("Experimental: detects repeated wrist movements during a set. You can tap USE to apply the estimate, or enter your actual reps manually. Never saves estimated reps automatically.")
+                    .font(.caption2)
+                    .foregroundStyle(WTheme.muted)
                 Text("Running voice cues and automatic miles remain in the Run screen.")
                     .font(.caption2).foregroundStyle(WTheme.muted)
             }
