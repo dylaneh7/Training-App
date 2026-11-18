@@ -1521,7 +1521,10 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
             let side = entry.side?.title ?? "not specified"
             let avg = motion.averageCycleSeconds.map { String(format: "%.2f", $0) } ?? "unknown"
             let last = motion.lastCycleSeconds.map { String(format: "%.2f", $0) } ?? "unknown"
-            lines.append("Motion observation: \(entry.workoutDate) \(entry.exerciseName), set \(entry.index), side \(side), source \(motion.source) on \(motion.wearSide) wrist; saved \(entry.reps) reps (may be corrected), detected \(motion.detectedReps) cycles, mean earlier cycle \(avg)s, last cycle \(last)s. \(motion.note)")
+            let location = motion.wearableLocation
+                .flatMap(IMUNWearableLocation.init(rawValue:))?.title ??
+                "\(motion.wearSide) wrist (legacy position)"
+            lines.append("Motion observation: \(entry.workoutDate) \(entry.exerciseName), set \(entry.index), side \(side), source \(motion.source), recorded placement \(location); saved \(entry.reps) reps (may be corrected), detected \(motion.detectedReps) cycles, mean earlier cycle \(avg)s, last cycle \(last)s. \(motion.note)")
         }
         if let plan = workout {
             for exercise in plan.exercises where exercise.isUnilateral {
@@ -1722,13 +1725,22 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
               stamp.isFinite && stamp > UserDefaults.standard.double(
                   forKey:"hcMotionPreferenceTimestamp") else { return }
         let prefs = UserDefaults.standard
-        if let value = packet["hcWatchWearSide"] as? String,
-           ["unknown","left","right"].contains(value) {
-            prefs.set(value,forKey:"hcWatchWearSide")
-        }
-        if let value = packet["hcWhoopWearSide"] as? String,
-           ["off","left","right","other"].contains(value) {
-            prefs.set(value,forKey:"hcWhoopWearSide")
+        if let placements = packet["hcWearablePlacementsV2"] as? [String: String] {
+            IMUNWearablePlacementStore.apply(placements, defaults: prefs)
+        } else {
+            // Older Watch installations still send only left/right wrist.
+            if let legacy = packet["hcWatchWearSide"] as? String,
+               ["left","right","unknown"].contains(legacy) {
+                IMUNWearablePlacementStore.save(
+                    .fromLegacy(legacy, deviceID: "appleWatch"),
+                    for: "appleWatch", defaults: prefs)
+            }
+            if let legacy = packet["hcWhoopWearSide"] as? String,
+               ["left","right","off","other"].contains(legacy) {
+                IMUNWearablePlacementStore.save(
+                    .fromLegacy(legacy, deviceID: "whoop"),
+                    for: "whoop", defaults: prefs)
+            }
         }
         for key in ["hcWatchMotionRepEstimate",
                     "hcWatchMotionRecognitionEnabled"] {
@@ -1787,8 +1799,13 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
         let motionStamp = prefs.double(forKey: "hcMotionPreferenceTimestamp")
         if motionStamp > 0 {
             context["hcMotionPreferenceTimestamp"] = motionStamp
-            context["hcWatchWearSide"] = prefs.string(forKey:"hcWatchWearSide") ?? "unknown"
-            context["hcWhoopWearSide"] = prefs.string(forKey:"hcWhoopWearSide") ?? "off"
+            context["hcWearablePlacementsV2"] =
+                IMUNWearablePlacementStore.payload(defaults: prefs)
+            // Compatibility for older Watch builds during an update.
+            context["hcWatchWearSide"] =
+                IMUNWearablePlacementStore.location("appleWatch", defaults: prefs).legacySide
+            context["hcWhoopWearSide"] =
+                IMUNWearablePlacementStore.location("whoop", defaults: prefs).legacySide
             context["hcWatchMotionRepEstimate"] =
                 prefs.object(forKey:"hcWatchMotionRepEstimate") as? Bool ?? true
             context["hcWatchMotionRecognitionEnabled"] =
