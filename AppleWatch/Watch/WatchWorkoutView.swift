@@ -399,13 +399,13 @@ private struct IMUNEitanHomeTile: View {
                         .foregroundStyle(WTheme.muted)
                         .lineLimit(1)
                     Text(wellness.value == nil ?
-                         "Synced · personal wellness baseline incomplete" :
+                         "Personal baseline developing" :
                          wellness.status)
                         .font(.system(size: 10, weight: .medium))
                         .foregroundStyle(WTheme.aqua)
                         .lineLimit(2)
                 } else {
-                    Text("No iPhone EITAN snapshot · tap to see connection details")
+                    Text("Your wellness score will appear when data is available.")
                         .font(.system(size: 10))
                         .foregroundStyle(WTheme.muted)
                         .fixedSize(horizontal: false, vertical: true)
@@ -520,7 +520,7 @@ private struct IMUNEitanExplanation: View {
                                 .fixedSize(horizontal: false, vertical: true)
                         }
                     } else {
-                        Text("No EITAN snapshot received. Open iMun on the iPhone and Watch, then tap Sync below. If the iPhone already shows a score, check the phone/watch build versions and connection status here.")
+                        Text("Your wellness score will appear here when your latest measurements are available.")
                             .font(.system(size: 11))
                             .foregroundStyle(WTheme.muted)
                     }
@@ -554,88 +554,6 @@ private struct IMUNEitanExplanation: View {
                     .font(.system(size: 10))
                     .foregroundStyle(WTheme.muted)
                     .fixedSize(horizontal: false, vertical: true)
-                Text(store.eitanSyncStatus)
-                    .font(.system(size: 10))
-                    .foregroundStyle(WTheme.aqua)
-                    .fixedSize(horizontal: false, vertical: true)
-                Text(store.eitanTransportDetails)
-                    .font(.system(size: 9))
-                    .foregroundStyle(WTheme.muted)
-                    .fixedSize(horizontal: false, vertical: true)
-                Text("Workout transfer diagnostics · " + store.lastBackgroundTransfer)
-                    .font(.system(size: 9))
-                    .foregroundStyle(WTheme.muted)
-                    .fixedSize(horizontal: false, vertical: true)
-                Text("WATCH BUILD " +
-                     (Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "?") +
-                     " · PHONE " + store.eitanPhoneBuild)
-                    .font(.system(size: 9))
-                    .foregroundStyle(WTheme.muted)
-                    .fixedSize(horizontal: false, vertical: true)
-                Text("Installed Watch ID · " +
-                     (Bundle.main.bundleIdentifier ?? "unknown"))
-                    .font(.system(size: 9))
-                    .foregroundStyle(WTheme.muted)
-                    .fixedSize(horizontal: false, vertical: true)
-                Text("Declared iPhone companion · " +
-                     (Bundle.main.infoDictionary?[
-                        "WKCompanionAppBundleIdentifier"] as? String ?? "missing"))
-                    .font(.system(size: 9))
-                    .foregroundStyle(WTheme.muted)
-                    .fixedSize(horizontal: false, vertical: true)
-                if let received = store.eitanLastReceivedAt {
-                    Text("Last received " +
-                         received.formatted(date: .omitted, time: .shortened))
-                        .font(.system(size: 10))
-                        .foregroundStyle(WTheme.muted)
-                }
-                Button {
-                    store.requestEitanSync()
-                } label: {
-                    Label("SYNC EITAN FROM IPHONE",
-                          systemImage: "arrow.triangle.2.circlepath")
-                        .font(.system(size: 11, weight: .semibold))
-                        .frame(maxWidth: .infinity, minHeight: 40)
-                }
-                .buttonStyle(.bordered)
-                .tint(WTheme.lime)
-                Divider()
-                Text("PRIVATE CLOUD · NO IPHONE CONNECTION REQUIRED")
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(WTheme.lime)
-                Text(store.eitanCloudStatus)
-                    .font(.system(size: 10))
-                    .foregroundStyle(WTheme.aqua)
-                    .fixedSize(horizontal: false, vertical: true)
-                if store.cloudSignedIn {
-                    Button {
-                        store.refreshCloudEitan(force: true)
-                    } label: {
-                        Label("LOAD EITAN FROM PRIVATE CLOUD",
-                              systemImage: "icloud.and.arrow.down")
-                            .font(.system(size: 10, weight: .semibold))
-                            .frame(maxWidth: .infinity, minHeight: 40)
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .tint(WTheme.lime)
-                } else {
-                    NavigationLink {
-                        WatchCloudBackupSetup()
-                    } label: {
-                        Label("SIGN IN TO IMUN CLOUD",
-                              systemImage: "icloud")
-                            .font(.system(size: 11, weight: .semibold))
-                            .frame(maxWidth: .infinity, minHeight: 40)
-                    }
-                    .buttonStyle(.bordered)
-                    .tint(WTheme.aqua)
-                    Text("Use the same iMun account as the iPhone. On iPhone, enable Private EITAN cloud sync in Settings. No paired iPhone link is needed after sign-in.")
-                        .font(.system(size: 10))
-                        .foregroundStyle(WTheme.muted)
-                }
-                Text("Change EITAN and Health preferences in iPhone Settings.")
-                    .font(.system(size: 10))
-                    .foregroundStyle(WTheme.aqua)
             }
             .padding(12)
         }
@@ -690,35 +608,6 @@ Section {
 
                     }
 
-                    // This control is visible without scrolling through
-                    // iPhone-link diagnostics. One cloud sign-in lets users
-                    // recover today's published workout without pairing sync.
-                    if !store.hasScheduledLift {
-                        if store.cloudSignedIn {
-                            Button {
-                                store.refreshCloudWorkout()
-                                store.uploadPendingCloudSets()
-                            } label: {
-                                WDestination(symbol: "icloud.and.arrow.down",
-                                             title: "GET TODAY'S WORKOUT",
-                                             detail: "Download directly · no iPhone link",
-                                             tint: WTheme.aqua)
-                            }
-                            .buttonStyle(.plain)
-                            .listRowBackground(WTheme.panel)
-                        } else {
-                            NavigationLink {
-                                WatchCloudBackupSetup()
-                            } label: {
-                                WDestination(symbol: "icloud",
-                                             title: "CONNECT CLOUD SYNC",
-                                             detail: "Get workouts without iPhone link",
-                                             tint: WTheme.aqua)
-                            }
-                            .listRowBackground(WTheme.panel)
-                        }
-                    }
-
                     NavigationLink {
                         WatchStrengthScreen()
                     } label: {
@@ -756,21 +645,6 @@ Section("TRAINING PLAN") {
                         Text(store.runPlan?.title ?? "No run scheduled")
                             .font(.system(size: 11))
                             .foregroundStyle(WTheme.muted)
-                        if let last = store.scheduleUpdatedAt {
-                            Label("Updated " + last.formatted(date: .omitted,
-                                                              time: .shortened),
-                                  systemImage: "checkmark.circle")
-                                .font(.system(size: 10))
-                                .foregroundStyle(WTheme.aqua)
-                        }
-                        Text(store.syncPathSummary)
-                            .font(.system(size: 10))
-                            .foregroundStyle(WTheme.aqua)
-                            .fixedSize(horizontal: false, vertical: true)
-                        Text(store.progressSyncStatus)
-                            .font(.system(size: 10))
-                            .foregroundStyle(WTheme.muted)
-                            .fixedSize(horizontal: false, vertical: true)
                     }
                     .listRowBackground(WTheme.panel)
                 }
@@ -818,13 +692,6 @@ Section("PREFERENCES") {
                         Label("SETTINGS & DIAGNOSTICS", systemImage: "gearshape")
                             .font(.system(size: 12, weight: .bold))
                     }
-                    Text("imun " +
-                         (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?") +
-                         " · build " +
-                         (Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "?"))
-                        .font(.system(size: 10))
-                        .foregroundStyle(WTheme.muted)
-                        .accessibilityLabel("Installed imun Watch app version")
                 }
     }
 
@@ -1063,7 +930,7 @@ private struct WatchStrengthScreen: View {
             }
             Button("Continue workout", role: .cancel) {}
         } message: {
-            Text("Your completed sets stay saved on the watch and sync to iPhone.")
+            Text("Your completed sets will be saved.")
         }
     }
 }
@@ -1076,22 +943,19 @@ private struct WatchStrengthReady: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
                 if !store.hasScheduledLift {
-                    Text(store.scheduleState == "ready" ? "REST DAY" : "IPHONE SYNC")
+                    Text(store.scheduleState == "ready" ? "REST DAY" : "TODAY'S TRAINING")
                         .font(WTheme.label()).tracking(1.5)
                         .foregroundStyle(WTheme.aqua)
                     Text(store.scheduleState == "ready" ? "No strength workout scheduled" :
                          "Checking today's workout…")
                         .font(.system(size: 21, weight: .heavy, design: .rounded))
                     Text(store.scheduleState == "ready" ?
-                         "Your iPhone calendar controls the plan. You can create a workout there." :
-                         "Open imun on your iPhone to load the latest schedule.")
+                         "Enjoy your recovery day, or plan your next session." :
+                         "Your next session will appear here.")
                         .font(.system(size: 12)).foregroundStyle(WTheme.muted)
                     WSecondary(title: "REFRESH", symbol: "arrow.clockwise") {
                         store.requestCurrentSchedule(manual: true)
                     }
-                    Text(store.status)
-                        .font(.system(size: 11))
-                        .foregroundStyle(WTheme.muted)
                 } else {
                 Text("TODAY'S LIFT")
                     .font(WTheme.label()).tracking(1.5)
@@ -1114,16 +978,13 @@ private struct WatchStrengthReady: View {
                     .background(WTheme.panel, in: RoundedRectangle(cornerRadius: 14))
                 }
                 if store.workout.exercises.isEmpty {
-                    Text("No exercises are scheduled. Build a strength plan on iPhone, then sync.")
+                    Text("No exercises scheduled.")
                         .font(.system(size: 12)).foregroundStyle(WTheme.muted)
                 }
                 if store.guidedAllFinished {
                     Text("ALL PRESCRIBED SETS COMPLETE")
                         .font(WTheme.label(11))
                         .foregroundStyle(WTheme.lime)
-                    Text("Completed sets on your iPhone and Watch count together. Raw set logs remain available on each device.")
-                        .font(.system(size: 11))
-                        .foregroundStyle(WTheme.muted)
                 } else {
                     WPrimary(title: "START WORKOUT", symbol: "play.fill") {
                         store.startLifting()
@@ -1739,6 +1600,95 @@ private struct WatchPreferences: View {
                     .font(.caption2).foregroundStyle(WTheme.muted)
             }
             Section("CONNECTIVITY & DIAGNOSTICS") {
+
+                DisclosureGroup("EITAN & WATCH DETAILS") {
+                Text(store.eitanSyncStatus)
+                    .font(.system(size: 10))
+                    .foregroundStyle(WTheme.aqua)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text(store.eitanTransportDetails)
+                    .font(.system(size: 9))
+                    .foregroundStyle(WTheme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text("Workout transfer diagnostics · " + store.lastBackgroundTransfer)
+                    .font(.system(size: 9))
+                    .foregroundStyle(WTheme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text("WATCH BUILD " +
+                     (Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "?") +
+                     " · PHONE " + store.eitanPhoneBuild)
+                    .font(.system(size: 9))
+                    .foregroundStyle(WTheme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text("Installed Watch ID · " +
+                     (Bundle.main.bundleIdentifier ?? "unknown"))
+                    .font(.system(size: 9))
+                    .foregroundStyle(WTheme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text("Declared iPhone companion · " +
+                     (Bundle.main.infoDictionary?[
+                        "WKCompanionAppBundleIdentifier"] as? String ?? "missing"))
+                    .font(.system(size: 9))
+                    .foregroundStyle(WTheme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+                if let received = store.eitanLastReceivedAt {
+                    Text("Last received " +
+                         received.formatted(date: .omitted, time: .shortened))
+                        .font(.system(size: 10))
+                        .foregroundStyle(WTheme.muted)
+                }
+                Button {
+                    store.requestEitanSync()
+                } label: {
+                    Label("SYNC EITAN FROM IPHONE",
+                          systemImage: "arrow.triangle.2.circlepath")
+                        .font(.system(size: 11, weight: .semibold))
+                        .frame(maxWidth: .infinity, minHeight: 40)
+                }
+                .buttonStyle(.bordered)
+                .tint(WTheme.lime)
+                Divider()
+                Text("PRIVATE CLOUD · NO IPHONE CONNECTION REQUIRED")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(WTheme.lime)
+                Text(store.eitanCloudStatus)
+                    .font(.system(size: 10))
+                    .foregroundStyle(WTheme.aqua)
+                    .fixedSize(horizontal: false, vertical: true)
+                if store.cloudSignedIn {
+                    Button {
+                        store.refreshCloudEitan(force: true)
+                    } label: {
+                        Label("LOAD EITAN FROM PRIVATE CLOUD",
+                              systemImage: "icloud.and.arrow.down")
+                            .font(.system(size: 10, weight: .semibold))
+                            .frame(maxWidth: .infinity, minHeight: 40)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(WTheme.lime)
+                } else {
+                    NavigationLink {
+                        WatchCloudBackupSetup()
+                    } label: {
+                        Label("SIGN IN TO IMUN CLOUD",
+                              systemImage: "icloud")
+                            .font(.system(size: 11, weight: .semibold))
+                            .frame(maxWidth: .infinity, minHeight: 40)
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(WTheme.aqua)
+                    Text("Use the same iMun account as the iPhone. On iPhone, enable Private EITAN cloud sync in Settings. No paired iPhone link is needed after sign-in.")
+                        .font(.system(size: 10))
+                        .foregroundStyle(WTheme.muted)
+                }
+                Text("Change EITAN and Health preferences in iPhone Settings.")
+                    .font(.system(size: 10))
+                    .foregroundStyle(WTheme.aqua)
+                }
+                Text("Watch build " +
+                     (Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "?"))
+                    .font(.system(size: 10))
+                    .foregroundStyle(WTheme.muted)
                 Text(store.eitanSyncStatus)
                     .font(.system(size: 10))
                     .foregroundStyle(WTheme.aqua)
