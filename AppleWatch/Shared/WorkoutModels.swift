@@ -205,6 +205,26 @@ struct HCRecoveryDatum: Codable, Identifiable {
 }
 
 
+/// A recording source is not equivalent to another vendor's metric model.
+/// Retain provider identity when comparing multi-year workouts and recovery.
+enum IMUNDataProvenance {
+    static func provider(_ source: String) -> String {
+        let name = source.lowercased()
+        if name.contains("whoop") { return "WHOOP" }
+        if name.contains("garmin") { return "Garmin" }
+        if name.contains("tredict") { return "Tredict" }
+        if name.contains("apple watch") || name.contains("watch ultra") ||
+           name.contains("watch series") { return "Apple Watch" }
+        if name.contains("healthkit") || name.contains("apple health") {
+            return "Apple Health"
+        }
+        if name.contains("imun") || name.contains("health coach") ||
+           name.contains("iphone") { return "iMun" }
+        return source.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? "Unattributed source" : source
+    }
+}
+
 /// Stable choice shared by EITAN, the optional IsAIah Health context,
 /// and the Watch. Tredict remains a workout/history provider, not a current
 /// primary wearable for physiological scoring. Never silently substitute
