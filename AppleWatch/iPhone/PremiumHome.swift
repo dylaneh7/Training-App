@@ -4494,7 +4494,7 @@ private struct PremiumCoachConversation: View {
                     else { throw IMUNCoachAttachmentReader.Failure.invalidImage }
                     let uploaded = try IMUNCoachAttachmentReader.image(
                         data: data, filename: "Training photo.jpg")
-                    addAttachment(uploaded)
+                    try addAttachment(uploaded)
                 } catch {
                     attachmentError = error.localizedDescription
                 }
