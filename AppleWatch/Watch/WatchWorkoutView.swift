@@ -657,10 +657,8 @@ struct WatchWorkoutView: View {
     private let progressPulse = Timer.publish(
         every: 6, on: .main, in: .common).autoconnect()
 
-    var body: some View {
-        NavigationStack {
-            List {
-                Section {
+    private var primaryActions: some View {
+Section {
                     if eitanEnabled {
                     NavigationLink {
                         IMUNEitanExplanation()
@@ -725,11 +723,17 @@ struct WatchWorkoutView: View {
                     }
                     .listRowBackground(WTheme.panel)
                 }
-                Section("IsAIah · TODAY") {
+    }
+
+    private var isaiahBrief: some View {
+Section("IsAIah · TODAY") {
                     WatchIsaiahDailyBrief()
                         .listRowBackground(WTheme.panel)
                 }
-                Section("TRAINING PLAN") {
+    }
+
+    private var trainingPlan: some View {
+Section("TRAINING PLAN") {
                     VStack(alignment: .leading, spacing: 6) {
                         Text(store.scheduleState == "ready" ?
                              (store.hasScheduledLift ? store.workout.title :
@@ -750,7 +754,10 @@ struct WatchWorkoutView: View {
                     }
                     .listRowBackground(WTheme.panel)
                 }
-                if let recovery = store.recoverySummary {
+    }
+
+    @ViewBuilder private var healthSummary: some View {
+if let recovery = store.recoverySummary {
                     Section("HEALTH · " + recovery.source.uppercased()) {
                         HStack(alignment: .firstTextBaseline, spacing: 10) {
                             WatchSmallHealthMetric(title: "SLEEP",
@@ -781,7 +788,10 @@ struct WatchWorkoutView: View {
                             .listRowBackground(WTheme.panel)
                     }
                 }
-                Section("PREFERENCES") {
+    }
+
+    private var preferences: some View {
+Section("PREFERENCES") {
                     NavigationLink {
                         WatchPreferences()
                     } label: {
@@ -796,7 +806,10 @@ struct WatchWorkoutView: View {
                         .foregroundStyle(WTheme.muted)
                         .accessibilityLabel("Installed imun Watch app version")
                 }
-                Section("YOUR TRAINING") {
+    }
+
+    private var trainingHistory: some View {
+Section("YOUR TRAINING") {
                     if let latest = store.runHistory.first {
                         NavigationLink {
                             WatchRunDetail(run: latest)
@@ -818,6 +831,17 @@ struct WatchWorkoutView: View {
                             .foregroundStyle(WTheme.muted)
                     }
                 }
+    }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                primaryActions
+                isaiahBrief
+                trainingPlan
+                healthSummary
+                preferences
+                trainingHistory
             }
             .listStyle(.plain)
             .scrollIndicators(.hidden)
