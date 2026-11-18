@@ -1014,10 +1014,11 @@ private struct WatchGuidedSession: View {
     @EnvironmentObject private var health: WatchHealthSession
     @AppStorage("hcWeightIncrement") private var increment = 5.0
     @AppStorage("hcAutoStartNextSet") private var autoStartNextSet = true
-    @AppStorage("hcWatchMotionRepEstimate") private var motionRepEnabled = false
+    @AppStorage("hcWatchMotionRepEstimate") private var motionRepEnabled = true
     @State private var weight = 0.0
     @State private var hasWeight = false
     @State private var reps = 8
+    @State private var repManuallyAdjusted = false
     @State private var rir = 2
     @State private var showSetPicker = false
     @State private var confirmUndoWorkout = false
@@ -1064,9 +1065,16 @@ private struct WatchGuidedSession: View {
                             .minimumScaleFactor(0.8)
                             .foregroundStyle(.white)
                         Spacer(minLength: 2)
-                        Text("\(store.guidedSetNumber)/\(current.prescribedSets)")
-                            .font(WTheme.metric(16))
-                            .foregroundStyle(WTheme.lime)
+                        VStack(alignment: .trailing, spacing: 2) {
+                            Text("\(store.guidedSetNumber)/\(current.prescribedSets)")
+                                .font(WTheme.metric(16))
+                                .foregroundStyle(WTheme.lime)
+                            if let side = current.side(forSet: store.guidedSetNumber) {
+                                Text(side.title.uppercased())
+                                    .font(WTheme.label(10))
+                                    .foregroundStyle(WTheme.aqua)
+                            }
+                        }
                     }
                     .padding(.bottom, 2)
 
@@ -1259,6 +1267,19 @@ private struct WatchGuidedSession: View {
         .task(id: nextSetToken) {
             loadNextTargets()
         }
+        .onChange(of: store.liftClock?.setStartedAt) { _, started in
+            if started != nil && active && motionRepEnabled &&
+                store.motionCanTrackActiveSide {
+                // Start the live count at zero rather than preset target reps.
+                reps = 0
+                repManuallyAdjusted = false
+            }
+        }
+        .onChange(of: store.motionEstimatedReps) { _, detected in
+            guard active, motionRepEnabled, store.motionCanTrackActiveSide,
+                  !repManuallyAdjusted, detected > 0 else { return }
+            reps = min(100, detected)
+        }
         .onAppear {
             store.processRestDeadline()
         }
@@ -1297,47 +1318,34 @@ private struct WatchGuidedSession: View {
                 title: "REPS",
                 value: String(reps),
                 decrease: {
-                    reps = max(1, reps - 1)
+                    reps = max(0, reps - 1)
+                    repManuallyAdjusted = true
                     wHaptic(.click)
                 },
                 increase: {
                     reps = min(100, reps + 1)
+                    repManuallyAdjusted = true
                     wHaptic(.click)
                 }
             )
             if active && motionRepEnabled {
-                HStack(spacing: 7) {
+                HStack(spacing: 6) {
                     Image(systemName: "waveform.path")
                         .foregroundStyle(WTheme.aqua)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("WRIST MOTION · \(store.motionEstimatedReps) EST.")
+                    Text(repManuallyAdjusted ? "MANUAL REPS LOCKED" :
+                        store.motionCanTrackActiveSide ?
+                        "LIVE WATCH COUNT · EDITABLE" :
+                        "WORKING WRIST NOT TRACKED")
+                        .font(WTheme.label(9))
+                        .foregroundStyle(WTheme.muted)
+                    Spacer(minLength: 2)
+                    if let period = store.motionLastRepPeriod {
+                        Text(String(format: "%.1f s", period))
                             .font(WTheme.label(10))
                             .foregroundStyle(WTheme.aqua)
-                        Text(store.motionRepStatus)
-                            .font(.system(size: 9))
-                            .foregroundStyle(WTheme.muted)
-                            .lineLimit(2)
-                    }
-                    Spacer(minLength: 2)
-                    if (1...100).contains(store.motionEstimatedReps) {
-                        Button {
-                            reps = store.motionEstimatedReps
-                            wHaptic(.click)
-                        } label: {
-                            Text("USE")
-                                .font(WTheme.label(10))
-                                .padding(.horizontal, 8)
-                                .padding(.vertical, 7)
-                                .background(WTheme.aqua.opacity(0.18),
-                                            in: RoundedRectangle(cornerRadius: 8))
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel("Use estimated \(store.motionEstimatedReps) reps")
                     }
                 }
-                .padding(8)
-                .background(WTheme.panel,
-                            in: RoundedRectangle(cornerRadius: 10))
+                .padding(.vertical, 5)
             }
             Button {
                 if active {
@@ -1349,6 +1357,10 @@ private struct WatchGuidedSession: View {
                     }
                 } else if !otherActive && store.liftClock?.isPaused != true {
                     store.startSet(for: exercise)
+                    if store.motionCanTrackActiveSide && motionRepEnabled {
+                        reps = 0
+                        repManuallyAdjusted = false
+                    }
                 }
             } label: {
                 HStack(spacing: 7) {
@@ -1420,6 +1432,7 @@ private struct WatchGuidedSession: View {
             hasWeight = false
         }
         reps = previous?.reps ?? next.repMin
+        repManuallyAdjusted = false
         rir = Int((previous?.rir ?? 2).rounded())
     }
 }
@@ -1504,7 +1517,10 @@ private struct WatchPreferences: View {
     @AppStorage("hcWatchHaptics") private var haptics = true
     @AppStorage("hcWatchSetStartHaptics") private var setStartHaptics = true
     @AppStorage("hcWatchRestCompleteHaptics") private var restCompleteHaptics = true
-    @AppStorage("hcWatchMotionRepEstimate") private var motionRepEstimate = false
+    @AppStorage("hcWatchMotionRepEstimate") private var motionRepEstimate = true
+    @AppStorage("hcWatchWearSide") private var watchWearSide = "unknown"
+    @AppStorage("hcWhoopWearSide") private var whoopWearSide = "off"
+
 
     var body: some View {
         List {
@@ -1640,17 +1656,36 @@ private struct WatchPreferences: View {
                             .foregroundStyle(WTheme.muted)
                     }
                 }
-                Toggle("Estimate reps from wrist movement",
+                Toggle("Automatically count wrist-motion reps",
                        isOn: $motionRepEstimate)
                     .tint(WTheme.lime)
                     .onChange(of: motionRepEstimate) { _, _ in
                         store.refreshMotionRepPreference()
                     }
-                Text("Experimental: detects repeated wrist movements during a set. You can tap USE to apply the estimate, or enter your actual reps manually. Never saves estimated reps automatically.")
+                Text("Motion counts fill the normal reps field. Editing + / − locks your correction for the rest of that set. You still save the set.")
                     .font(.caption2)
                     .foregroundStyle(WTheme.muted)
                 Text("Running voice cues and automatic miles remain in the Run screen.")
                     .font(.caption2).foregroundStyle(WTheme.muted)
+            }
+            Section("WEARABLE POSITION") {
+                Picker("Apple Watch wrist", selection: $watchWearSide) {
+                    Text("Choose wrist").tag("unknown")
+                    Text("Left").tag("left")
+                    Text("Right").tag("right")
+                }
+                .onChange(of: watchWearSide) { _, _ in
+                    store.refreshMotionRepPreference()
+                }
+                Picker("WHOOP position", selection: $whoopWearSide) {
+                    Text("Not worn").tag("off")
+                    Text("Left wrist").tag("left")
+                    Text("Right wrist").tag("right")
+                    Text("Other position").tag("other")
+                }
+                Text("Apple Watch supplies live wrist motion. WHOOP position is recorded, but live WHOOP motion is unavailable through its official developer API.")
+                    .font(.caption2)
+                    .foregroundStyle(WTheme.muted)
             }
             WatchConnectivityDiagnostics()
         }
