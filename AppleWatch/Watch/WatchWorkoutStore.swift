@@ -67,6 +67,14 @@ private final class HCMotionRepEstimator {
     private var rotationalTravel: [Double] = []
     private var peakRotationSpeeds: [Double] = []
     private var activePhaseSeconds: [Double] = []
+    private var sampleCount = 0
+    private var sampleGapCount = 0
+    private var motionErrors = 0
+    private var firstSampleTime: TimeInterval?
+    private var accelerationSum = 0.0
+    private var accelerationMax = 0.0
+    private var currentCycleAccelPeak = 0.0
+    private var cycleAccelPeaks: [Double] = []
     var onEstimate: ((Int, Double?) -> Void)?
 
     var isAvailable: Bool { manager.isDeviceMotionAvailable }
@@ -90,11 +98,21 @@ private final class HCMotionRepEstimator {
         lastSampleTime = nil
         currentCycleRotationDegrees = 0
         currentMaxRotationDegreesPerSecond = 0
+        sampleCount = 0
+        sampleGapCount = 0
+        motionErrors = 0
+        firstSampleTime = nil
+        accelerationSum = 0
+        accelerationMax = 0
+        currentCycleAccelPeak = 0
+        cycleAccelPeaks.removeAll(keepingCapacity: true)
         manager.deviceMotionUpdateInterval = 1.0 / 25.0
         // The Watch holds one Core Motion manager for this session. Samples
         // are processed locally and never added to the HealthKit workout.
-        manager.startDeviceMotionUpdates(to: .main) { [weak self] sample, _ in
-            guard let self, let sample else { return }
+        manager.startDeviceMotionUpdates(to: .main) { [weak self] sample, error in
+            guard let self else { return }
+            if error != nil { self.motionErrors += 1 }
+            guard let sample else { return }
             self.consume(sample)
         }
         return true
@@ -119,9 +137,33 @@ private final class HCMotionRepEstimator {
         let angular = sqrt(rotation.x * rotation.x +
                            rotation.y * rotation.y +
                            rotation.z * rotation.z)
+        let now = sample.timestamp
+        guard now.isFinite, linear.isFinite, angular.isFinite,
+              (0...12).contains(linear), (0...50).contains(angular) else {
+            motionErrors += 1
+            return
+        }
+        if let previous = lastSampleTime {
+            let delta = now - previous
+            guard delta > 0 else { return } // Duplicate/out-of-order packet.
+            if delta > 0.24 {
+                // Never interpret an interrupted partial rep as a complete one.
+                sampleGapCount += 1
+                smoothedEnergy = 0
+                aboveThresholdSince = nil
+                motionPeakSeen = false
+                cyclePeak = 0
+                currentCycleRotationDegrees = 0
+                currentMaxRotationDegreesPerSecond = 0
+                currentCycleAccelPeak = 0
+            }
+        }
+        if firstSampleTime == nil { firstSampleTime = now }
+        sampleCount += 1
+        accelerationSum += linear
+        accelerationMax = max(accelerationMax, linear)
         let energy = linear + 0.08 * angular
         smoothedEnergy = 0.7 * smoothedEnergy + 0.3 * energy
-        let now = sample.timestamp
         let dt = lastSampleTime.map {
             max(0, min(0.08, now - $0))
         } ?? 0
@@ -129,6 +171,7 @@ private final class HCMotionRepEstimator {
         // Integrate gyro magnitude only for relative rotational wrist travel.
         // This is not a joint-ROM estimate and cannot infer dumbbell velocity.
         if smoothedEnergy >= 0.105 {
+            currentCycleAccelPeak = max(currentCycleAccelPeak, linear)
             let degPerSecond = angular * 180 / .pi
             currentCycleRotationDegrees += degPerSecond * dt
             currentMaxRotationDegreesPerSecond =
@@ -157,6 +200,7 @@ private final class HCMotionRepEstimator {
                 lastRepTime = now
                 count += 1
                 peaks.append(cyclePeak)
+                cycleAccelPeaks.append(currentCycleAccelPeak)
                 rotationalTravel.append(currentCycleRotationDegrees)
                 peakRotationSpeeds.append(currentMaxRotationDegreesPerSecond)
                 if let began = aboveThresholdSince {
@@ -167,6 +211,7 @@ private final class HCMotionRepEstimator {
             cyclePeak = 0
             currentCycleRotationDegrees = 0
             currentMaxRotationDegreesPerSecond = 0
+            currentCycleAccelPeak = 0
             aboveThresholdSince = nil
             motionPeakSeen = false
         }
@@ -218,6 +263,37 @@ private final class HCMotionRepEstimator {
         result.cycleSeconds = Array(periods.suffix(50))
         result.cycleWristMotionPeaks = Array(peaks.suffix(50))
         result.cycleTimingVariabilityPercent = variability
+        result.motionModelVersion = 2
+        result.motionSampleCount = sampleCount
+        result.samplingGapCount = sampleGapCount
+        result.peakLinearAccelerationG = accelerationMax
+        if sampleCount > 0 {
+            result.meanLinearAccelerationG = accelerationSum / Double(sampleCount)
+        }
+        result.repAccelerationPeaksG = Array(cycleAccelPeaks.suffix(50))
+        let expected = firstSampleTime.flatMap { first -> Double? in
+            guard let last = lastSampleTime, last > first else { return nil }
+            return max(1, (last - first) * 25)
+        } ?? 0
+        let coverage = expected > 0 ?
+            min(100, Double(sampleCount) / expected * 100) : 0
+        result.sampleCoveragePercent = coverage
+        var warnings: [String] = []
+        if sampleGapCount > 0 {
+            warnings.append("\(sampleGapCount) motion sampling interruptions")
+        }
+        if motionErrors > 0 {
+            warnings.append("\(motionErrors) sensor errors/invalid samples")
+        }
+        if coverage < 70 {
+            warnings.append("Low sample coverage")
+        }
+        result.analysisConfidence = coverage >= 85 && sampleGapCount == 0 &&
+            motionErrors == 0 && count >= 5 ? "Moderate" : "Low"
+        result.analysisWarnings = warnings
+        if !warnings.isEmpty {
+            result.note += " Signal quality: " + warnings.joined(separator: "; ") + "."
+        }
         func variation(_ data: [Double]) -> Double? {
             guard data.count >= 3 else { return nil }
             let avg = data.reduce(0, +) / Double(data.count)
