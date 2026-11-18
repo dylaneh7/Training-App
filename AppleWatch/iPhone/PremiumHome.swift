@@ -163,9 +163,6 @@ private struct IMUNTodayPage: View {
                         Text(healthSummary)
                             .font(.system(size: 12))
                             .foregroundStyle(HCDesign.secondary)
-                        Text("On-device summary of real records; not an AI-generated readiness score.")
-                            .font(.system(size: 10))
-                            .foregroundStyle(HCDesign.secondary)
                     }
                 }
                 Spacer(minLength: 95)
@@ -198,7 +195,6 @@ private struct IMUNEitanTodayCard: View {
                     heading
                     wellnessContent
                     coachingContent
-                    syncDiagnostics
                 }
             }
         }
@@ -315,56 +311,6 @@ if coachingEnabled {
                     }
     }
 
-    private var syncDiagnostics: some View {
-        VStack(alignment: .leading, spacing: 9) {
-Divider().overlay(HCDesign.outline)
-                    HStack(spacing: 10) {
-                        Image(systemName: coach.eitanWatchAcknowledgedAt == nil
-                            ? "applewatch.slash" : "applewatch")
-                            .foregroundStyle(HCDesign.electric)
-                        Text(coach.eitanWatchSyncStatus)
-                            .font(.system(size: 11))
-                            .foregroundStyle(HCDesign.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                        Spacer(minLength: 4)
-                        Button {
-                            coach.sendEitanToWatch(forceQueue: true)
-                        } label: {
-                            Label("Sync", systemImage: "arrow.triangle.2.circlepath")
-                                .font(.system(size: 11, weight: .semibold))
-                        }
-                        .buttonStyle(.bordered)
-                        .tint(HCDesign.electric)
-                    }
-                    Text("iPhone wellness: " +
-                         (coach.eitanSnapshot?.value.map { "\($0)/100" } ??
-                          (coach.eitanSnapshot == nil ? "not calculated" : "baseline incomplete")) +
-                         " · " + (coach.eitanSnapshot?.coverage ?? "No score to send"))
-                        .font(.system(size: 10))
-                        .foregroundStyle(HCDesign.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                    Text("iPhone build " +
-                         (Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "unknown") +
-                         " · " + coach.watchConnectionDetails)
-                        .font(.system(size: 10))
-                        .foregroundStyle(HCDesign.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                    Text("Private EITAN cloud · " + coach.eitanCloudSyncStatus)
-                        .font(.system(size: 10))
-                        .foregroundStyle(HCDesign.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                    Text("Background Watch queue · " + coach.lastBackgroundTransfer)
-                        .font(.system(size: 10))
-                        .foregroundStyle(HCDesign.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                    Text("The Watch transfer queue and the EITAN wellness snapshot are separate. A workout transfer timeout does not establish an EITAN sync failure.")
-                        .font(.system(size: 10))
-                        .foregroundStyle(HCDesign.secondary)
-                    Text("Personal trends and coaching suggestions are informational, not medical diagnoses.")
-                        .font(.system(size: 10))
-                        .foregroundStyle(HCDesign.secondary)
-        }
-    }
 }
 
 /// Brief private athlete check-in: complements physiological monitoring.
@@ -458,11 +404,9 @@ private struct IMUNActiveWorkoutMiniBar: View {
                                 .foregroundStyle(HCDesign.electric)
                         }
                     } else {
-                        Text(coach.cloudPendingCount > 0 ?
-                             "\(coach.cloudPendingCount) changes awaiting sync" :
-                             (coach.phoneSessionStartedAt == nil ?
-                              "Active on Apple Watch · tap to continue" :
-                              "Tap to return to your active session"))
+                        Text(coach.phoneSessionStartedAt == nil ?
+                             "Active workout · tap to continue" :
+                             "Tap to return to your workout")
                             .font(.system(size: 10))
                             .foregroundStyle(HCDesign.secondary)
                     }
@@ -1149,9 +1093,6 @@ private struct PremiumStrengthPage: View {
             VStack(alignment: .leading, spacing: 19) {
                 HCSectionTitle(title: "Weightlifting", detail: aggressive ? "Coached session" : "Today's plan")
                 IMUNTrainingMindsetCard()
-                HCSyncStatus(pending: coach.cloudPendingCount,
-                             saving: coach.savingPlan, connected: coach.signedIn)
-
                 if !coach.signedIn { PremiumLogin() }
 
                 if let plan {
@@ -1721,13 +1662,6 @@ private struct PremiumRunPage: View {
                                            tint: HCDesign.aqua) {
                                 showingCreateRun = true
                             }
-                        }
-                        Text("Set warm-up, intervals, recovery and heart-rate targets for Apple's Workout app.")
-                            .font(.caption2).foregroundStyle(HCDesign.secondary)
-                        Text(coach.watchSyncStatus)
-                            .font(.caption2).foregroundStyle(HCDesign.secondary)
-                        HCOutlineButton(title: "Sync this run to iMun Watch", icon: "arrow.triangle.2.circlepath") {
-                            coach.refreshAndSendToWatch()
                         }
                         if let steps = coach.runPlan?.structuredSteps, !steps.isEmpty {
                             VStack(alignment: .leading, spacing: 6) {
@@ -3666,10 +3600,6 @@ private struct PremiumRecoveryPage: View {
                         if appleHealth.loading {
                             ProgressView().tint(HCDesign.electric)
                         }
-                        Text(appleHealth.status)
-                            .font(.system(size: 11))
-                            .foregroundStyle(HCDesign.secondary)
-
                         Divider().overlay(HCDesign.outline.opacity(0.35))
 
                         DisclosureGroup(isExpanded: $showRawReadings) {
@@ -5020,6 +4950,18 @@ private struct PremiumSettingsPage: View {
                                 .font(.system(size: 10))
                                 .foregroundStyle(HCDesign.secondary)
                                 .fixedSize(horizontal: false, vertical: true)
+                            Text("EITAN transfer · " + coach.eitanWatchSyncStatus)
+                                .font(.system(size: 10))
+                                .foregroundStyle(HCDesign.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                            Text("Background queue · " + coach.lastBackgroundTransfer)
+                                .font(.system(size: 10))
+                                .foregroundStyle(HCDesign.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                            Text("Phone build " +
+                                 (Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "?"))
+                                .font(.system(size: 10))
+                                .foregroundStyle(HCDesign.secondary)
                             Button {
                                 coach.sendEitanToWatch(forceQueue: true)
                             } label: {
@@ -5343,6 +5285,10 @@ private struct PremiumSettingsPage: View {
                             .foregroundStyle(HCDesign.secondary)
                             .fixedSize(horizontal: false, vertical: true)
                         Text(coach.cloudWorkoutStatus)
+                            .font(.caption2)
+                            .foregroundStyle(HCDesign.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Text("Background Watch transfers · " + coach.lastBackgroundTransfer)
                             .font(.caption2)
                             .foregroundStyle(HCDesign.secondary)
                             .fixedSize(horizontal: false, vertical: true)
