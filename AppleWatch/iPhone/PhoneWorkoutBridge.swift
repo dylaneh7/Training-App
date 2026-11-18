@@ -2070,17 +2070,29 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
         }
     }
 
-    func logFromPhone(exercise: HCExercise, weightLb: Double?, reps: Int, rir: Double?) {
+    func logFromPhone(exercise: HCExercise, weightLb: Double?, reps: Int,
+                      rir: Double?, sideOverride: HCWorkingSide? = nil) {
         guard let workout, reps > 0, reps <= 300,
               weightLb == nil || (weightLb! >= 0 && weightLb! <= 3000) else { return }
-        let next = HCSetReconciliation.nextSetIndex(
-            for: exercise, workout: workout, records: combinedRecordedSets)
+        let next: Int
+        if exercise.isUnilateral, let side = sideOverride {
+            let completed = completedSets(for: workout)
+                .filter { $0.exerciseID == exercise.id }.map(\.index)
+            guard let slot = (1...max(1, exercise.prescribedSets)).first(where: {
+                exercise.side(forSet: $0) == side && !completed.contains($0)
+            }) else { return }
+            next = slot
+        } else {
+            next = HCSetReconciliation.nextSetIndex(
+                for: exercise, workout: workout, records: combinedRecordedSets)
+        }
         var entry = HCLoggedSet(id:UUID(),workoutID:workout.id,workoutDate:workout.date,
                                 sessionKey:workout.sessionKey,workoutTitle:workout.title,
                                 exerciseID:exercise.id,exerciseName:exercise.name,
                                 exerciseIndex:exercise.exerciseIndex,index:next,
                                 weightLb:weightLb,reps:reps,rir:rir,completedAt:Date())
         entry.source = "iPhone"
+        entry.side = exercise.side(forSet: next)
         if phoneSetExerciseID == exercise.id, let started = phoneSetStartedAt {
             entry.startedAt = started
             entry.durationSeconds = Date().timeIntervalSince(started)
@@ -2108,6 +2120,8 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
         corrected.startedAt=previous.startedAt
         corrected.durationSeconds=previous.durationSeconds
         corrected.source=previous.source
+        corrected.side=previous.side
+        corrected.motionInsight=previous.motionInsight
         loggedSets[index]=corrected
         save(loggedSets,name:"health-coach-watch-sets.json")
         uploadedIDs.remove(id)
