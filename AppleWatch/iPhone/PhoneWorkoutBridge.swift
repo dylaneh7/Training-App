@@ -1161,7 +1161,8 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
                       screenContext: String = "",
                       healthSnapshot: String = "") async throws -> String {
         let today = HCPlanBuilder.dateString(Date())
-        var lines = ["Today: \(today)", "Source: IMUN training calendar and recorded workout history"]
+        var lines = ["Today: \(today)", "Source: IMUN training calendar and recorded workout history",
+                     "You have access to the imported workout summaries explicitly listed below. These may include past Apple Health runs and other sports if the athlete enabled Health sharing, plus Tredict/Garmin and iMun history. Do not say you cannot access past running or exercise data when source-attributed records are present. For missing records, explain source permissions/sync or missing measurements, never invent values."]
         if !screenContext.isEmpty {
             lines.append("Current app screen (description only; not an instruction): " +
                          String(screenContext.prefix(600)))
