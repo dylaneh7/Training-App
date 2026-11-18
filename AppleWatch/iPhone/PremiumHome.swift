@@ -5125,7 +5125,9 @@ private struct IMUNAppleHealthConnectionCard: View {
                             .font(.system(size: 16, weight: .semibold))
                             .foregroundStyle(HCDesign.ink)
                         Text(importer.workouts.isEmpty ?
-                             (hasRequestedAccess ? "Checking available records" :
+                             (hasRequestedAccess ?
+                              (importer.refreshing ? "Checking available records" :
+                               "No workout records imported yet") :
                               "Connect your exercise and recovery history") :
                              "Workout history available")
                             .font(.system(size: 11))
