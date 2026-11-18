@@ -408,9 +408,12 @@ struct StrengthExerciseDetails: View {
                 }
             }
         }
-        .navigationTitle("Exercise")
+        .navigationTitle("MOVEMENT")
+        .scrollContentBackground(.hidden)
+        .background(HCDesign.canvas)
+        .tint(HCDesign.electric)
         .sheet(isPresented:$showSwap) {
-            ExerciseLibraryPicker { item in swapTo(item) }
+            ExerciseLibraryPicker(replacing: exercise) { item in swapTo(item) }
         }
         .sheet(item:$editingSet) { set in
             SetCorrectionSheet(entry:set)
@@ -525,89 +528,292 @@ private struct SetCorrectionSheet: View {
     }
 }
 
+/// Native iMun catalog browser, shared by the workout builder and Smart Swap.
+/// Recommendations are local and explainable: muscle + movement family +
+/// compatible equipment, never fabricated exercise equivalences.
 struct ExerciseLibraryPicker: View {
     @Environment(\.dismiss) private var dismiss
+    let replacing: HCExercise?
     let onSelect: (HCLibraryExercise) -> Void
-    @State private var search = ""
-    @State private var category = "All"
+    @State private var query = ""
+    @State private var group = "All"
+    @State private var movementKind = "All"
+    @State private var suggestedOnly = true
+    @State private var expandedID: String?
     @State private var showingCustom = false
     @State private var customName = ""
     @State private var customInstructions = ""
     @State private var customGroup = "Other"
 
-    private var results: [HCLibraryExercise] {
-        HCExerciseLibrary.all.filter { e in
-            (category == "All" || e.group == category) &&
-            (search.isEmpty || e.name.localizedCaseInsensitiveContains(search) ||
-                e.equipment.localizedCaseInsensitiveContains(search) ||
-                e.group.localizedCaseInsensitiveContains(search))
+    init(replacing: HCExercise? = nil,
+         onSelect: @escaping (HCLibraryExercise) -> Void) {
+        self.replacing = replacing
+        self.onSelect = onSelect
+        _suggestedOnly = State(initialValue: replacing != nil)
+    }
+
+    private var recommendations: [HCLibraryExercise] {
+        guard let replacing else { return [] }
+        return HCExerciseLibrary.alternatives(for: replacing, limit: 16)
+    }
+
+    private var filtered: [HCLibraryExercise] {
+        let pool = replacing != nil && suggestedOnly ?
+            recommendations : HCExerciseLibrary.all
+        return pool.filter { item in
+            (group == "All" || item.group == group) &&
+            (movementKind == "All" || item.kind.lowercased() == movementKind.lowercased()) &&
+            (query.isEmpty || [item.name, item.equipment, item.group,
+                               item.primaryLabel, item.instructions]
+                .contains(where: { $0.localizedCaseInsensitiveContains(query) }))
         }
+    }
+
+    private func pick(_ item: HCLibraryExercise) {
+        onSelect(item)
+        dismiss()
+    }
+
+    private func chip(_ text: String, selected: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(text.uppercased())
+                .font(.system(size: 10, weight: .bold, design: .rounded))
+                .tracking(0.6)
+                .foregroundStyle(selected ? HCDesign.canvas : HCDesign.secondary)
+                .padding(.horizontal, 13).padding(.vertical, 10)
+                .background(selected ? HCDesign.electric : HCDesign.card,
+                            in: Capsule())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func resultCard(_ item: HCLibraryExercise, recommended: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 11) {
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: "figure.strengthtraining.traditional")
+                    .font(.system(size: 17))
+                    .foregroundStyle(HCDesign.electric)
+                    .frame(width: 39, height: 39)
+                    .background(HCDesign.electric.opacity(0.10),
+                                in: RoundedRectangle(cornerRadius: 11))
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(item.name)
+                        .font(.system(size: 15, weight: .bold, design: .rounded))
+                        .foregroundStyle(HCDesign.ink)
+                    Text(item.primaryLabel + "  ·  " + item.equipment)
+                        .font(.system(size: 11))
+                        .foregroundStyle(HCDesign.secondary)
+                }
+                Spacer(minLength: 2)
+                if recommended {
+                    Image(systemName: "arrow.triangle.2.circlepath")
+                        .foregroundStyle(HCDesign.aqua)
+                }
+            }
+            Text(item.instructions)
+                .font(.system(size: 12))
+                .foregroundStyle(HCDesign.secondary)
+                .lineLimit(expandedID == item.id ? nil : 2)
+                .fixedSize(horizontal: false, vertical: true)
+            if expandedID == item.id {
+                if !item.formTip.isEmpty {
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text("FORM & CONTROL")
+                            .font(.system(size: 10, weight: .bold))
+                            .tracking(1.0).foregroundStyle(HCDesign.aqua)
+                        Text(item.formTip)
+                            .font(.system(size: 12))
+                            .foregroundStyle(HCDesign.ink)
+                    }
+                }
+                Text(item.difficulty.capitalized + "  ·  " + item.kind.capitalized)
+                    .font(.system(size: 10))
+                    .foregroundStyle(HCDesign.secondary)
+            }
+            HStack(spacing: 10) {
+                Button {
+                    expandedID = expandedID == item.id ? nil : item.id
+                } label: {
+                    Label(expandedID == item.id ? "LESS" : "HOW TO",
+                          systemImage: expandedID == item.id ? "chevron.up" : "book.closed")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(HCDesign.aqua)
+                        .padding(.vertical, 9)
+                }
+                .buttonStyle(.plain)
+                Spacer()
+                Button { pick(item) } label: {
+                    Label(replacing == nil ? "ADD" : "SWAP",
+                          systemImage: replacing == nil ? "plus" :
+                              "arrow.triangle.2.circlepath")
+                        .font(.system(size: 11, weight: .bold, design: .rounded))
+                        .padding(.horizontal, 15)
+                        .padding(.vertical, 10)
+                        .foregroundStyle(HCDesign.canvas)
+                        .background(HCDesign.electric, in: Capsule())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(14)
+        .background(HCDesign.card,
+                    in: RoundedRectangle(cornerRadius: 17))
+        .overlay(RoundedRectangle(cornerRadius: 17)
+            .strokeBorder(HCDesign.outline.opacity(0.65), lineWidth: 0.7))
     }
 
     var body: some View {
         NavigationStack {
-            List {
-                Picker("Muscle group",selection:$category) {
-                    ForEach(["All","Chest","Back","Shoulders","Arms","Legs","Traps","Core"],id:\.self) { Text($0) }
-                }
-                Button {
-                    showingCustom = true
-                } label: {
-                    Label("Create Custom Exercise",systemImage:"plus")
-                }
-                ForEach(results) { item in
-                    VStack(alignment:.leading,spacing:7) {
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 13) {
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text(replacing == nil ? "MOVEMENT LIBRARY" : "SMART SWAP")
+                            .font(.system(size: 25, weight: .heavy, design: .rounded))
+                            .tracking(0.4)
+                            .foregroundStyle(HCDesign.ink)
+                        Text(replacing == nil ?
+                             "\(HCExerciseLibrary.all.count) exercises, ready offline" :
+                             "Similar muscles · matched movement patterns")
+                            .font(.subheadline).foregroundStyle(HCDesign.secondary)
+                        if let replacing {
+                            Text("REPLACING  ·  " + replacing.name.uppercased())
+                                .font(.system(size: 10, weight: .bold))
+                                .foregroundStyle(HCDesign.aqua)
+                                .padding(.top, 6)
+                            if let best = recommendations.first {
+                                Button { pick(best) } label: {
+                                    HStack(spacing: 10) {
+                                        Image(systemName: "arrow.triangle.2.circlepath")
+                                        VStack(alignment: .leading, spacing: 2) {
+                                            Text("TOP MATCH").font(.system(size: 10, weight: .bold))
+                                            Text(best.name).font(.system(size: 15, weight: .bold))
+                                        }
+                                        Spacer()
+                                        Image(systemName: "arrow.right")
+                                    }
+                                    .foregroundStyle(HCDesign.canvas)
+                                    .padding(15)
+                                    .background(HCDesign.electric,
+                                                in: RoundedRectangle(cornerRadius: 14))
+                                }
+                                .buttonStyle(.plain)
+                                .padding(.top, 6)
+                            }
+                        }
+                    }
+                    HStack(spacing: 9) {
+                        Image(systemName: "magnifyingglass")
+                            .foregroundStyle(HCDesign.secondary)
+                        TextField("Search exercises, muscles or equipment", text: $query)
+                            .font(.system(size: 13))
+                            .foregroundStyle(HCDesign.ink)
+                            .tint(HCDesign.electric)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                        if !query.isEmpty {
+                            Button { query = "" } label: {
+                                Image(systemName: "xmark.circle.fill")
+                                    .foregroundStyle(HCDesign.secondary)
+                            }.buttonStyle(.plain)
+                        }
+                    }
+                    .padding(14)
+                    .background(HCDesign.card,
+                                in: RoundedRectangle(cornerRadius: 12))
+                    if replacing != nil {
                         HStack {
-                            Text(item.name).font(.headline)
-                            Spacer()
-                            Button("Select") {
-                                onSelect(item)
-                                dismiss()
+                            chip("Best matches", selected: suggestedOnly) {
+                                suggestedOnly = true
                             }
-                            .buttonStyle(.bordered)
-                        }
-                        Text("\(item.group) · \(item.equipment)")
-                            .font(.caption).foregroundStyle(.secondary)
-                        Text(item.instructions).font(.footnote)
-                    }
-                    .padding(.vertical,3)
-                }
-            }
-            .searchable(text:$search,prompt:"Search 50 exercises")
-            .navigationTitle("Exercise Library")
-            .sheet(isPresented:$showingCustom) {
-                NavigationStack {
-                    Form {
-                        TextField("Exercise name",text:$customName)
-                        TextField("Muscle group",text:$customGroup)
-                        Section("How to perform it") {
-                            TextEditor(text:$customInstructions).frame(minHeight:130)
-                        }
-                    }
-                    .navigationTitle("New Exercise")
-                    .toolbar {
-                        ToolbarItem(placement:.cancellationAction) {
-                            Button("Cancel") {showingCustom=false}
-                        }
-                        ToolbarItem(placement:.confirmationAction) {
-                            Button("Add") {
-                                let name=customName.trimmingCharacters(in:.whitespacesAndNewlines)
-                                guard !name.isEmpty else{return}
-                                onSelect(HCLibraryExercise(
-                                    name:name,group:customGroup,
-                                    equipment:"Custom",instructions:customInstructions))
-                                showingCustom=false
-                                dismiss()
+                            chip("Full library", selected: !suggestedOnly) {
+                                suggestedOnly = false
+                                group = "All"
                             }
                         }
                     }
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 7) {
+                            ForEach(HCExerciseLibrary.groups, id: \.self) { name in
+                                chip(name, selected: group == name) { group = name }
+                            }
+                        }
+                    }
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 7) {
+                            ForEach(["All", "strength", "stretching", "plyometrics",
+                                     "cardio", "strongman", "olympic weightlifting"],
+                                    id: \.self) { name in
+                                chip(name == "All" ? "Any style" : name,
+                                     selected: movementKind == name) {
+                                    movementKind = name
+                                }
+                            }
+                        }
+                    }
+                    HStack {
+                        Text("\(filtered.count) MOVEMENTS")
+                            .font(.system(size: 10, weight: .bold)).tracking(1)
+                            .foregroundStyle(HCDesign.secondary)
+                        Spacer()
+                        if replacing == nil {
+                            Button("CUSTOM +") { showingCustom = true }
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(HCDesign.aqua)
+                        }
+                    }
+                    if filtered.isEmpty {
+                        Text("No matches. Try clearing your muscle or style filters.")
+                            .font(.subheadline)
+                            .foregroundStyle(HCDesign.secondary)
+                            .padding(22)
+                    }
+                    ForEach(filtered) { item in
+                        resultCard(item, recommended: replacing != nil && suggestedOnly)
+                    }
+                    Text("Exercise instructions are informational. Start with appropriate loads and use a spotter where needed. Free Exercise DB content is public domain (Unlicense).")
+                        .font(.system(size: 10))
+                        .foregroundStyle(HCDesign.secondary)
+                        .padding(.vertical, 12)
                 }
+                .padding(18)
             }
+            .background(HCDesign.canvas.ignoresSafeArea())
+            .navigationTitle("")
             .toolbar {
-                ToolbarItem(placement:.cancellationAction) {
-                    Button("Close") { dismiss() }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("DONE") { dismiss() }
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundStyle(HCDesign.electric)
                 }
             }
+        }
+        .preferredColorScheme(.dark)
+        .sheet(isPresented: $showingCustom) {
+            NavigationStack {
+                Form {
+                    TextField("Exercise name", text: $customName)
+                    TextField("Muscle group", text: $customGroup)
+                    Section("Steps and form cues") {
+                        TextEditor(text: $customInstructions)
+                            .frame(minHeight: 130)
+                    }
+                    Button("SAVE MOVEMENT") {
+                        let name = customName.trimmingCharacters(in: .whitespacesAndNewlines)
+                        guard !name.isEmpty else { return }
+                        pick(HCLibraryExercise(name: name, group: customGroup,
+                             equipment: "Custom", instructions: customInstructions))
+                    }
+                }
+                .scrollContentBackground(.hidden)
+                .background(HCDesign.canvas)
+                .navigationTitle("Custom Movement")
+                .toolbar {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button("CANCEL") { showingCustom = false }
+                    }
+                }
+            }
+            .preferredColorScheme(.dark)
         }
     }
 }
