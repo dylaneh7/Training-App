@@ -728,6 +728,9 @@ struct PremiumHomeView: View {
         .onReceive(runImporter.$runs) { imported in
             coach.updateHealthRuns(imported)
         }
+        .onReceive(runImporter.$workouts) { imported in
+            coach.updateHealthWorkouts(imported)
+        }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active {
                 runImporter.startIfAuthorized()
@@ -3897,6 +3900,89 @@ private struct IMUNCoachTurn: Identifiable, Codable {
     let text: String
 }
 
+/// Private, locally stored conversation memory. This is retrieval, not
+/// on-device model training. Nothing is uploaded until the athlete taps Send.
+private enum IMUNCoachLocalMemory {
+    private static var archiveURL: URL? {
+        FileManager.default.urls(for: .applicationSupportDirectory,
+                                 in: .userDomainMask).first?
+            .appendingPathComponent("imun-isaiah-conversation-memory.json")
+    }
+
+    private static func read() -> [IMUNCoachTurn] {
+        guard let archiveURL,
+              let data = try? Data(contentsOf: archiveURL),
+              let value = try? JSONDecoder().decode([IMUNCoachTurn].self, from: data)
+        else { return [] }
+        return value
+    }
+
+    static var count: Int { read().count }
+
+    static func save(_ recent: [IMUNCoachTurn]) {
+        guard !recent.isEmpty, let archiveURL else { return }
+        var history = read()
+        var seen = Set(history.map(\.id))
+        for turn in recent where seen.insert(turn.id).inserted {
+            history.append(turn)
+        }
+        guard let data = try? JSONEncoder().encode(Array(history.suffix(1000)))
+        else { return }
+        do {
+            try FileManager.default.createDirectory(
+                at: archiveURL.deletingLastPathComponent(),
+                withIntermediateDirectories: true)
+            try data.write(to: archiveURL, options: .atomic)
+            try? FileManager.default.setAttributes(
+                [.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication],
+                ofItemAtPath: archiveURL.path)
+        } catch {
+            // A failed archive must never prevent training or live chat.
+        }
+    }
+
+    static func clear() {
+        guard let archiveURL else { return }
+        try? FileManager.default.removeItem(at: archiveURL)
+    }
+
+    static func relevantUserNotes(for question: String,
+                                  excluding inCurrentThread: Set<UUID>) -> String {
+        let stopWords: Set<String> = [
+            "what", "when", "where", "which", "about", "could", "would",
+            "should", "have", "this", "that", "with", "from", "your",
+            "mine", "please", "then", "them", "there", "like",
+            "workout", "workouts", "training"
+        ]
+        let terms = Set(question.lowercased().split {
+            !$0.isLetter && !$0.isNumber
+        }.map(String.init).filter { $0.count >= 4 }).subtracting(stopWords)
+        let messages = read().filter {
+            $0.role == "user" && !inCurrentThread.contains($0.id)
+        }
+        let candidates = messages.enumerated().map { index, note in
+            (index: index, text: note.text,
+             hits: terms.filter { note.text.lowercased().contains($0) }.count)
+        }
+        let related = candidates.filter { $0.hits > 0 }.sorted {
+            if $0.hits != $1.hits { return $0.hits > $1.hits }
+            return $0.index > $1.index
+        }
+        var selected = related.prefix(10).map { $0 }
+        // Include a few recent athlete statements for changing goals/preferences,
+        // even if the current question uses different wording.
+        let recent = candidates.suffix(5).reversed()
+        for note in recent where !selected.contains(where: { $0.index == note.index }) {
+            selected.append(note)
+        }
+        guard !selected.isEmpty else { return "" }
+        let snippets = selected.prefix(14).map {
+            "Athlete previously said: " + String($0.text.prefix(420))
+        }.joined(separator: "\n")
+        return String(snippets.prefix(5500))
+    }
+}
+
 /// Understated, accessible activity indicator for both action planning and
 /// generated answers. Driven by TimelineView; no manual timers to leak.
 private struct IMUNIsAIahThinking: View {
@@ -3934,9 +4020,11 @@ private struct PremiumCoachConversation: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var coach: PhoneWorkoutBridge
     @EnvironmentObject private var appleHealth: HCAppleHealthReader
+    @EnvironmentObject private var runImporter: HCRunHealthImporter
     @AppStorage("hcSelectedHealthCategory") private var selectedHealthCategory = "Overview"
     @AppStorage("hcSelectedHealthMetric") private var selectedHealthMetric = ""
     @AppStorage("hcAIShareRecovery") private var shareRecovery = false
+    @AppStorage("hcIsaiahRememberChats") private var rememberChats = true
     @AppStorage("hcCoachConversationLocalV1") private var storedConversation = Data()
     @FocusState private var composerFocused: Bool
     @State private var question = ""
@@ -4104,7 +4192,9 @@ private struct PremiumCoachConversation: View {
             if let decoded = try? JSONDecoder().decode([IMUNCoachTurn].self,
                                                        from: storedConversation) {
                 turns = Array(decoded.suffix(24))
+                if rememberChats { IMUNCoachLocalMemory.save(turns) }
             }
+            if runImporter.enabled { runImporter.refresh() }
         }
         .task {
             try? await Task.sleep(nanoseconds: 350_000_000)
@@ -4214,10 +4304,10 @@ private struct PremiumCoachConversation: View {
             Toggle(isOn: $shareRecovery) {
                 HStack(spacing: 6) {
                     Image(systemName: "heart.text.square")
-                    Text("Include all loaded Health readings")
+                    Text("Share Apple Health workouts & recovery")
                     Spacer(minLength: 0)
                     if shareRecovery {
-                        Text("\(appleHealth.metrics.count) readings")
+                        Text("\(runImporter.workouts.count) workouts")
                             .foregroundStyle(HCDesign.electric)
                     }
                 }
@@ -4225,8 +4315,15 @@ private struct PremiumCoachConversation: View {
                 .foregroundStyle(HCDesign.secondary)
             }
             .tint(HCDesign.electric)
+            Toggle("Use relevant previous IsAIah chats", isOn: $rememberChats)
+                .font(.system(size: 11))
+                .tint(HCDesign.electric)
+                .foregroundStyle(HCDesign.secondary)
+                .onChange(of: rememberChats) { _, enabled in
+                    if enabled { IMUNCoachLocalMemory.save(turns) }
+                }
             if !composerFocused {
-                Text("Health sharing is optional. Data is sent only with your message.")
+                Text("Only Send shares selected Health or past-chat context with IsAIah. Older chats may contain personal details.")
                     .font(.system(size: 10))
                     .foregroundStyle(HCDesign.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -4268,6 +4365,7 @@ private struct PremiumCoachConversation: View {
         if let saved = try? JSONEncoder().encode(Array(turns.suffix(24))) {
             storedConversation = saved
         }
+        if rememberChats { IMUNCoachLocalMemory.save(turns) }
     }
 
     private func populateEditFields(for exerciseID: String,
@@ -4646,7 +4744,11 @@ private struct PremiumCoachConversation: View {
             presentAction(proposed, for: questionText, appendUser: true)
             return
         }
-        let history = context
+        let currentHistory = context
+        let past = rememberChats ? IMUNCoachLocalMemory.relevantUserNotes(
+            for: questionText, excluding: Set(turns.map(\.id))) : ""
+        let history = [currentHistory, past].filter { !$0.isEmpty }
+            .joined(separator: "\n")
         question = ""
         composerFocused = false
         errorMessage = nil
