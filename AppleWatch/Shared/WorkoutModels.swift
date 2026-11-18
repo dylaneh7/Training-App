@@ -173,6 +173,16 @@ struct HCMotionSetInsight: Codable, Hashable {
     var lastWristRotationChangePercent: Double? = nil
     /// Location at capture time; old records still decode without this field.
     var wearableLocation: String? = nil
+    /// Capture-quality metadata. Missing values indicate older recordings.
+    var motionModelVersion: Int? = nil
+    var motionSampleCount: Int? = nil
+    var sampleCoveragePercent: Double? = nil
+    var samplingGapCount: Int? = nil
+    var analysisConfidence: String? = nil
+    var analysisWarnings: [String]? = nil
+    var peakLinearAccelerationG: Double? = nil
+    var meanLinearAccelerationG: Double? = nil
+    var repAccelerationPeaksG: [Double]? = nil
 }
 
 
