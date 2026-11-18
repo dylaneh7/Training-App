@@ -47,6 +47,11 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
     @Published private(set) var eitanLastReceivedAt: Date?
     @Published private(set) var eitanTransportDetails = "No EITAN packet from iPhone yet"
     @Published private(set) var eitanPhoneBuild = "Not connected"
+    @Published private(set) var eitanCloudStatus =
+        "Private cloud EITAN has not been checked"
+    @Published private(set) var eitanCloudReceivedAt: Date?
+    private var checkingEitanCloud = false
+    private var lastEitanCloudCheck = Date.distantPast
     private var lastEitanLiveRequestAt = Date.distantPast
     @Published private(set) var sets: [HCLoggedSet] = []
     // Preserve all original records locally; cloud history is read-only.
@@ -147,6 +152,7 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
                 if available {
                     self.refreshCloudWorkout()
                     self.refreshCloudAppearance(force: true)
+                    self.refreshCloudEitan(force: true)
                     self.uploadPendingCloudSets()
                 }
             }
@@ -171,12 +177,86 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
                     self.cloudStatus = "Signed in · loading today's workout"
                     self.refreshCloudWorkout()
                     self.refreshCloudAppearance(force: true)
+                    self.refreshCloudEitan(force: true)
                     self.uploadPendingCloudSets()
                 }
             } catch {
                 DispatchQueue.main.async {
                     self.cloudStatus = "Cloud sign-in failed: " + error.localizedDescription
                 }
+            }
+        }
+    }
+
+    /// Fetch today's EITAN through the athlete's already authenticated
+    /// account, with no dependency on isReachable, paired-app registration,
+    /// or a background WatchConnectivity session.
+    func refreshCloudEitan(force: Bool = false) {
+        guard cloudSignedIn else {
+            eitanCloudStatus =
+                "Sign in to iMun cloud on Watch to sync EITAN without the iPhone link"
+            return
+        }
+        guard !checkingEitanCloud,
+              force || Date().timeIntervalSince(lastEitanCloudCheck) > 45
+        else { return }
+        checkingEitanCloud = true
+        lastEitanCloudCheck = Date()
+        eitanCloudStatus = "Checking private cloud for today's EITAN…"
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                let row = try await cloud.fetchEitanForWatch()
+                self.checkingEitanCloud = false
+                guard let row else {
+                    self.eitanCloudStatus =
+                        "No private EITAN published. Enable EITAN cloud sync in iPhone Settings."
+                    return
+                }
+                guard row.enabled else {
+                    self.eitanCloudStatus =
+                        "Private EITAN cloud sync is off on iPhone; no health data stored."
+                    return
+                }
+                guard let snapshot = row.snapshot else {
+                    self.eitanCloudStatus =
+                        "Private cloud connected; iPhone has not calculated an EITAN score yet."
+                    return
+                }
+                guard snapshot.date == Self.today() else {
+                    self.eitanCloudStatus =
+                        "Cloud has an earlier EITAN day; open iMun on iPhone to refresh."
+                    return
+                }
+                let lastLocalRevision = UserDefaults.standard.double(
+                    forKey: "hcEitanReceivedTimestamp")
+                // Avoid overriding a newer WatchConnectivity revision with
+                // an older, cached cloud row.
+                if let updated = row.updatedAt,
+                   updated.timeIntervalSince1970 + 1 < lastLocalRevision,
+                   self.eitanSnapshot?.date == Self.today() {
+                    self.eitanCloudStatus =
+                        "Watch already has a newer EITAN snapshot than private cloud."
+                    return
+                }
+                self.eitanSnapshot = snapshot
+                self.save(snapshot, name: "eitan-snapshot.json")
+                self.eitanCloudReceivedAt = Date()
+                self.eitanLastReceivedAt = Date()
+                self.eitanSyncStatus = snapshot.value == nil ?
+                    "EITAN received via private cloud · personal baseline incomplete" :
+                    "EITAN received via private cloud · phone link not needed"
+                self.eitanTransportDetails =
+                    "Private iMun cloud · owner account · source " +
+                    (snapshot.primaryWearable ?? "Auto")
+                self.eitanPhoneBuild = "Private cloud"
+                self.eitanCloudStatus = snapshot.value.map {
+                    "Private cloud EITAN synced: \($0)/100"
+                } ?? "EITAN synced via cloud · waiting for enough Health data"
+            } catch {
+                self.checkingEitanCloud = false
+                self.eitanCloudStatus =
+                    "EITAN cloud fetch failed: " + error.localizedDescription
             }
         }
     }
@@ -1354,6 +1434,7 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
         }
         guard session.isReachable else {
             queueEitanRequest(session)
+            refreshCloudEitan(force: true)
             return
         }
         eitanSyncStatus = "Requesting latest EITAN from iPhone…"
@@ -1371,6 +1452,7 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
                 DispatchQueue.main.async {
                     guard let self else { return }
                     self.queueEitanRequest(session)
+                    self.refreshCloudEitan(force: true)
                     self.eitanTransportDetails = "iPhone did not answer live request: " +
                         error.localizedDescription
                 }
