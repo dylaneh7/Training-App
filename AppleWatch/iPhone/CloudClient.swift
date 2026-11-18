@@ -622,7 +622,7 @@ actor HCCloudClient {
         body["rir"] = set.rir.map { $0 as Any } ?? NSNull()
         body["started_at"] = set.startedAt.map { stamp.string(from:$0) as Any } ?? NSNull()
         body["duration_seconds"] = set.durationSeconds.map { $0 as Any } ?? NSNull()
-        body["working_side"] = set.side?.rawValue ?? NSNull()
+        body["working_side"] = set.side.map { $0.rawValue as Any } ?? NSNull()
         if let insight = set.motionInsight,
            let data = try? JSONEncoder().encode(insight),
            let object = try? JSONSerialization.jsonObject(with: data) {
