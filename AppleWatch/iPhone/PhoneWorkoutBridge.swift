@@ -1334,6 +1334,51 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
         // Include enough actual session history to answer trends and PR queries.
         // Derived running pace uses measured distance and elapsed time only.
         let permittedRuns = runHistory.filter { shareRecovery || !$0.fromAppleHealth }
+        let validRuns = permittedRuns.filter {
+            ($0.distanceMeters ?? 0) > 0 && ($0.durationSeconds ?? 0) > 0
+        }
+        let totalMeasuredMiles = validRuns.reduce(0.0) {
+            $0 + ($1.distanceMeters ?? 0) / 1609.344
+        }
+        if let longest = validRuns.max(by: {
+            ($0.distanceMeters ?? 0) < ($1.distanceMeters ?? 0)
+        }) {
+            lines.append(String(format:
+                "Longest imported measured run: %@, %.2f mi, source %@.",
+                longest.date, (longest.distanceMeters ?? 0) / 1609.344,
+                longest.source))
+        }
+        if let fastestFiveK = validRuns.filter({
+            // Only standalone runs near a 5-km recorded distance; never
+            // infer a 5K PR from a longer run's average speed.
+            let meters = $0.distanceMeters ?? 0
+            return meters >= 4800 && meters <= 5300
+        }).min(by: {
+            (($0.durationSeconds ?? 0) / ($0.distanceMeters ?? 1)) <
+            (($1.durationSeconds ?? 0) / ($1.distanceMeters ?? 1))
+        }) {
+            lines.append(String(format:
+                "Fastest pace among imported approximately-5K runs: %@, %.2f min/mi, source %@. This is a recorded workout comparison, not a verified race PR.",
+                fastestFiveK.date,
+                (fastestFiveK.durationSeconds ?? 0) / 60 /
+                ((fastestFiveK.distanceMeters ?? 1) / 1609.344),
+                fastestFiveK.source))
+        }
+        lines.append(String(format:
+            "Loaded measured run history: %d runs, %.1f total miles (all currently permitted imported sources, not necessarily every lifetime workout).",
+            validRuns.count, totalMeasuredMiles))
+        let runsByYear = Dictionary(grouping: validRuns, by: {
+            String($0.date.prefix(4))
+        })
+        for year in runsByYear.keys.sorted() {
+            let recorded = runsByYear[year] ?? []
+            let miles = recorded.reduce(0.0) {
+                $0 + ($1.distanceMeters ?? 0) / 1609.344
+            }
+            lines.append(String(format:
+                "Measured running year %@: %d runs, %.1f miles.", year,
+                recorded.count, miles))
+        }
         let windows: [(String, Int, Int)] = [
             ("Recent 30 days", 0, 30), ("Previous 30 days", 30, 60)
         ]
