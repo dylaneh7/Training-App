@@ -67,6 +67,14 @@ private final class HCMotionRepEstimator {
     private var rotationalTravel: [Double] = []
     private var peakRotationSpeeds: [Double] = []
     private var activePhaseSeconds: [Double] = []
+    private var sampleCount = 0
+    private var sampleGapCount = 0
+    private var motionErrors = 0
+    private var firstSampleTime: TimeInterval?
+    private var accelerationSum = 0.0
+    private var accelerationMax = 0.0
+    private var currentCycleAccelPeak = 0.0
+    private var cycleAccelPeaks: [Double] = []
     var onEstimate: ((Int, Double?) -> Void)?
 
     var isAvailable: Bool { manager.isDeviceMotionAvailable }
@@ -90,11 +98,21 @@ private final class HCMotionRepEstimator {
         lastSampleTime = nil
         currentCycleRotationDegrees = 0
         currentMaxRotationDegreesPerSecond = 0
+        sampleCount = 0
+        sampleGapCount = 0
+        motionErrors = 0
+        firstSampleTime = nil
+        accelerationSum = 0
+        accelerationMax = 0
+        currentCycleAccelPeak = 0
+        cycleAccelPeaks.removeAll(keepingCapacity: true)
         manager.deviceMotionUpdateInterval = 1.0 / 25.0
         // The Watch holds one Core Motion manager for this session. Samples
         // are processed locally and never added to the HealthKit workout.
-        manager.startDeviceMotionUpdates(to: .main) { [weak self] sample, _ in
-            guard let self, let sample else { return }
+        manager.startDeviceMotionUpdates(to: .main) { [weak self] sample, error in
+            guard let self else { return }
+            if error != nil { self.motionErrors += 1 }
+            guard let sample else { return }
             self.consume(sample)
         }
         return true
@@ -119,9 +137,33 @@ private final class HCMotionRepEstimator {
         let angular = sqrt(rotation.x * rotation.x +
                            rotation.y * rotation.y +
                            rotation.z * rotation.z)
+        let now = sample.timestamp
+        guard now.isFinite, linear.isFinite, angular.isFinite,
+              (0...12).contains(linear), (0...50).contains(angular) else {
+            motionErrors += 1
+            return
+        }
+        if let previous = lastSampleTime {
+            let delta = now - previous
+            guard delta > 0 else { return } // Duplicate/out-of-order packet.
+            if delta > 0.24 {
+                // Never interpret an interrupted partial rep as a complete one.
+                sampleGapCount += 1
+                smoothedEnergy = 0
+                aboveThresholdSince = nil
+                motionPeakSeen = false
+                cyclePeak = 0
+                currentCycleRotationDegrees = 0
+                currentMaxRotationDegreesPerSecond = 0
+                currentCycleAccelPeak = 0
+            }
+        }
+        if firstSampleTime == nil { firstSampleTime = now }
+        sampleCount += 1
+        accelerationSum += linear
+        accelerationMax = max(accelerationMax, linear)
         let energy = linear + 0.08 * angular
         smoothedEnergy = 0.7 * smoothedEnergy + 0.3 * energy
-        let now = sample.timestamp
         let dt = lastSampleTime.map {
             max(0, min(0.08, now - $0))
         } ?? 0
@@ -129,6 +171,7 @@ private final class HCMotionRepEstimator {
         // Integrate gyro magnitude only for relative rotational wrist travel.
         // This is not a joint-ROM estimate and cannot infer dumbbell velocity.
         if smoothedEnergy >= 0.105 {
+            currentCycleAccelPeak = max(currentCycleAccelPeak, linear)
             let degPerSecond = angular * 180 / .pi
             currentCycleRotationDegrees += degPerSecond * dt
             currentMaxRotationDegreesPerSecond =
@@ -157,6 +200,7 @@ private final class HCMotionRepEstimator {
                 lastRepTime = now
                 count += 1
                 peaks.append(cyclePeak)
+                cycleAccelPeaks.append(currentCycleAccelPeak)
                 rotationalTravel.append(currentCycleRotationDegrees)
                 peakRotationSpeeds.append(currentMaxRotationDegreesPerSecond)
                 if let began = aboveThresholdSince {
@@ -167,6 +211,7 @@ private final class HCMotionRepEstimator {
             cyclePeak = 0
             currentCycleRotationDegrees = 0
             currentMaxRotationDegreesPerSecond = 0
+            currentCycleAccelPeak = 0
             aboveThresholdSince = nil
             motionPeakSeen = false
         }
@@ -218,6 +263,37 @@ private final class HCMotionRepEstimator {
         result.cycleSeconds = Array(periods.suffix(50))
         result.cycleWristMotionPeaks = Array(peaks.suffix(50))
         result.cycleTimingVariabilityPercent = variability
+        result.motionModelVersion = 2
+        result.motionSampleCount = sampleCount
+        result.samplingGapCount = sampleGapCount
+        result.peakLinearAccelerationG = accelerationMax
+        if sampleCount > 0 {
+            result.meanLinearAccelerationG = accelerationSum / Double(sampleCount)
+        }
+        result.repAccelerationPeaksG = Array(cycleAccelPeaks.suffix(50))
+        let expected = firstSampleTime.flatMap { first -> Double? in
+            guard let last = lastSampleTime, last > first else { return nil }
+            return max(1, (last - first) * 25)
+        } ?? 0
+        let coverage = expected > 0 ?
+            min(100, Double(sampleCount) / expected * 100) : 0
+        result.sampleCoveragePercent = coverage
+        var warnings: [String] = []
+        if sampleGapCount > 0 {
+            warnings.append("\(sampleGapCount) motion sampling interruptions")
+        }
+        if motionErrors > 0 {
+            warnings.append("\(motionErrors) sensor errors/invalid samples")
+        }
+        if coverage < 70 {
+            warnings.append("Low sample coverage")
+        }
+        result.analysisConfidence = coverage >= 85 && sampleGapCount == 0 &&
+            motionErrors == 0 && count >= 5 ? "Moderate" : "Low"
+        result.analysisWarnings = warnings
+        if !warnings.isEmpty {
+            result.note += " Signal quality: " + warnings.joined(separator: "; ") + "."
+        }
         func variation(_ data: [Double]) -> Double? {
             guard data.count >= 3 else { return nil }
             let avg = data.reduce(0, +) / Double(data.count)
@@ -382,8 +458,9 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
             if reps >= 4 &&
                (UserDefaults.standard.object(
                    forKey:"hcWatchMotionRecognitionEnabled") as? Bool ?? false) {
-                if let current = self.repEstimator.insight(
+                if var current = self.repEstimator.insight(
                     wearSide: self.wornAppleWatchSide?.rawValue ?? "unknown") {
+                    current.wearableLocation = self.watchLocation.rawValue
                     self.motionRecognitionHint = self.recognizeMotionProfile(current)
                 }
             }
@@ -1158,9 +1235,12 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
         UserDefaults.standard.object(forKey:"hcWatchMotionRepEstimate") as? Bool ?? true
     }
 
+    private var watchLocation: IMUNWearableLocation {
+        IMUNWearablePlacementStore.location("appleWatch")
+    }
+
     private var wornAppleWatchSide: HCWorkingSide? {
-        HCWorkingSide(rawValue:
-            UserDefaults.standard.string(forKey: "hcWatchWearSide") ?? "")
+        watchLocation.side
     }
 
     var activeSetSide: HCWorkingSide? {
@@ -1181,8 +1261,11 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
             HCPayload.kind: "imunMotionPreferencesV1",
             "hcMotionPreferenceTimestamp": prefs.double(
                 forKey:"hcMotionPreferenceTimestamp"),
-            "hcWatchWearSide": prefs.string(forKey:"hcWatchWearSide") ?? "unknown",
-            "hcWhoopWearSide": prefs.string(forKey:"hcWhoopWearSide") ?? "off",
+            "hcWearablePlacementsV2": IMUNWearablePlacementStore.payload(defaults: prefs),
+            "hcWatchWearSide":
+                IMUNWearablePlacementStore.location("appleWatch", defaults: prefs).legacySide,
+            "hcWhoopWearSide":
+                IMUNWearablePlacementStore.location("whoop", defaults: prefs).legacySide,
             "hcWatchMotionRepEstimate": prefs.object(forKey:
                 "hcWatchMotionRepEstimate") as? Bool ?? true,
             "hcWatchMotionRecognitionEnabled": prefs.object(forKey:
@@ -1200,8 +1283,11 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
 
     /// No unilateral auto-count from a device on the opposite wrist.
     var motionCanTrackActiveSide: Bool {
+        // A device marked as not worn, unknown, or positioned outside the
+        // arm must never silently count an unrelated movement.
+        guard watchLocation.canAttributeArm else { return false }
         guard let side = activeSetSide else { return true }
-        return wornAppleWatchSide == side
+        return watchLocation.side == side
     }
 
     /// WHOOP has no supported public raw IMU stream. It is not treated as
@@ -1242,8 +1328,10 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
               let rotation = current.meanWristRotationDegrees, rotation > 1
         else { return nil }
         let historical = sets.filter {
-            $0.motionInsight?.wearSide == current.wearSide &&
-            ($0.motionInsight?.detectedReps ?? 0) >= 4
+            $0.motionInsight.map(IMUNMotionAnalytics.placement) ==
+                current.wearableLocation &&
+            ($0.motionInsight?.detectedReps ?? 0) >= 4 &&
+            ($0.motionInsight?.analysisConfidence != "Low")
         }
         let grouped = Dictionary(grouping: historical) {
             HCProgramCatalog.normalized($0.exerciseName)
@@ -1282,7 +1370,9 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
             return
         }
         guard motionCanTrackActiveSide else {
-            motionRepStatus = "Apple Watch is not on the working wrist · enter reps manually"
+            motionRepStatus = watchLocation.canAttributeArm ?
+                "Apple Watch is not on the working arm · enter reps manually" :
+                "Choose Apple Watch arm position in Settings before auto-counting"
             repEstimator.stop()
             return
         }
@@ -1566,8 +1656,18 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
               !completedSets(for: exercise, setNumber: setNumber) else { return false }
 
         let now = Date()
-        let motionInsight = motionRepEnabled && motionCanTrackActiveSide ?
+        var motionInsight = motionRepEnabled && motionCanTrackActiveSide ?
             repEstimator.insight(wearSide: wornAppleWatchSide?.rawValue ?? "unknown") : nil
+        motionInsight?.wearableLocation = watchLocation.rawValue
+        if let position = motionInsight?.wearableLocation
+            .flatMap(IMUNWearableLocation.init(rawValue:)),
+           !position.isWrist {
+            motionInsight?.analysisConfidence = "Low"
+            var warnings = motionInsight?.analysisWarnings ?? []
+            warnings.append("Watch not worn at calibrated wrist location")
+            motionInsight?.analysisWarnings = warnings
+            motionInsight?.note += " Watch arm placement is experimental and may change detection accuracy."
+        }
         endRepEstimate()
         var entry = HCLoggedSet(
             id: UUID(),
@@ -2236,13 +2336,22 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
         if let incoming = context["hcMotionPreferenceTimestamp"] as? Double,
            incoming > UserDefaults.standard.double(forKey: "hcMotionPreferenceTimestamp") {
             let prefs = UserDefaults.standard
-            if let wrist = context["hcWatchWearSide"] as? String,
-               ["unknown","left","right"].contains(wrist) {
-                prefs.set(wrist, forKey: "hcWatchWearSide")
-            }
-            if let whoop = context["hcWhoopWearSide"] as? String,
-               ["off","left","right","other"].contains(whoop) {
-                prefs.set(whoop, forKey: "hcWhoopWearSide")
+            if let placements = context["hcWearablePlacementsV2"] as? [String: String] {
+                IMUNWearablePlacementStore.apply(placements, defaults: prefs)
+            } else {
+                // Backward compatibility with older phone builds.
+                if let watch = context["hcWatchWearSide"] as? String,
+                   ["unknown","left","right"].contains(watch) {
+                    IMUNWearablePlacementStore.save(
+                        .fromLegacy(watch, deviceID: "appleWatch"),
+                        for: "appleWatch", defaults: prefs)
+                }
+                if let whoop = context["hcWhoopWearSide"] as? String,
+                   ["off","left","right","other"].contains(whoop) {
+                    IMUNWearablePlacementStore.save(
+                        .fromLegacy(whoop, deviceID: "whoop"),
+                        for: "whoop", defaults: prefs)
+                }
             }
             if let enabled = context["hcWatchMotionRepEstimate"] as? Bool {
                 prefs.set(enabled, forKey: "hcWatchMotionRepEstimate")

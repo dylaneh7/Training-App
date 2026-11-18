@@ -462,6 +462,30 @@ actor HCCloudClient {
         return HCSetReconciliation.decodeCloudRows(rows, workout: workout)
     }
 
+    /// Historical motion detail across every dated workout, not just the
+    /// current session. The RLS-protected table enforces signed-in ownership.
+    /// Page in deterministic completed-at order to avoid dropping old sets.
+    func fetchMotionHistory() async throws -> [HCLoggedSet] {
+        let fields = "id,workout_date,session_key,workout_title,exercise_id,exercise_name,exercise_index,set_index,weight_lb,reps,rir,completed_at,started_at,duration_seconds,source,working_side,motion_insight"
+        var offset = 0
+        var rows: [[String: Any]] = []
+        let batch = 250
+        // Bound the in-memory response to protect performance on phones with
+        // exceptionally large histories. Older cloud records stay untouched.
+        while offset < 5000 {
+            let page = try await readRows("health_coach_watch_sets",
+                fields: fields, otherQuery: [
+                    URLQueryItem(name: "motion_insight", value: "not.is.null"),
+                    URLQueryItem(name: "order", value: "completed_at.desc,id.desc"),
+                    URLQueryItem(name: "offset", value: String(offset))
+                ], limit: batch)
+            rows.append(contentsOf: page)
+            if page.count < batch { break }
+            offset += page.count
+        }
+        return HCSetReconciliation.decodeMotionHistoryRows(rows)
+    }
+
     /// Read only signed-in athlete's undone set/session windows. Raw records
     /// are never used in progress after these corrections have arrived.
     func fetchWorkoutUndos(for workout: HCWorkout) async throws -> [HCWorkoutUndo] {

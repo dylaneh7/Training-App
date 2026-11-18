@@ -1524,8 +1524,21 @@ private struct WatchPreferences: View {
     @AppStorage("hcWatchRestCompleteHaptics") private var restCompleteHaptics = true
     @AppStorage("hcWatchMotionRepEstimate") private var motionRepEstimate = true
     @AppStorage("hcWatchMotionRecognitionEnabled") private var motionRecognition = false
-    @AppStorage("hcWatchWearSide") private var watchWearSide = "unknown"
-    @AppStorage("hcWhoopWearSide") private var whoopWearSide = "off"
+    @State private var wearableLocations: [String: IMUNWearableLocation] = [:]
+
+    private func loadWearableLocations() {
+        IMUNWearablePlacementStore.migrateLegacy()
+        wearableLocations = Dictionary(uniqueKeysWithValues:
+            IMUNWearableCatalog.devices.map {
+                ($0.id, IMUNWearablePlacementStore.location($0.id))
+            })
+    }
+
+    private func chooseLocation(_ location: IMUNWearableLocation, for id: String) {
+        IMUNWearablePlacementStore.save(location, for: id)
+        wearableLocations[id] = location
+        motionSettingsChanged()
+    }
 
     private func motionSettingsChanged() {
         UserDefaults.standard.set(Date().timeIntervalSince1970,
@@ -1688,25 +1701,33 @@ private struct WatchPreferences: View {
                 Text("Running voice cues and automatic miles remain in the Run screen.")
                     .font(.caption2).foregroundStyle(WTheme.muted)
             }
-            Section("WEARABLE POSITION") {
-                Picker("Apple Watch wrist", selection: $watchWearSide) {
-                    Text("Choose wrist").tag("unknown")
-                    Text("Left").tag("left")
-                    Text("Right").tag("right")
+            Section("WEARABLE PLACEMENT") {
+                ForEach(IMUNWearableCatalog.devices) { device in
+                    NavigationLink {
+                        WatchDevicePlacementEditor(
+                            device: device,
+                            selected: wearableLocations[device.id] ??
+                                IMUNWearablePlacementStore.location(device.id)
+                        ) { selected in
+                            chooseLocation(selected, for: device.id)
+                        }
+                    } label: {
+                        HStack(spacing: 9) {
+                            Image(systemName: device.symbol)
+                                .foregroundStyle(WTheme.lime)
+                                .frame(width: 26)
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(device.name)
+                                    .font(.system(size: 12, weight: .semibold))
+                                Text((wearableLocations[device.id] ??
+                                    IMUNWearablePlacementStore.location(device.id)).title)
+                                    .font(.system(size: 10))
+                                    .foregroundStyle(WTheme.aqua)
+                            }
+                        }
+                    }
                 }
-                .onChange(of: watchWearSide) { _, _ in
-                    motionSettingsChanged()
-                }
-                Picker("WHOOP position", selection: $whoopWearSide) {
-                    Text("Not worn").tag("off")
-                    Text("Left wrist").tag("left")
-                    Text("Right wrist").tag("right")
-                    Text("Other position").tag("other")
-                }
-                .onChange(of: whoopWearSide) { _, _ in
-                    motionSettingsChanged()
-                }
-                Text("Apple Watch supplies live wrist motion. WHOOP position is recorded, but live WHOOP motion is unavailable through its official developer API.")
+                Text("Choose which arm and attachment point each wearable occupies. WHOOP location is saved for future motion integration, but it does not currently provide live gyroscope data.")
                     .font(.caption2)
                     .foregroundStyle(WTheme.muted)
             }
@@ -1714,6 +1735,47 @@ private struct WatchPreferences: View {
         }
         .listStyle(.plain)
         .navigationTitle("Settings")
+        .background(WTheme.bg.ignoresSafeArea())
+        .onAppear { loadWearableLocations() }
+    }
+}
+
+/// Future device types use this same location picker and persisted schema.
+private struct WatchDevicePlacementEditor: View {
+    let device: IMUNWearableDefinition
+    let selected: IMUNWearableLocation
+    let choose: (IMUNWearableLocation) -> Void
+
+    var body: some View {
+        List {
+            Section(device.name.uppercased()) {
+                ForEach(IMUNWearableLocation.allCases, id: \.rawValue) { location in
+                    Button { choose(location) } label: {
+                        HStack(spacing: 7) {
+                            Image(systemName: selected == location ?
+                                  "checkmark.circle.fill" : "circle")
+                                .foregroundStyle(selected == location ?
+                                    WTheme.lime : WTheme.muted)
+                            Text(location.title)
+                                .font(.system(size: 12, weight: .medium))
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityAddTraits(selected == location ? .isSelected : [])
+                }
+            }
+            Section {
+                Text(device.hasSupportedLiveMotion ?
+                    "Rep counting uses the chosen arm. Forearm or biceps placement is experimental and may require calibration." :
+                    "Placement saved. Live WHOOP motion is not currently supported.")
+                    .font(.caption2)
+                    .foregroundStyle(WTheme.muted)
+            }
+        }
+        .listStyle(.plain)
+        .navigationTitle("Placement")
         .background(WTheme.bg.ignoresSafeArea())
     }
 }
