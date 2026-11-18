@@ -3571,10 +3571,8 @@ private struct PremiumRecoveryPage: View {
                             .font(.system(size: 13))
                             .foregroundStyle(HCDesign.secondary)
                         HStack(spacing: 10) {
-                            HCOutlineButton(title: "Health access",
-                                            icon: "heart") { appleHealth.connect() }
                             HCOutlineButton(title: appleHealth.loading ?
-                                            "Reading…" : "Refresh",
+                                            "Reading…" : "Refresh readings",
                                             icon: "arrow.clockwise") {
                                 appleHealth.refreshIfAuthorized(force: true)
                             }
@@ -5075,7 +5073,7 @@ private struct IMUNAppleHealthConnectionCard: View {
                     }
                 }
 
-                HStack(spacing: 9) {
+                VStack(spacing: 8) {
                     HCFilledButton(
                         title: hasRequestedAccess ? "REVIEW HEALTH ACCESS" :
                                "CONNECT APPLE HEALTH",
@@ -5084,7 +5082,8 @@ private struct IMUNAppleHealthConnectionCard: View {
                         connect()
                     }
                     if hasRequestedAccess {
-                        HCOutlineButton(title: "Sync now",
+                        HCOutlineButton(title: importer.refreshing ?
+                                        "Importing workouts…" : "Sync Health data",
                                         icon: "arrow.clockwise") {
                             refresh()
                         }
