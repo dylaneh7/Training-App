@@ -1989,7 +1989,7 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
                 self.updatePendingCount()
                 self.syncingQueue = false
                 if !savedIDs.isEmpty || !confirmedUndoIDs.isEmpty {
-                    let runIDs = Set(pendingRuns.map(.id))
+                    let runIDs = Set(pendingRuns.map(\.id))
                     let includesRuns = savedIDs.contains { runIDs.contains($0) }
                     self.notifyWatchCloudProgressChanged(containsRuns: includesRuns)
                     if includesRuns { self.refreshCloudRunHistory(force: true) }
