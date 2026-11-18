@@ -604,6 +604,9 @@ struct PremiumHomeView: View {
         .environmentObject(runImporter)
         .environmentObject(tredictImporter)
         .environmentObject(tredictPlans)
+        // All tabs must share the same Health reader. Sheets already receive it,
+        // but a missing root injection used to crash Settings on launch.
+        .environmentObject(appleHealth)
         .overlay(alignment: .bottom) {
             if coach.isWorkoutActive {
                 IMUNActiveWorkoutMiniBar()
