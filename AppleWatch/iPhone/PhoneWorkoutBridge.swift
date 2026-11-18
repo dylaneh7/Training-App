@@ -52,6 +52,8 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
     @Published private(set) var watchSyncStatus = "Waiting for Watch connection"
     @Published private(set) var cloudWorkoutStatus = "Cloud schedule not published yet"
     @Published private(set) var watchConnectionDetails = "Connection not checked"
+    @Published private(set) var lastBackgroundTransfer =
+        "No background Watch transfer has finished yet"
     @Published private(set) var designCloudStatus = "Appearance stored on iPhone"
     @Published private(set) var watchLastAcknowledgedAt: Date?
     private var sendAfterCalendarRefresh = false
@@ -1588,7 +1590,17 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
                   let next = packet[HCPayload.schedule] as? Data else { return false }
             return queued == next
         }
-        if !hasIdenticalPending { connection.transferUserInfo(packet) }
+        if !hasIdenticalPending {
+            // Schedule is replaceable state, unlike exercise logs and undos.
+            // Clear only older queued schedules before installing the latest
+            // dated plan; otherwise watchOS may time out obsolete transfers.
+            for transfer in connection.outstandingUserInfoTransfers
+                where transfer.userInfo[HCPayload.kind] as? String ==
+                    HCPayload.pushSchedule {
+                transfer.cancel()
+            }
+            connection.transferUserInfo(packet)
+        }
         watchSyncStatus = connection.isWatchAppInstalled
             ? "Workout queued for Watch · awaiting confirmation"
             : "Workout queued · watchOS has not recognized the companion yet"
@@ -2024,19 +2036,28 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
                  didFinish userInfoTransfer: WCSessionUserInfoTransfer,
                  error: Error?) {
         let transferKind = userInfoTransfer.userInfo[HCPayload.kind] as? String
-        if transferKind == HCPayload.eitanSync {
-            // Obsolete queued EITAN packets from older builds may time out.
-            // Their result is not the status of the newer latest-state sync.
-            return
-        }
-        guard transferKind == HCPayload.pushSchedule else { return }
+            ?? "unknown"
         DispatchQueue.main.async {
             if let error {
-                self.watchSyncStatus = "Watch delivery failed: " + error.localizedDescription
+                let label = transferKind == HCPayload.eitanSync
+                    ? "legacy EITAN queued packet (not current EITAN)"
+                    : transferKind
+                self.lastBackgroundTransfer =
+                    "Background " + label + " timed out/failed: " +
+                    error.localizedDescription
             } else {
-                // A completed background transfer is not a loaded-workout
-                // acknowledgment. The Watch separately sends a scheduleReceipt.
-                self.watchSyncStatus = "Workout transferred · awaiting Watch confirmation"
+                self.lastBackgroundTransfer =
+                    "Background " + transferKind + " transfer finished"
+            }
+            guard transferKind == HCPayload.pushSchedule else { return }
+            if let error {
+                self.watchSyncStatus =
+                    "Workout schedule background transfer failed: " +
+                    error.localizedDescription
+            } else {
+                // Delivery is NOT a Watch-loaded confirmation.
+                self.watchSyncStatus =
+                    "Workout schedule transferred · awaiting Watch acknowledgment"
             }
         }
     }

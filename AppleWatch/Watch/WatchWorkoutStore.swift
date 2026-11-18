@@ -69,6 +69,9 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
     @Published private(set) var isRequestingSchedule = false
     @Published private(set) var lastPhoneAcknowledgement: Date?
     private var pendingManualScheduleRequest = false
+    @Published private(set) var lastBackgroundTransfer = "No background Watch transfer result yet"
+    private var lastLiftStateSignature: String?
+    private var lastAutomaticResendAt = Date.distantPast
 
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
@@ -136,7 +139,7 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
             applyContext(WCSession.default.receivedApplicationContext)
             requestCurrentSchedule()
         }
-        Task { [weak self] in
+        Task { @MainActor [weak self] in
             guard let self else { return }
             let available = await cloud.hasSession()
             DispatchQueue.main.async {
@@ -159,7 +162,7 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
             return
         }
         cloudStatus = "Signing in securely…"
-        Task { [weak self] in
+        Task { @MainActor [weak self] in
             guard let self else { return }
             do {
                 try await cloud.signIn(email: cleanEmail, password: password)
@@ -187,7 +190,7 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
         loadingCloudSchedule = true
         let day = Self.today()
         cloudStatus = "Downloading today's strength and running plans…"
-        Task { [weak self] in
+        Task { @MainActor [weak self] in
             guard let self else { return }
             do {
                 // New complete plan (includes no-lift days with scheduled runs).
@@ -254,7 +257,7 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
         isFetchingCloudAppearance = true
         lastCloudAppearanceCheck = Date()
         designCloudStatus = "Checking cloud appearance…"
-        Task { [weak self] in
+        Task { @MainActor [weak self] in
             guard let self else { return }
             do {
                 let value = try await cloud.fetchVisualPreferences()
@@ -287,7 +290,7 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
               !isFetchingCloudSets else { return }
         let requested = workout
         isFetchingCloudSets = true
-        Task { [weak self] in
+        Task { @MainActor [weak self] in
             guard let self else { return }
             do {
                 let undoEntries = try await cloud.fetchWorkoutUndos(for: requested)
@@ -321,7 +324,7 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
         }
         guard !pendingUndo.isEmpty || !pending.isEmpty else { return }
         isUploadingCloudSets = true
-        Task { [weak self] in
+        Task { @MainActor [weak self] in
             guard let self else { return }
             var failed = false
             for undo in pendingUndo {
@@ -624,6 +627,13 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
         guard WCSession.isSupported() else { return }
         let session = WCSession.default
         guard session.activationState == .activated else { return }
+        // The current lift session status is replaceable state. Activation,
+        // reachability and foreground callbacks must not enqueue identical
+        // user-info transfers, each of which can time out independently.
+        let signature = workout.id + "|" + workout.date + "|" +
+            (startedAt.map { String($0.timeIntervalSince1970) } ?? "none") +
+            "|" + (active ? "active" : "inactive")
+        guard signature != lastLiftStateSignature else { return }
         let state = HCWatchLiftSessionStatus(
             workoutID: workout.id,
             workoutDate: workout.date,
@@ -636,7 +646,14 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
             HCPayload.kind: HCPayload.liftSessionStatus,
             HCPayload.data: data
         ]
-        // Background copy is durable; interactive copy updates the iPhone now.
+        // Only the latest status is relevant. Cancel older pending STATUS
+        // packets (never logged sets, runs, workout undo or their receipts).
+        for transfer in session.outstandingUserInfoTransfers
+            where transfer.userInfo[HCPayload.kind] as? String ==
+                HCPayload.liftSessionStatus {
+            transfer.cancel()
+        }
+        lastLiftStateSignature = signature
         session.transferUserInfo(packet)
         if session.isReachable {
             session.sendMessage(packet, replyHandler: { _ in },
@@ -1585,8 +1602,13 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
         DispatchQueue.main.async {
             self.checkPhoneConnection()
             guard session.activationState == .activated, session.isReachable else { return }
-            // Build 28: retry queued sets/runs and request latest dated plan.
-            self.sendPending(forceResend: true)
+            // Reconnection does not justify re-queuing every workout record
+            // repeatedly. Preserve pending events and rate-limit automatic
+            // retries; the manual Sync action can still force delivery.
+            if Date().timeIntervalSince(self.lastAutomaticResendAt) >= 120 {
+                self.lastAutomaticResendAt = Date()
+                self.sendPending(forceResend: true)
+            }
             if self.hasScheduledLift && self.workout.date == Self.today() {
                 self.publishLiftSessionStatus(
                     startedAt: self.liftClock?.startedAt,
@@ -1655,6 +1677,21 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
                 "runSignature": self.runPlan?.syncSignature ?? "",
                 "reason": accepted ? "" : "Watch did not load the same strength and running plans"
             ])
+        }
+    }
+
+    func session(_ session: WCSession,
+                 didFinish userInfoTransfer: WCSessionUserInfoTransfer,
+                 error: Error?) {
+        let kind = userInfoTransfer.userInfo[HCPayload.kind] as? String ?? "unknown"
+        DispatchQueue.main.async {
+            if let error {
+                self.lastBackgroundTransfer =
+                    "Background \(kind) failed: " + error.localizedDescription
+            } else {
+                self.lastBackgroundTransfer =
+                    "Background \(kind) transfer completed (not app acknowledgment)"
+            }
         }
     }
 
