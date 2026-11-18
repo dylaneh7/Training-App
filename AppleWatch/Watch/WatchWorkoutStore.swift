@@ -427,6 +427,50 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
         }
     }
 
+    /// Read durable completed runs directly from the athlete's cloud account.
+    /// Live WatchConnectivity is optional; cached imported runs are preserved.
+    func refreshCloudRunHistory(force: Bool = false) {
+        guard cloudSignedIn, !isFetchingCloudRuns,
+              force || Date().timeIntervalSince(lastCloudRunHistoryCheck) >= 30
+        else { return }
+        isFetchingCloudRuns = true
+        lastCloudRunHistoryCheck = Date()
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                let incoming = try await cloud.fetchNativeRunHistory()
+                self.isFetchingCloudRuns = false
+                var merged = incoming
+                for current in self.runHistory {
+                    let duplicate = merged.contains { other in
+                        other.id == current.id ||
+                        other.id == current.id.replacingOccurrences(
+                            of: "imun-watch:", with: "") ||
+                        (other.date == current.date &&
+                         other.startedAt != nil && current.startedAt != nil &&
+                         abs(other.startedAt!.timeIntervalSince(
+                             current.startedAt!)) < 120)
+                    }
+                    if !duplicate { merged.append(current) }
+                }
+                merged.sort {
+                    if $0.date != $1.date { return $0.date > $1.date }
+                    return ($0.startedAt ?? .distantPast) >
+                           ($1.startedAt ?? .distantPast)
+                }
+                let latest = Array(merged.prefix(20))
+                if latest.map(\.id) != self.runHistory.map(\.id) {
+                    self.runHistory = latest
+                    self.save(latest, name: "run-history.json")
+                }
+            } catch {
+                self.isFetchingCloudRuns = false
+                self.cloudStatus = "Run history retained · cloud error: " +
+                    error.localizedDescription
+            }
+        }
+    }
+
     /// Uploads retain stable UUIDs. The local set log is never removed, and
     /// a failed request simply remains pending for the next sync.
     func uploadPendingCloudSets() {
@@ -2211,6 +2255,53 @@ private actor HCWatchCloudFallback {
         guard let raw = rows.first?["plan"] as? [String: Any] else { return nil }
         return try JSONDecoder().decode(HCWorkout.self,
             from: JSONSerialization.data(withJSONObject: raw))
+    }
+
+    /// Authenticated, owner-scoped completed runs; no raw HealthKit routes.
+    func fetchNativeRunHistory() async throws -> [HCProgressRun] {
+        let session = try await authorized()
+        let response = try await request(
+            path: "/rest/v1/health_coach_native_runs",
+            query: [
+                URLQueryItem(name: "select", value:
+                    "id,workout_date,started_at,ended_at,distance_meters,avg_heart_rate_bpm,splits,source"),
+                URLQueryItem(name: "user_id", value: "eq." + session.userID),
+                URLQueryItem(name: "order", value: "started_at.desc"),
+                URLQueryItem(name: "limit", value: "25")
+            ], bearer: session.access)
+        guard let records = try JSONSerialization.jsonObject(with: response)
+                as? [[String: Any]] else { throw HCWatchCloudError.malformed }
+        let precise = ISO8601DateFormatter()
+        precise.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let standard = ISO8601DateFormatter()
+        return records.compactMap { row -> HCProgressRun? in
+            guard let id = row["id"] as? String,
+                  let date = row["workout_date"] as? String else { return nil }
+            let started = (row["started_at"] as? String).flatMap {
+                precise.date(from: $0) ?? standard.date(from: $0)
+            }
+            let ended = (row["ended_at"] as? String).flatMap {
+                precise.date(from: $0) ?? standard.date(from: $0)
+            }
+            let splits = (row["splits"] as? [[String: Any]] ?? [])
+                .enumerated().map { index, point in
+                    HCRunSplit(
+                        index: (point["index"] as? Int) ?? index + 1,
+                        elapsedSeconds: (point["elapsedSeconds"] as? NSNumber)?.doubleValue ?? 0,
+                        distanceMeters: (point["distanceMeters"] as? NSNumber)?.doubleValue)
+                }
+            var run = HCProgressRun(
+                id: id, date: date, title: "iMun Run",
+                source: row["source"] as? String ?? "iMun",
+                distanceMeters: (row["distance_meters"] as? NSNumber)?.doubleValue,
+                durationSeconds: started != nil && ended != nil
+                    ? max(0, ended!.timeIntervalSince(started!)) : nil,
+                averageBPM: (row["avg_heart_rate_bpm"] as? NSNumber)?.doubleValue,
+                splits: splits)
+            run.startedAt = started
+            run.endedAt = ended
+            return run
+        }
     }
 
     /// Same idempotent owner-scoped run write as the iPhone client. Without
