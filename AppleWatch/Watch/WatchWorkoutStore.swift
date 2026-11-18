@@ -4,6 +4,112 @@ import WatchConnectivity
 import Security
 import WatchKit
 import UserNotifications
+import CoreMotion
+
+/// An experimental wrist-motion cycle detector. It is never authoritative:
+/// iMun only saves the athlete's confirmed rep value. No raw IMU trace is
+/// retained or uploaded. Sampling only runs during an active lifting set.
+private final class IMUNWatchRepMotionAnalyzer {
+    private let manager = CMMotionManager()
+    private var callback: ((Int, Double?) -> Void)?
+    private var active = false
+    private var firstTimestamp: TimeInterval?
+    private var axisStrengths = Array(repeating: 0.0, count: 6)
+    private var dominantAxis = 0
+    private var filteredValue = 0.0
+    private var phase = 0
+    private var phaseStart: TimeInterval?
+    private var lastRepTimestamp: TimeInterval?
+    private var durations: [Double] = []
+    private(set) var repCount = 0
+
+    func start(_ onEstimate: @escaping (Int, Double?) -> Void) -> Bool {
+        stop()
+        guard manager.isDeviceMotionAvailable else { return false }
+        callback = onEstimate
+        active = true
+        firstTimestamp = nil
+        axisStrengths = Array(repeating: 0, count: 6)
+        dominantAxis = 0
+        filteredValue = 0
+        phase = 0
+        phaseStart = nil
+        lastRepTimestamp = nil
+        durations = []
+        repCount = 0
+        manager.deviceMotionUpdateInterval = 1.0 / 25.0
+        manager.startDeviceMotionUpdates(to: .main) { [weak self] motion, _ in
+            guard let self, self.active, let motion else { return }
+            self.consume(motion)
+        }
+        return true
+    }
+
+    func stop() {
+        active = false
+        manager.stopDeviceMotionUpdates()
+        callback = nil
+    }
+
+    private func consume(_ sample: CMDeviceMotion) {
+        let t = sample.timestamp
+        if firstTimestamp == nil { firstTimestamp = t }
+        // Translation and rotation use separately normalized axes.
+        // Wrist movement is not a universal measurement of bar travel.
+        let a = sample.userAcceleration
+        let r = sample.rotationRate
+        let channels = [a.x, a.y, a.z,
+                        r.x * 0.4, r.y * 0.4, r.z * 0.4]
+        guard let began = firstTimestamp else { return }
+        let elapsed = t - began
+        if elapsed < 1.8 {
+            for index in channels.indices {
+                axisStrengths[index] =
+                    0.96 * axisStrengths[index] + 0.04 * abs(channels[index])
+            }
+            if let strongest = axisStrengths.indices.max(by: {
+                axisStrengths[$0] < axisStrengths[$1]
+            }) { dominantAxis = strongest }
+            return
+        }
+        let raw = channels[dominantAxis]
+        filteredValue = 0.7 * filteredValue + 0.3 * raw
+        let threshold = dominantAxis < 3 ? 0.12 : 0.16
+        // Count a full + / - / return movement cycle, not two half-reps.
+        // Reject very rapid wrist flicks and unlikely slow cycles.
+        switch phase {
+        case 0:
+            if filteredValue > threshold {
+                phase = 1
+                phaseStart = t
+            }
+        case 1:
+            if filteredValue < -threshold {
+                phase = 2
+            } else if let start = phaseStart, t - start > 6 {
+                phase = 0
+                phaseStart = nil
+            }
+        default:
+            if filteredValue >= -threshold * 0.2 {
+                defer { phase = 0; phaseStart = nil }
+                guard let start = phaseStart,
+                      t - start >= 0.45 && t - start <= 5.5,
+                      lastRepTimestamp.map({ t - $0 >= 0.65 }) ?? true
+                else { return }
+                if let last = lastRepTimestamp {
+                    durations.append(t - last)
+                    if durations.count > 12 { durations.removeFirst() }
+                }
+                lastRepTimestamp = t
+                repCount += 1
+                let avgTempo = durations.isEmpty ? nil :
+                    durations.reduce(0, +) / Double(durations.count)
+                callback?(repCount, avgTempo)
+            }
+        }
+    }
+}
 
 /// Timestamp-based clocks survive wrist-down, temporary app suspension, and re-launch.
 /// Display timers calculate Date() - start rather than incrementing a foreground counter.
