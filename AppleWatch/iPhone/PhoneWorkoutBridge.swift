@@ -1236,11 +1236,25 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
         // Apple Health exercise workouts and Tredict/Garmin exercise records
         // share one timeline. This is only the exercise history iMun actually
         // imported; missing permissions, samples and detail never become facts.
-        let exerciseRecords = trainingActivities.sorted { $0.date > $1.date }
+        // Apple Health records are only added to the online context when
+        // the athlete explicitly enables Health sharing for this conversation.
+        // Preserve the underlying per-source imports even if iMun's timeline
+        // merged duplicate workouts from Garmin or Tredict.
+        var exerciseByID: [String: HCTrainingActivity] = [:]
+        for entry in trainingActivities where
+            shareRecovery || !entry.id.hasPrefix("healthkit:") {
+            exerciseByID[entry.id] = entry
+        }
+        if shareRecovery {
+            for entry in importedHealthWorkouts {
+                exerciseByID[entry.id] = entry
+            }
+        }
+        let exerciseRecords = exerciseByID.values.sorted { $0.date > $1.date }
         let appleHealthCount = exerciseRecords.filter {
             $0.id.hasPrefix("healthkit:")
         }.count
-        lines.append("Exercise record coverage: \(exerciseRecords.count) distinct imported sessions (\(appleHealthCount) Apple Health workouts); Tredict/Garmin and connected services appear only if synced. Oldest: \(exerciseRecords.last?.date ?? "none"), newest: \(exerciseRecords.first?.date ?? "none"). An empty history does not mean the athlete never exercised.")
+        lines.append("Exercise record coverage: \(exerciseRecords.count) source-attributed imported sessions (\(appleHealthCount) Apple Health workouts shared by consent); Tredict/Garmin and connected services appear only if synced. Oldest: \(exerciseRecords.last?.date ?? "none"), newest: \(exerciseRecords.first?.date ?? "none"). If Apple Health sharing is off, do not claim access to Apple Health exercises. An empty history does not mean the athlete never exercised.")
         let bySport = Dictionary(grouping: exerciseRecords, by: { $0.kind.lowercased() })
         lines.append("Exercise types (complete on-device record counts): " +
             bySport.keys.sorted().map { "\($0)=\(bySport[$0]?.count ?? 0)" }
@@ -1265,7 +1279,7 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
         }
         let selected = matching.isEmpty ? Array(exerciseRecords.prefix(40)) :
             Array(matching.prefix(70))
-        lines.append("Recorded exercise examples: \(selected.count) matching or recent workouts (not the full HealthKit database). These values were read from source data:")
+        lines.append("Recorded exercise examples: \(selected.count) matching or recent imported workouts. A 24k-character request context cannot include every raw exercise record at once; ask by sport, date or year for targeted history. Values below came from actual source data:")
         for activity in selected {
             var items = [activity.date, activity.kind, activity.title,
                          "source " + activity.source]
@@ -1307,11 +1321,12 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
 
         // Include enough actual session history to answer trends and PR queries.
         // Derived running pace uses measured distance and elapsed time only.
+        let permittedRuns = runHistory.filter { shareRecovery || !$0.fromAppleHealth }
         let windows: [(String, Int, Int)] = [
             ("Recent 30 days", 0, 30), ("Previous 30 days", 30, 60)
         ]
         for (label, lower, upper) in windows {
-            let measured = runHistory.filter { run in
+            let measured = permittedRuns.filter { run in
                 guard let day = HCPlanBuilder.startOfDate(run.date) else { return false }
                 let days = Calendar.current.dateComponents([.day], from: day, to: Date()).day ?? 999
                 return days >= lower && days < upper &&
@@ -1338,7 +1353,7 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
             lines.append("Strength set: \(entry.date) \(entry.exercise) " +
                          String(format: "%.1f lb × %d reps", entry.weightLb, entry.reps))
         }
-        for run in runHistory.sorted(by: { $0.date > $1.date }).prefix(40) {
+        for run in permittedRuns.sorted(by: { $0.date > $1.date }).prefix(40) {
             let distance = run.distanceMeters.map {
                 String(format: "%.2f mi", $0 / 1609.344)
             } ?? "distance unavailable"
