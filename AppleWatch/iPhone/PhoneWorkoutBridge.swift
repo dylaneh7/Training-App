@@ -1720,6 +1720,14 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
         context[HCPayload.weightIncrement] = prefs.object(forKey:"hcWeightIncrement") as? Double ?? 5.0
         context[HCPayload.restOverride] = prefs.integer(forKey:"hcRestOverrideSeconds")
         context[HCPayload.watchHaptics] = prefs.object(forKey:"hcWatchHaptics") as? Bool ?? true
+        let motionStamp = prefs.double(forKey: "hcMotionPreferenceTimestamp")
+        if motionStamp > 0 {
+            context["hcMotionPreferenceTimestamp"] = motionStamp
+            context["hcWatchWearSide"] = prefs.string(forKey:"hcWatchWearSide") ?? "unknown"
+            context["hcWhoopWearSide"] = prefs.string(forKey:"hcWhoopWearSide") ?? "off"
+            context["hcWatchMotionRepEstimate"] =
+                prefs.object(forKey:"hcWatchMotionRepEstimate") as? Bool ?? true
+        }
         // Use the EXACT same revision and snapshot as independent EITAN
         // delivery. Workout calendar updates must not supersede EITAN with a
         // newer timestamp attached to older or empty wellness bytes.
