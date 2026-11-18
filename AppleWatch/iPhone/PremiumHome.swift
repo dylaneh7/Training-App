@@ -1388,100 +1388,260 @@ private struct PremiumExerciseCard: View {
 
 // MARK: - Workout builder and set controls
 
+/// Purpose-built iMun workout composition surface. No stock edit-mode list,
+/// delete swipe affordances, or unranked workout substitution sheets.
 private struct PremiumWorkoutEditor: View {
     @EnvironmentObject private var coach: PhoneWorkoutBridge
     @Environment(\.dismiss) private var dismiss
     @State private var library = false
     @State private var workoutName = ""
+    @State private var smartSwapExercise: HCExercise?
+    @State private var pendingRemoval: HCExercise?
+    @State private var actionStatus: String?
+
+    private var plan: HCWorkout? { coach.workout }
+
+    private func completed(_ exercise: HCExercise) -> Bool {
+        guard let plan else { return false }
+        return coach.completedSets(for: plan).contains { $0.exerciseID == exercise.id }
+    }
+
+    private func save(title: String, list: [HCExercise]) {
+        guard let plan else { return }
+        // Stable IDs, reindexed layout. A moved exercise keeps its prescribed
+        // sets and historical source attribution.
+        let ordered = list.enumerated().map { index, old -> HCExercise in
+            var next = HCExercise(
+                id: old.id, name: old.name, originalName: old.originalName,
+                exerciseIndex: index, prescribedSets: old.prescribedSets,
+                repMin: old.repMin, repMax: old.repMax,
+                suggestedWeightLb: old.suggestedWeightLb,
+                restSeconds: old.restSeconds)
+            next.instructions = old.instructions
+            next.movementType = old.movementType
+            return next
+        }
+        coach.saveEditedWorkout(HCWorkout(
+            id: plan.id, date: plan.date, sessionKey: plan.sessionKey,
+            title: title, exercises: ordered, isPreview: false))
+    }
+
+    private func move(_ exercise: HCExercise, by shift: Int) {
+        guard let plan,
+              let index = plan.exercises.firstIndex(where: { $0.id == exercise.id }),
+              plan.exercises.indices.contains(index + shift) else { return }
+        var list = plan.exercises
+        list.swapAt(index, index + shift)
+        save(title: plan.title, list: list)
+    }
+
+    private func remove(_ exercise: HCExercise) {
+        guard let plan else { return }
+        guard !completed(exercise) && coach.phoneSetExerciseID != exercise.id else {
+            actionStatus = "Recorded or active movements cannot be deleted. Undo the current set first."
+            return
+        }
+        save(title: plan.title, list: plan.exercises.filter { $0.id != exercise.id })
+    }
+
+    private func replace(_ original: HCExercise, with item: HCLibraryExercise) {
+        guard let plan, let index = plan.exercises.firstIndex(where: { $0.id == original.id }) else {
+            return
+        }
+        guard !completed(original) && coach.phoneSetExerciseID != original.id else {
+            actionStatus = "This movement already has recorded or active sets. Undo the current sets before swapping."
+            return
+        }
+        let oldRounds = original.isUnilateral ?
+            max(1, original.prescribedSets / 2) : original.prescribedSets
+        let slots = item.isUnilateral ? min(24, oldRounds * 2) : min(12, oldRounds)
+        let probe = HCExercise(id: original.id, name: item.name,
+            originalName: item.name, exerciseIndex: original.exerciseIndex,
+            prescribedSets: slots, repMin: original.repMin,
+            repMax: original.repMax, suggestedWeightLb: nil,
+            restSeconds: original.restSeconds)
+        let suggestion = coach.suggestion(for: probe, on: plan.date)
+        var swapped = HCExercise(id: original.id, name: item.name,
+            originalName: item.name, exerciseIndex: original.exerciseIndex,
+            prescribedSets: slots, repMin: original.repMin, repMax: original.repMax,
+            suggestedWeightLb: suggestion.weightLb, restSeconds: original.restSeconds)
+        swapped.instructions = item.instructions
+        var list = plan.exercises
+        list[index] = swapped
+        save(title: plan.title, list: list)
+    }
+
+    private func add(_ item: HCLibraryExercise) {
+        guard let plan, plan.exercises.count < 35 else { return }
+        let index = plan.exercises.count
+        let slots = item.isUnilateral ? 6 : 3
+        let probe = HCExercise(id: UUID().uuidString, name: item.name,
+            originalName: item.name, exerciseIndex: index,
+            prescribedSets: slots, repMin: 8, repMax: 12,
+            suggestedWeightLb: nil, restSeconds: 120)
+        let suggestion = coach.suggestion(for: probe, on: plan.date)
+        var added = HCExercise(id: probe.id, name: item.name,
+            originalName: item.name, exerciseIndex: index,
+            prescribedSets: slots, repMin: 8, repMax: 12,
+            suggestedWeightLb: suggestion.weightLb, restSeconds: 120)
+        added.instructions = item.instructions
+        save(title: plan.title, list: plan.exercises + [added])
+    }
+
+    private func exerciseCard(_ exercise: HCExercise, position: Int,
+                              total: Int) -> some View {
+        HCCard {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(alignment: .top, spacing: 10) {
+                    Text(String(format: "%02d", position + 1))
+                        .font(HCDesign.metric(19))
+                        .foregroundStyle(HCDesign.electric)
+                        .frame(width: 35, alignment: .leading)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(exercise.name)
+                            .font(.system(size: 15, weight: .bold, design: .rounded))
+                            .foregroundStyle(HCDesign.ink)
+                        Text(exercise.setSummary + "  ·  " +
+                             exercise.repDescription + " reps")
+                            .font(.system(size: 11))
+                            .foregroundStyle(HCDesign.secondary)
+                    }
+                    Spacer()
+                    VStack(spacing: 2) {
+                        Button { move(exercise, by: -1) } label: {
+                            Image(systemName: "chevron.up")
+                                .frame(width: 30, height: 26)
+                        }
+                        .disabled(position == 0)
+                        Button { move(exercise, by: 1) } label: {
+                            Image(systemName: "chevron.down")
+                                .frame(width: 30, height: 26)
+                        }
+                        .disabled(position >= total - 1)
+                    }
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(HCDesign.secondary)
+                    .buttonStyle(.plain)
+                }
+                Rectangle().fill(HCDesign.outline).frame(height: 1)
+                HStack(spacing: 8) {
+                    Button {
+                        smartSwapExercise = exercise
+                    } label: {
+                        Label("SMART SWAP", systemImage: "arrow.triangle.2.circlepath")
+                            .font(.system(size: 11, weight: .bold, design: .rounded))
+                            .padding(.horizontal, 12).padding(.vertical, 10)
+                            .foregroundStyle(HCDesign.canvas)
+                            .background(HCDesign.electric, in: Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    NavigationLink {
+                        StrengthExerciseDetails(exerciseID: exercise.id)
+                    } label: {
+                        Label("EDIT", systemImage: "slider.horizontal.3")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(HCDesign.aqua)
+                            .padding(10)
+                    }
+                    Spacer(minLength: 2)
+                    Button {
+                        pendingRemoval = exercise
+                    } label: {
+                        Image(systemName: "trash")
+                            .font(.system(size: 12))
+                            .foregroundStyle(HCDesign.secondary)
+                            .frame(width: 31, height: 32)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Remove " + exercise.name)
+                }
+            }
+        }
+    }
 
     var body: some View {
         NavigationStack {
-            List {
-                Section {
-                    TextField("Workout name", text: $workoutName)
-                        .font(.headline)
-                    Button("Save workout name") {
-                        guard let p = coach.workout, !workoutName.trimmingCharacters(in: .whitespaces).isEmpty else { return }
-                        save(title: workoutName, list: p.exercises)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("WORKOUT STUDIO")
+                            .font(.system(size: 25, weight: .heavy, design: .rounded))
+                            .foregroundStyle(HCDesign.ink)
+                        Text("Build, rearrange and intelligently substitute movements.")
+                            .font(.system(size: 12))
+                            .foregroundStyle(HCDesign.secondary)
                     }
-                    .foregroundStyle(HCDesign.electric)
-                }
-                Section("Press and drag to reorder; swipe left to remove") {
-                    if let p = coach.workout {
-                        ForEach(p.exercises) { ex in
-                            HStack(spacing: 10) {
-                                Image(systemName: "line.3.horizontal")
-                                    .foregroundStyle(HCDesign.secondary)
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text(ex.name).font(.subheadline.bold())
-                                    Text("\(ex.prescribedSets) × \(ex.repDescription)")
-                                        .font(.caption).foregroundStyle(HCDesign.secondary)
+                    HCCard {
+                        VStack(alignment: .leading, spacing: 10) {
+                            Text("SESSION NAME")
+                                .font(HCDesign.label(10))
+                                .foregroundStyle(HCDesign.secondary)
+                            TextField("Workout name", text: $workoutName)
+                                .font(.system(size: 17, weight: .semibold))
+                                .foregroundStyle(HCDesign.ink)
+                                .tint(HCDesign.electric)
+                            HCFilledButton(title: "SAVE SESSION NAME",
+                                           icon: "checkmark") {
+                                guard let plan,
+                                      !workoutName.trimmingCharacters(in: .whitespaces).isEmpty else {
+                                    return
                                 }
+                                save(title: workoutName, list: plan.exercises)
                             }
-                            .listRowBackground(HCDesign.card)
-                        }
-                        .onMove { source, destination in
-                            var list = p.exercises
-                            list.move(fromOffsets: source, toOffset: destination)
-                            save(title: p.title, list: list)
-                        }
-                        .onDelete { offsets in
-                            var list = p.exercises
-                            list.remove(atOffsets: offsets)
-                            save(title: p.title, list: list)
                         }
                     }
-                }
-                Section {
-                    Button {
+                    if let plan {
+                        HCSectionTitle(title: "Movement sequence",
+                                       detail: "\(plan.exercises.count) movements · \(plan.prescribedSetCount) work sets")
+                        ForEach(Array(plan.exercises.enumerated()), id: \.element.id) { pos, exercise in
+                            exerciseCard(exercise, position: pos,
+                                         total: plan.exercises.count)
+                        }
+                    }
+                    HCFilledButton(title: "ADD MOVEMENT",
+                                   icon: "plus.circle.fill") {
                         library = true
-                    } label: {
-                        Label("Add from exercise library", systemImage: "plus.circle.fill")
-                            .foregroundStyle(HCDesign.electric)
+                    }
+                    if let actionStatus {
+                        Text(actionStatus)
+                            .font(.system(size: 12))
+                            .foregroundStyle(HCDesign.aqua)
                     }
                 }
-                Section {
-                    Text("Individual exercise details provide set-count, rep range, rest duration, movement substitutions and personalized instructions.")
-                        .font(.caption).foregroundStyle(HCDesign.secondary)
-                }
+                .padding(18)
             }
-            .scrollContentBackground(.hidden)
-            .background(HCDesign.canvas)
-            .environment(\.editMode, .constant(.active))
-            .navigationTitle("EDIT WORKOUT")
+            .background(HCDesign.canvas.ignoresSafeArea())
+            .navigationTitle("")
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("Done") { dismiss() }.foregroundStyle(HCDesign.electric)
+                    Button("DONE") { dismiss() }
+                        .foregroundStyle(HCDesign.electric)
                 }
             }
         }
         .preferredColorScheme(.dark)
         .sheet(isPresented: $library) {
-            ExerciseLibraryPicker { item in
-                guard let p = coach.workout, p.exercises.count < 35 else { return }
-                let index = (p.exercises.map(\.exerciseIndex).max() ?? -1) + 1
-                guard index <= 40 else { return }
-                let prototype = HCExercise(id: UUID().uuidString, name: item.name,
-                                           originalName: item.name, exerciseIndex: index,
-                                           prescribedSets: 3, repMin: 8, repMax: 12,
-                                           suggestedWeightLb: nil, restSeconds: 120)
-                let suggested = coach.suggestion(for: prototype, on: p.date)
-                var configured = HCExercise(id: prototype.id, name: prototype.name,
-                                           originalName: prototype.originalName,
-                                           exerciseIndex: index, prescribedSets: 3,
-                                           repMin: 8, repMax: 12,
-                                           suggestedWeightLb: suggested.weightLb, restSeconds: 120)
-                configured.instructions = item.instructions
-                save(title: p.title, list: p.exercises + [configured])
+            ExerciseLibraryPicker { item in add(item) }
+        }
+        .sheet(item: $smartSwapExercise) { original in
+            ExerciseLibraryPicker(replacing: original) { item in
+                replace(original, with: item)
             }
         }
+        .confirmationDialog("REMOVE MOVEMENT?",
+                            isPresented: Binding(get: { pendingRemoval != nil },
+                                                 set: { if !$0 { pendingRemoval = nil } })) {
+            Button("Remove exercise", role: .destructive) {
+                if let pendingRemoval { remove(pendingRemoval) }
+                pendingRemoval = nil
+            }
+            Button("Keep exercise", role: .cancel) {
+                pendingRemoval = nil
+            }
+        } message: {
+            Text("This removes the exercise from the current workout plan.")
+        }
         .onAppear { workoutName = coach.workout?.title ?? "" }
-    }
-
-    private func save(title: String, list: [HCExercise]) {
-        guard let p = coach.workout else { return }
-        coach.saveEditedWorkout(HCWorkout(id: p.id, date: p.date, sessionKey: p.sessionKey,
-                                         title: title, exercises: list, isPreview: false))
     }
 }
 
