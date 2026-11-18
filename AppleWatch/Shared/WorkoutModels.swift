@@ -8,6 +8,143 @@ enum HCWorkingSide: String, Codable, Hashable {
     var title: String { self == .left ? "Left" : "Right" }
 }
 
+/// Physical attachment location, independent of vendor or sensor access.
+/// Stable raw IDs can be saved and sent between devices across app releases.
+enum IMUNWearableLocation: String, CaseIterable, Codable, Hashable, Identifiable {
+    case unassigned
+    case notWorn
+    case leftWrist, rightWrist
+    case leftForearm, rightForearm
+    case leftUpperArm, rightUpperArm
+    case other
+
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .unassigned: "Choose location"
+        case .notWorn: "Not wearing"
+        case .leftWrist: "Left wrist"
+        case .rightWrist: "Right wrist"
+        case .leftForearm: "Left forearm"
+        case .rightForearm: "Right forearm"
+        case .leftUpperArm: "Left upper arm / biceps"
+        case .rightUpperArm: "Right upper arm / biceps"
+        case .other: "Other body position"
+        }
+    }
+    var side: HCWorkingSide? {
+        switch self {
+        case .leftWrist, .leftForearm, .leftUpperArm: .left
+        case .rightWrist, .rightForearm, .rightUpperArm: .right
+        default: nil
+        }
+    }
+    var areaName: String {
+        switch self {
+        case .leftWrist, .rightWrist: "Wrist"
+        case .leftForearm, .rightForearm: "Forearm"
+        case .leftUpperArm, .rightUpperArm: "Upper arm / biceps"
+        default: "Other"
+        }
+    }
+    var isWrist: Bool {
+        self == .leftWrist || self == .rightWrist
+    }
+    /// Unknown and non-arm positions cannot be assigned to a unilateral side.
+    var canAttributeArm: Bool { side != nil }
+
+    static func fromLegacy(_ value: String?, deviceID: String) -> Self {
+        switch value {
+        case "left": .leftWrist
+        case "right": .rightWrist
+        case "other": .other
+        case "off": .notWorn
+        default: deviceID == "whoop" ? .notWorn : .unassigned
+        }
+    }
+    var legacySide: String {
+        if let side { return side.rawValue }
+        return self == .notWorn ? "off" : self == .other ? "other" : "unknown"
+    }
+}
+
+/// Register additional wearables here without another pair of UI pickers.
+/// Device identity and motion capability are separate from physical placement.
+struct IMUNWearableDefinition: Identifiable, Hashable {
+    let id: String
+    let name: String
+    let symbol: String
+    let hasSupportedLiveMotion: Bool
+}
+enum IMUNWearableCatalog {
+    static let devices: [IMUNWearableDefinition] = [
+        .init(id: "appleWatch", name: "Apple Watch",
+              symbol: "applewatch", hasSupportedLiveMotion: true),
+        .init(id: "whoop", name: "WHOOP",
+              symbol: "waveform.path.ecg", hasSupportedLiveMotion: false)
+    ]
+}
+
+/// One canonical placement per device; legacy wrist-side keys migrate without
+/// erasing a user's existing settings or fabricated WHOOP sensor streams.
+enum IMUNWearablePlacementStore {
+    static func key(_ deviceID: String) -> String {
+        "hcWearableLocation." + deviceID
+    }
+    private static func legacyKey(_ deviceID: String) -> String? {
+        switch deviceID {
+        case "appleWatch": "hcWatchWearSide"
+        case "whoop": "hcWhoopWearSide"
+        default: nil
+        }
+    }
+    static func location(_ deviceID: String,
+                         defaults: UserDefaults = .standard) -> IMUNWearableLocation {
+        if let raw = defaults.string(forKey: key(deviceID)),
+           let valid = IMUNWearableLocation(rawValue: raw) {
+            return valid
+        }
+        return IMUNWearableLocation.fromLegacy(
+            legacyKey(deviceID).flatMap { defaults.string(forKey: $0) },
+            deviceID: deviceID)
+    }
+    static func save(_ location: IMUNWearableLocation, for deviceID: String,
+                     defaults: UserDefaults = .standard) {
+        defaults.set(location.rawValue, forKey: key(deviceID))
+        if let legacy = legacyKey(deviceID) {
+            defaults.set(location.legacySide, forKey: legacy)
+        }
+    }
+    static func migrateLegacy(defaults: UserDefaults = .standard) {
+        for device in IMUNWearableCatalog.devices
+        where defaults.object(forKey: key(device.id)) == nil {
+            save(location(device.id, defaults: defaults),
+                 for: device.id, defaults: defaults)
+        }
+    }
+    /// Extensible dictionary payload: future device identifiers need no new
+    /// WatchConnectivity fields. Unknown IDs do not affect existing devices.
+    static func payload(defaults: UserDefaults = .standard) -> [String: String] {
+        Dictionary(uniqueKeysWithValues: IMUNWearableCatalog.devices.map {
+            ($0.id, location($0.id, defaults: defaults).rawValue)
+        })
+    }
+    @discardableResult
+    static func apply(_ payload: [String: String],
+                      defaults: UserDefaults = .standard) -> Bool {
+        var changed = false
+        for (id, raw) in payload {
+            guard IMUNWearableCatalog.devices.contains(where: { $0.id == id }),
+                  let location = IMUNWearableLocation(rawValue: raw) else { continue }
+            if self.location(id, defaults: defaults) != location {
+                save(location, for: id, defaults: defaults)
+                changed = true
+            }
+        }
+        return changed
+    }
+}
+
 /// On-device wrist-motion observations, not measured joint range or form.
 struct HCMotionSetInsight: Codable, Hashable {
     var source: String = "Apple Watch"
@@ -34,6 +171,8 @@ struct HCMotionSetInsight: Codable, Hashable {
     var repActivePhaseSeconds: [Double]? = nil
     var cycleWristRotationDegrees: [Double]? = nil
     var lastWristRotationChangePercent: Double? = nil
+    /// Location at capture time; old records still decode without this field.
+    var wearableLocation: String? = nil
 }
 
 
