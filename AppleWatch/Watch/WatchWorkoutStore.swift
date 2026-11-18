@@ -4,6 +4,7 @@ import WatchConnectivity
 import Security
 import WatchKit
 import UserNotifications
+import CoreMotion
 
 /// Timestamp-based clocks survive wrist-down, temporary app suspension, and re-launch.
 /// Display timers calculate Date() - start rather than incrementing a foreground counter.
@@ -36,6 +37,83 @@ struct HCGuidedSetChoice: Codable, Equatable {
     let setNumber: Int
 }
 
+/// Lightweight on-Watch motion-cycle estimator for active strength sets.
+/// This is explicitly experimental: it detects rhythmic wrist motion, not a
+/// verified completed repetition. It does not write sets or transmit samples.
+private final class HCMotionRepEstimator {
+    private let manager = CMMotionManager()
+    private var smoothedEnergy = 0.0
+    private var aboveThresholdSince: TimeInterval?
+    private var motionPeakSeen = false
+    private var lastRepTime = -Double.infinity
+    private var count = 0
+    private var lastPeriod: Double?
+    var onEstimate: ((Int, Double?) -> Void)?
+
+    var isAvailable: Bool { manager.isDeviceMotionAvailable }
+
+    func start() -> Bool {
+        stop()
+        guard manager.isDeviceMotionAvailable else { return false }
+        count = 0
+        smoothedEnergy = 0
+        aboveThresholdSince = nil
+        motionPeakSeen = false
+        lastRepTime = -Double.infinity
+        lastPeriod = nil
+        manager.deviceMotionUpdateInterval = 1.0 / 25.0
+        // The Watch holds one Core Motion manager for this session. Samples
+        // are processed locally and never added to the HealthKit workout.
+        manager.startDeviceMotionUpdates(to: .main) { [weak self] sample, _ in
+            guard let self, let sample else { return }
+            self.consume(sample)
+        }
+        return true
+    }
+
+    func stop() {
+        if manager.isDeviceMotionActive {
+            manager.stopDeviceMotionUpdates()
+        }
+        aboveThresholdSince = nil
+        motionPeakSeen = false
+    }
+
+    private func consume(_ sample: CMDeviceMotion) {
+        let acceleration = sample.userAcceleration
+        let rotation = sample.rotationRate
+        let linear = sqrt(acceleration.x * acceleration.x +
+                          acceleration.y * acceleration.y +
+                          acceleration.z * acceleration.z)
+        let angular = sqrt(rotation.x * rotation.x +
+                           rotation.y * rotation.y +
+                           rotation.z * rotation.z)
+        let energy = linear + 0.08 * angular
+        smoothedEnergy = 0.7 * smoothedEnergy + 0.3 * energy
+        let now = sample.timestamp
+
+        if smoothedEnergy >= 0.24 {
+            if aboveThresholdSince == nil {
+                aboveThresholdSince = now
+            }
+            if let since = aboveThresholdSince, now - since >= 0.12 {
+                motionPeakSeen = true
+            }
+        } else if smoothedEnergy <= 0.105 {
+            if motionPeakSeen && now - lastRepTime >= 0.65 {
+                if lastRepTime.isFinite {
+                    lastPeriod = now - lastRepTime
+                }
+                lastRepTime = now
+                count += 1
+                onEstimate?(count, lastPeriod)
+            }
+            aboveThresholdSince = nil
+            motionPeakSeen = false
+        }
+    }
+}
+
 final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
     @Published private(set) var workout: HCWorkout = .unscheduled(date: WatchWorkoutStore.today())
     @Published private(set) var scheduleState = "loading"
@@ -63,6 +141,10 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
     @Published private(set) var progressSyncStatus = "Cloud progress not checked"
     @Published private(set) var completedRuns: [HCRunFinished] = []
     @Published private(set) var liftClock: HCTrainingClock?
+    @Published private(set) var motionEstimatedReps = 0
+    @Published private(set) var motionRepStatus = "Motion rep estimates are off"
+    @Published private(set) var motionLastRepPeriod: Double?
+    private let repEstimator = HCMotionRepEstimator()
     @Published private(set) var guidedExerciseID: String?
     @Published private(set) var selectedGuidedSet: HCGuidedSetChoice?
     @Published private(set) var queuedNextGuidedSet: HCGuidedSetChoice?
@@ -137,6 +219,11 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
 
     override init() {
         super.init()
+        repEstimator.onEstimate = { [weak self] reps, secondsPerRep in
+            self?.motionEstimatedReps = reps
+            self?.motionLastRepPeriod = secondsPerRep
+            self?.motionRepStatus = "Wrist motion estimate · verify manually"
+        }
         if UserDefaults.standard.bool(forKey: "hcWatchRestNotifications") {
             restNotificationStatus =
                 "Background rest alerts enabled; delivery follows Watch notification settings"
@@ -883,6 +970,41 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
         if session.isReachable {
             session.sendMessage(packet, replyHandler: { _ in },
                                 errorHandler: { _ in })
+        }
+    }
+
+    // MARK: - Optional on-device motion rep estimates
+
+    private var motionRepEnabled: Bool {
+        UserDefaults.standard.bool(forKey: "hcWatchMotionRepEstimate")
+    }
+
+    private func beginRepEstimate() {
+        motionEstimatedReps = 0
+        motionLastRepPeriod = nil
+        guard motionRepEnabled else {
+            motionRepStatus = "Motion rep estimates are off"
+            repEstimator.stop()
+            return
+        }
+        motionRepStatus = repEstimator.start()
+            ? "Listening for rhythmic wrist movements…"
+            : "Motion data not available on this Watch"
+    }
+
+    private func endRepEstimate() {
+        repEstimator.stop()
+    }
+
+    /// Called when the Watch Settings toggle changes mid-workout.
+    func refreshMotionRepPreference() {
+        if motionRepEnabled, liftClock?.setStartedAt != nil {
+            beginRepEstimate()
+        } else {
+            endRepEstimate()
+            motionRepStatus = motionRepEnabled
+                ? "Starts with your next active set"
+                : "Motion rep estimates are off"
         }
     }
 
