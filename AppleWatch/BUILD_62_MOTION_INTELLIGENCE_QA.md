@@ -29,7 +29,7 @@ Gymatic publicly advertises exercise recognition, rep counting, auto work/rest t
 | Apple Watch HR and calories | Existing HealthKit workout session | Trust HealthKit's actual measurements, don't invent set-level values |
 | Guided/freeform workouts | Guided session exists | Freeform live motion classification needs separate development |
 
-WHOOP published integration/export documentation: https://www.whoop.com/us/en/thelocker/access-your-whoop-data-with-new-integrations-export-options/
+WHOOP published integration/export documentation: https://www.whoop.com/us/en/thelocker/access-your-whoop-data-with-new-integrations-data-export-options/
 WHOOP API: https://developer.whoop.com/api/
 
 ## QA before merge
