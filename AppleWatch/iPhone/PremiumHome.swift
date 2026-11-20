@@ -680,7 +680,8 @@ struct PremiumHomeView: View {
             NavigationStack { PremiumProgressPage() }
                 .tabItem { Label("Progress", systemImage: "chart.xyaxis.line") }
                 .tag("progress")
-            NavigationStack { PremiumRecoveryPage(appleHealth: appleHealth) }
+            NavigationStack { PremiumRecoveryPage(appleHealth: appleHealth,
+                                                  openCoach: presentIsaiah) }
                 .tabItem { Label("Health", systemImage: "heart.text.square.fill") }
                 .tag("health")
             NavigationStack { PremiumSettingsPage(appleHealth: appleHealth) }
@@ -2947,9 +2948,6 @@ private struct IMUNMotionWorkoutDetail: View {
                             .padding(.vertical, 10)
                         }
                         .buttonStyle(.plain)
-                        Text("Opening IsAIah prepares a summary; it is sent only when you submit a message.")
-                            .font(.system(size: 10))
-                            .foregroundStyle(HCDesign.secondary)
                     }
                 }
                 HCSectionTitle(title: "Exercises and rep analysis",
@@ -4179,6 +4177,14 @@ private struct IMUNWearableIntelligenceCard: View {
     @Binding var primary: String
     @State private var report = IMUNWearableIntelligence.analyze([], primary: "Auto")
     @State private var details = false
+    @State private var coverage: [CoverageRow] = []
+
+    private struct CoverageRow: Identifiable {
+        let source: String
+        let signals: Int
+        let days: Int
+        var id: String { source }
+    }
 
     private var sources: [String] {
         Array(Set(["WHOOP", "Apple Watch", "Garmin", "Chargerless", primary]
@@ -4188,6 +4194,15 @@ private struct IMUNWearableIntelligenceCard: View {
     private func update() {
         report = IMUNWearableIntelligence.analyze(
             health.heartRateObservations, primary: primary)
+        let all = Dictionary(grouping: health.metricHistory, by: \.source)
+        coverage = all.map { source, rows in
+            CoverageRow(source: source,
+                        signals: Set(rows.map(\.name)).count,
+                        days: Set(rows.map(\.date)).count)
+        }.sorted { lhs, rhs in
+            lhs.signals == rhs.signals ? lhs.source < rhs.source :
+                lhs.signals > rhs.signals
+        }
     }
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -4228,6 +4243,11 @@ private struct IMUNWearableIntelligenceCard: View {
                 .font(.system(size: 13, weight: .medium))
                 .foregroundStyle(HCDesign.ink)
                 .fixedSize(horizontal: false, vertical: true)
+            if !coverage.isEmpty {
+                Text("\(coverage.reduce(0) { $0 + $1.signals }) source-specific measured signals across \(coverage.count) publishers")
+                    .font(.system(size: 11))
+                    .foregroundStyle(HCDesign.secondary)
+            }
             HStack(spacing: 20) {
                 VStack(alignment: .leading, spacing: 3) {
                     Text("\(report.sources.count)").font(HCDesign.metric(23))
@@ -4243,6 +4263,25 @@ private struct IMUNWearableIntelligenceCard: View {
             if !report.sources.isEmpty {
                 DisclosureGroup(isExpanded: $details) {
                     VStack(alignment: .leading, spacing: 12) {
+                        if !coverage.isEmpty {
+                            Text("HEALTH PROFILE COVERAGE")
+                                .font(HCDesign.label(9))
+                                .foregroundStyle(HCDesign.aqua)
+                            ForEach(coverage.prefix(8)) { row in
+                                HStack(alignment: .firstTextBaseline) {
+                                    Text(row.source)
+                                        .font(.system(size: 12, weight: .medium))
+                                    Spacer()
+                                    Text("\(row.signals) signals · \(row.days) days")
+                                        .font(HCDesign.label(10))
+                                        .foregroundStyle(HCDesign.secondary)
+                                }
+                            }
+                            Divider().overlay(HCDesign.outline)
+                        }
+                        Text("ALIGNED HEART RATE SOURCES")
+                            .font(HCDesign.label(9))
+                            .foregroundStyle(HCDesign.aqua)
                         ForEach(report.sources) { item in
                             HStack(alignment: .top) {
                                 VStack(alignment: .leading, spacing: 3) {
@@ -4273,6 +4312,9 @@ private struct IMUNWearableIntelligenceCard: View {
                                     .monospacedDigit()
                             }
                         }
+                        Text("Time-matched agreement is not a calibrated accuracy ranking. Missing data and unlike HRV methods are never blended.")
+                            .font(.system(size: 10))
+                            .foregroundStyle(HCDesign.secondary)
                     }
                     .padding(.top, 10)
                 } label: {
@@ -4282,9 +4324,7 @@ private struct IMUNWearableIntelligenceCard: View {
                 }
                 .tint(HCDesign.electric)
             }
-            Text("Agreement ≠ accuracy. Aligned samples are compared within 30 seconds over the past 48 hours. The selected primary guides EITAN; other sources remain available for comparison. Data stays on-device until you choose to share with IsAIah.")
-                .font(.system(size: 10))
-                .foregroundStyle(HCDesign.secondary)
+
         }
         .padding(16)
         .background(HCDesign.card,
@@ -4295,6 +4335,9 @@ private struct IMUNWearableIntelligenceCard: View {
         .onReceive(health.$heartRateObservations) { _ in
             DispatchQueue.main.async { update() }
         }
+        .onReceive(health.$metricHistory) { _ in
+            DispatchQueue.main.async { update() }
+        }
         .onChange(of: primary) { _, _ in update() }
     }
 }
@@ -4302,6 +4345,7 @@ private struct IMUNWearableIntelligenceCard: View {
 private struct PremiumRecoveryPage: View {
     @EnvironmentObject private var coach: PhoneWorkoutBridge
     @ObservedObject var appleHealth: HCAppleHealthReader
+    let openCoach: () -> Void
     @State private var showHistory = false
     @State private var showRawReadings = false
     @AppStorage("hcSelectedHealthCategory") private var selectedHealthCategory = "Overview"
@@ -4611,6 +4655,19 @@ private struct PremiumRecoveryPage: View {
 
                 IMUNWearableIntelligenceCard(health: appleHealth,
                                             primary: $preferredSource)
+                Button(action: openCoach) {
+                    HStack(spacing: 10) {
+                        Image(systemName: "sparkles")
+                        Text("Review your health profile with IsAIah")
+                        Spacer(minLength: 8)
+                        Image(systemName: "arrow.up.right")
+                    }
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(HCDesign.electric)
+                    .padding(.horizontal, 4)
+                }
+                .buttonStyle(.plain)
+                .accessibilityHint("Opens IsAIah. Health information is shared only with permission when you send a message.")
                 HCSectionTitle(title: "Measurements",
                                detail: selectedHealthCategory == "Overview" ?
                                     "At a glance" : selectedHealthCategory)
