@@ -2920,7 +2920,7 @@ private struct IMUNMotionWorkoutDetail: View {
                 HCCard {
                     VStack(alignment: .leading, spacing: 12) {
                         ForEach(Array(IMUNMotionSessionReview.observations(sets).enumerated()),
-                                id: .offset) { entry in
+                                id: \.offset) { entry in
                             HStack(alignment: .top, spacing: 10) {
                                 Image(systemName: "waveform.path")
                                     .font(.system(size: 11))
@@ -6293,7 +6293,7 @@ private struct HCEitanPrimaryWearableSelector: View {
                 .foregroundStyle(HCDesign.secondary)
             Picker("Primary wearable", selection: $primaryWearable) {
                 Text("Automatic").tag("Auto")
-                ForEach(choices, id: .self) { source in
+                ForEach(choices, id: \.self) { source in
                     Text(source).tag(source)
                 }
             }
