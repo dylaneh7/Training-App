@@ -117,7 +117,7 @@ private struct IMUNTodayPage: View {
     let openCoach: () -> Void
     @AppStorage("hcSelectedTab") private var selectedTab = "today"
     @AppStorage("hcTrainingActivity") private var activity = "weightlifting"
-    @AppStorage("hcPreferredHealthSource") private var preferredSource = "Auto"
+    @AppStorage("hcEitanPrimaryWearable") private var preferredSource = "Auto"
 
     private var today: String { HCPlanBuilder.dateString(Date()) }
     private var lift: HCWorkout? {
@@ -4049,6 +4049,132 @@ private struct HCHealthCategoryGroup: Identifiable {
     var id: String { name }
 }
 
+
+private struct IMUNWearableIntelligenceCard: View {
+    @ObservedObject var health: HCAppleHealthReader
+    @Binding var primary: String
+    @State private var report = IMUNWearableIntelligence.analyze([], primary: "Auto")
+    @State private var details = false
+
+    private var sources: [String] {
+        Array(Set(["WHOOP", "Apple Watch", "Garmin", "Chargerless", primary]
+            .filter { $0 != "Auto" } +
+            health.metrics.map { IMUNDataProvenance.provider($0.source) })).sorted()
+    }
+    private func update() {
+        report = IMUNWearableIntelligence.analyze(
+            health.heartRateObservations, primary: primary)
+    }
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("IMUN  /  SENSOR INTELLIGENCE")
+                        .font(HCDesign.label(9))
+                        .tracking(1.4)
+                        .foregroundStyle(HCDesign.aqua)
+                    Text("Wearable intelligence")
+                        .font(HCDesign.display(21))
+                        .foregroundStyle(HCDesign.ink)
+                    Text("The evidence behind every measurement.")
+                        .font(.system(size: 12))
+                        .foregroundStyle(HCDesign.secondary)
+                }
+                Spacer()
+                Image(systemName: "waveform.path.ecg.rectangle")
+                    .font(.system(size: 23, weight: .light))
+                    .foregroundStyle(HCDesign.electric)
+            }
+            HStack {
+                Text("PRIMARY WEARABLE")
+                    .font(HCDesign.label(10))
+                    .foregroundStyle(HCDesign.secondary)
+                Spacer()
+                Picker("Primary wearable", selection: $primary) {
+                    Text("Automatic").tag("Auto")
+                    ForEach(sources, id: \.self) { name in
+                        Text(name).tag(name)
+                    }
+                }
+                .pickerStyle(.menu)
+                .tint(HCDesign.electric)
+            }
+            Divider().overlay(HCDesign.outline)
+            Text(report.summary)
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(HCDesign.ink)
+                .fixedSize(horizontal: false, vertical: true)
+            HStack(spacing: 20) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("\(report.sources.count)").font(HCDesign.metric(23))
+                    Text("Sources").font(HCDesign.label(10))
+                }
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("\(report.alignedWindows)").font(HCDesign.metric(23))
+                    Text("Aligned windows").font(HCDesign.label(10))
+                }
+                Spacer()
+            }
+            .foregroundStyle(HCDesign.ink)
+            if !report.sources.isEmpty {
+                DisclosureGroup(isExpanded: $details) {
+                    VStack(alignment: .leading, spacing: 12) {
+                        ForEach(report.sources) { item in
+                            HStack(alignment: .top) {
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text(item.source).font(.system(size: 12, weight: .semibold))
+                                    Text("\(item.uniqueMinutes) sampled minutes · \(item.comparedSamples) paired" +
+                                         (item.unusualJumps > 0 ? " · \(item.unusualJumps) rapid changes" : ""))
+                                        .font(.system(size: 10))
+                                        .foregroundStyle(HCDesign.secondary)
+                                }
+                                Spacer(minLength: 8)
+                                Text("\(item.sampleCount) samples")
+                                    .font(HCDesign.label(10))
+                                    .foregroundStyle(HCDesign.secondary)
+                            }
+                        }
+                        ForEach(report.agreements) { item in
+                            HStack {
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text(item.first + " / " + item.second)
+                                        .font(.system(size: 12, weight: .semibold))
+                                    Text("\(item.pairs) windows · \(Int(item.nearAgreementPercent.rounded()))% within 5 bpm")
+                                        .font(.system(size: 10))
+                                        .foregroundStyle(HCDesign.secondary)
+                                }
+                                Spacer(minLength: 8)
+                                Text(String(format: "%.1f bpm", item.medianDifferenceBPM))
+                                    .font(HCDesign.metric(15))
+                                    .monospacedDigit()
+                            }
+                        }
+                    }
+                    .padding(.top, 10)
+                } label: {
+                    Text("Review sensor agreement")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(HCDesign.electric)
+                }
+                .tint(HCDesign.electric)
+            }
+            Text("Agreement ≠ accuracy. Aligned samples are compared within 30 seconds over the past 48 hours. The selected primary guides EITAN; other sources remain available for comparison. Data stays on-device until you choose to share with IsAIah.")
+                .font(.system(size: 10))
+                .foregroundStyle(HCDesign.secondary)
+        }
+        .padding(16)
+        .background(HCDesign.card,
+                    in: RoundedRectangle(cornerRadius: 17, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 17, style: .continuous)
+                    .strokeBorder(HCDesign.outline, lineWidth: 1))
+        .onAppear(perform: update)
+        .onReceive(health.$heartRateObservations) { _ in
+            DispatchQueue.main.async { update() }
+        }
+        .onChange(of: primary) { _, _ in update() }
+    }
+}
+
 private struct PremiumRecoveryPage: View {
     @EnvironmentObject private var coach: PhoneWorkoutBridge
     @ObservedObject var appleHealth: HCAppleHealthReader
@@ -4056,7 +4182,7 @@ private struct PremiumRecoveryPage: View {
     @State private var showRawReadings = false
     @AppStorage("hcSelectedHealthCategory") private var selectedHealthCategory = "Overview"
     @AppStorage("hcSelectedHealthMetric") private var selectedHealthMetric = ""
-    @AppStorage("hcPreferredHealthSource") private var preferredSource = "Auto"
+    @AppStorage("hcEitanPrimaryWearable") private var preferredSource = "Auto"
     @State private var metricSearch = ""
     @State private var expandedTrends: Set<String> = []
     @State private var expandedHealthGroups: Set<String> = ["Sleep", "Heart & Vitals"]
@@ -4303,12 +4429,12 @@ private struct PremiumRecoveryPage: View {
                             .foregroundStyle(HCDesign.secondary)
                     }
                     .padding(.bottom, 8)
-                    Text("Your health, clearly.")
-                        .font(.system(size: 33, weight: .semibold, design: .default))
-                        .tracking(-1.1)
+                    Text("Health.")
+                        .font(HCDesign.display(31))
+                        .tracking(-0.8)
                         .foregroundStyle(HCDesign.ink)
                         .fixedSize(horizontal: false, vertical: true)
-                    Text("One view of your measurements. Every source keeps its own data and baseline.")
+                    Text("Your measurements, their sources, and the patterns that matter.")
                         .font(.system(size: 14))
                         .foregroundStyle(HCDesign.secondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -4331,25 +4457,6 @@ private struct PremiumRecoveryPage: View {
                                         title: "With baselines")
                 }
 
-                HStack(spacing: 8) {
-                    Text("PREFERRED SOURCE")
-                        .font(HCDesign.label(9))
-                        .foregroundStyle(HCDesign.secondary)
-                    Spacer(minLength: 8)
-                    Picker("Health source", selection: $preferredSource) {
-                        Text("Automatic").tag("Auto")
-                        ForEach(Array(Set(allFamilies.flatMap { family in
-                            family.readings.map {
-                                HCMetricFamily.sourceName($0.source)
-                            }
-                        })).sorted(), id: \.self) { source in
-                            Text(source).tag(source)
-                        }
-                    }
-                    .pickerStyle(.menu)
-                    .tint(HCDesign.electric)
-                    .accessibilityLabel("Preferred Health reading source")
-                }
                 HCSectionTitle(title: "At a glance", detail: "Latest available readings")
                 if appleHealth.loading && allFamilies.isEmpty {
                     IMUNLoadingPlaceholder(lines: 4, height: 170)
@@ -4378,6 +4485,8 @@ private struct PremiumRecoveryPage: View {
                     .padding(.vertical, 4)
                 }
 
+                IMUNWearableIntelligenceCard(health: appleHealth,
+                                            primary: $preferredSource)
                 HCSectionTitle(title: "Measurements",
                                detail: selectedHealthCategory == "Overview" ?
                                     "At a glance" : selectedHealthCategory)
@@ -5866,7 +5975,7 @@ private struct PremiumCoachConversation: View {
         }.joined(separator: "; ")
         let primary = UserDefaults.standard.string(forKey: "hcEitanPrimaryWearable") ?? "Auto"
         return "\nPRIMARY WEARABLE FOR EITAN: " + primary +
-            ". Use only this wearable for physiological trends when selected; do not substitute Apple Watch HRV for WHOOP or historical Garmin/Tredict recovery. WHOOP HRV is unavailable through Apple Health unless a direct WHOOP API integration is authorized. " +
+            ". The primary wearable controls EITAN baselines. IsAIah should compare all user-shared wearable sources, keeping methods and source identities distinct; never silently substitute missing primary data or merge HRV methods. " +
             "\nEITAN observational body-wellness score: " +
             (snapshot.value.map(String.init) ?? "insufficient data") +
             "/100. Consecutive lower-score days: \(snapshot.consecutiveLowDays). " +
@@ -5959,7 +6068,7 @@ private struct PremiumCoachConversation: View {
                             selectedMetric: selectedHealthMetric,
                             question: questionText,
                             primaryWearable: UserDefaults.standard.string(
-                                forKey: "hcIsaiahRecoveryPriority") ?? "WHOOP") +
+                                forKey: "hcEitanPrimaryWearable") ?? "Auto") +
                          eitanSharedCoachContext) : "",
                     attachments: uploads)
                 await MainActor.run {
@@ -5987,7 +6096,14 @@ private struct PremiumCoachConversation: View {
 /// Explicit, strictly attributed physiological source for EITAN and the
 /// opt-in IsAIah context. Tredict remains available for training history.
 private struct HCEitanPrimaryWearableSelector: View {
+    @EnvironmentObject private var appleHealth: HCAppleHealthReader
     @Binding var primaryWearable: String
+
+    private var choices: [String] {
+        Array(Set(["WHOOP", "Apple Watch", "Garmin", "Chargerless", primaryWearable]
+            .filter { $0 != "Auto" } +
+            appleHealth.metrics.map { IMUNDataProvenance.provider($0.source) })).sorted()
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 7) {
@@ -5996,13 +6112,13 @@ private struct HCEitanPrimaryWearableSelector: View {
                 .foregroundStyle(HCDesign.secondary)
             Picker("Primary wearable", selection: $primaryWearable) {
                 Text("Automatic").tag("Auto")
-                Text("WHOOP").tag("WHOOP")
-                Text("Apple Watch").tag("Apple Watch")
-                Text("Garmin").tag("Garmin")
+                ForEach(choices, id: .self) { source in
+                    Text(source).tag(source)
+                }
             }
             .pickerStyle(.menu)
             .tint(HCDesign.electric)
-            Text("EITAN and IsAIah prioritize this wearable's HRV, resting heart rate, sleep and physiological trends. No fallback to another device's readings when a primary is selected.")
+            Text("Primary controls EITAN's physiological baseline. IsAIah can compare all authorized sources with separate baselines when sharing is enabled. No silent EITAN fallback.")
                 .font(.system(size: 11))
                 .foregroundStyle(HCDesign.secondary)
             if primaryWearable == "WHOOP" {
