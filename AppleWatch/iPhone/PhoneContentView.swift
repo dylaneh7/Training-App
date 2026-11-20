@@ -1234,6 +1234,39 @@ struct IMUNWearableIntelligenceSnapshot {
     let summary: String
 
     var alignedWindows: Int { agreements.reduce(0) { $0 + $1.pairs } }
+
+    /// A recommendation about corroboration, never a claim of accuracy.
+    /// At least three publishers and substantial matched evidence are needed
+    /// to avoid picking a winner from an unresolvable two-device disagreement.
+    var sourceGuidance: String {
+        guard sources.count >= 3, agreements.count >= 2 else {
+            return "Keep your chosen primary for continuity. With fewer than three well-aligned sources, iMun cannot fairly recommend which sensor is closer to the truth."
+        }
+        var candidates: [IMUNHeartRateSourceReport] = []
+        for source in sources {
+            let peers = agreements.filter {
+                $0.first == source.source || $0.second == source.source
+            }
+            guard peers.count >= 2,
+                  source.comparedSamples >= 12,
+                  source.pairedMedianDifferenceBPM != nil else { continue }
+            candidates.append(source)
+        }
+        candidates.sort { lhs, rhs in
+            let a = lhs.pairedMedianDifferenceBPM ?? .infinity
+            let b = rhs.pairedMedianDifferenceBPM ?? .infinity
+            return a == b ? lhs.comparedSamples > rhs.comparedSamples : a < b
+        }
+        guard candidates.count >= 2,
+              let leading = candidates[0].pairedMedianDifferenceBPM,
+              let next = candidates[1].pairedMedianDifferenceBPM,
+              next - leading >= 2 else {
+            return "No clear cross-source leader. Prefer consistent wear and stronger sample coverage; a validated chest-strap reference would help assess actual accuracy."
+        }
+        return candidates[0].source +
+            " has the closest agreement with the other available publishers in this 48-hour sample. It is a candidate to review, not a proven more accurate sensor."
+    }
+
     var coachingContext: String {
         let matches = agreements.prefix(8).map { item in
             String(format: "%@ vs %@: %d time-matched readings, median absolute difference %.1f bpm, %.0f%% within 5 bpm",
@@ -1242,6 +1275,7 @@ struct IMUNWearableIntelligenceSnapshot {
         }.joined(separator: "; ")
         return "WEARABLE SOURCE AGREEMENT (on-device, latest 48 hours): " +
             "Preferred wearable: " + primary + ". " + summary + " " +
+            "Source guidance: " + sourceGuidance + " " +
             (matches.isEmpty ? "No sufficiently aligned cross-source readings." : matches) +
             ". Source agreement, sampling frequency, and rapid changes are NOT accuracy validation. " +
             "Do not rank devices by measured accuracy without a calibrated reference. " +
