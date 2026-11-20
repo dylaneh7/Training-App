@@ -1191,6 +1191,175 @@ struct HCHealthTrendSample: Identifiable {
     var id: String { name + ":" + source + ":" + date }
 }
 
+/// Timestamp-preserving heart-rate samples. Only authorized, already-imported
+/// HealthKit readings are used. Sources are publishers, not a guarantee of
+/// physical sensor identity or clinical accuracy.
+struct IMUNHeartRateObservation: Identifiable {
+    let id: UUID
+    let source: String
+    let bundleID: String
+    let start: Date
+    let end: Date
+    let bpm: Double
+
+    var midpoint: Date {
+        start.addingTimeInterval(end.timeIntervalSince(start) / 2)
+    }
+    var duration: TimeInterval { end.timeIntervalSince(start) }
+}
+
+struct IMUNHeartRateAgreement: Identifiable {
+    let first: String
+    let second: String
+    let pairs: Int
+    let medianDifferenceBPM: Double
+    let nearAgreementPercent: Double
+    var id: String { first + "|" + second }
+}
+
+struct IMUNHeartRateSourceReport: Identifiable {
+    let source: String
+    let sampleCount: Int
+    let uniqueMinutes: Int
+    let comparedSamples: Int
+    let unusualJumps: Int
+    let pairedMedianDifferenceBPM: Double?
+    var id: String { source }
+}
+
+struct IMUNWearableIntelligenceSnapshot {
+    let primary: String
+    let sources: [IMUNHeartRateSourceReport]
+    let agreements: [IMUNHeartRateAgreement]
+    let summary: String
+
+    var alignedWindows: Int { agreements.reduce(0) { $0 + $1.pairs } }
+    var coachingContext: String {
+        let matches = agreements.prefix(8).map { item in
+            String(format: "%@ vs %@: %d time-matched readings, median absolute difference %.1f bpm, %.0f%% within 5 bpm",
+                   item.first, item.second, item.pairs,
+                   item.medianDifferenceBPM, item.nearAgreementPercent)
+        }.joined(separator: "; ")
+        return "WEARABLE SOURCE AGREEMENT (on-device, latest 48 hours): " +
+            "Preferred wearable: " + primary + ". " + summary + " " +
+            (matches.isEmpty ? "No sufficiently aligned cross-source readings." : matches) +
+            ". Source agreement, sampling frequency, and rapid changes are NOT accuracy validation. " +
+            "Do not rank devices by measured accuracy without a calibrated reference. " +
+            "Do not merge HRV methods or duplicate activity from multiple publishers."
+    }
+}
+
+/// Evidence engine: same-time comparisons, not an LLM guessing sensor accuracy.
+/// Cap each comparison to one-to-one matches within 30 seconds and short
+/// sampling intervals. Never average away disagreement or substitute missing data.
+enum IMUNWearableIntelligence {
+    static func analyze(_ observations: [IMUNHeartRateObservation],
+                        primary: String,
+                        asOf date: Date = Date()) -> IMUNWearableIntelligenceSnapshot {
+        let since = date.addingTimeInterval(-48 * 3600)
+        let valid = observations.filter {
+            $0.end >= since && $0.start <= date &&
+            $0.bpm.isFinite && (30...240).contains($0.bpm) &&
+            $0.duration >= 0 && $0.duration <= 120
+        }
+        let groups = Dictionary(grouping: valid, by: \.source)
+        let names = groups.keys.sorted()
+        var compared: [String: Int] = [:]
+        var deviations: [String: [Double]] = [:]
+        var agreements: [IMUNHeartRateAgreement] = []
+
+        func median(_ input: [Double]) -> Double? {
+            let values = input.sorted()
+            guard !values.isEmpty else { return nil }
+            let i = values.count / 2
+            return values.count.isMultiple(of: 2)
+                ? (values[i - 1] + values[i]) / 2 : values[i]
+        }
+
+        if names.count > 1 {
+            for firstIndex in 0..<(names.count - 1) {
+                for secondIndex in (firstIndex + 1)..<names.count {
+                    let a = (groups[names[firstIndex]] ?? [])
+                        .sorted { $0.midpoint < $1.midpoint }
+                    let b = (groups[names[secondIndex]] ?? [])
+                        .sorted { $0.midpoint < $1.midpoint }
+                    var i = 0
+                    var j = 0
+                    var differences: [Double] = []
+                    while i < a.count && j < b.count {
+                        let gap = a[i].midpoint.timeIntervalSince(b[j].midpoint)
+                        if abs(gap) <= 30 {
+                            let diff = abs(a[i].bpm - b[j].bpm)
+                            differences.append(diff)
+                            deviations[names[firstIndex], default: []].append(diff)
+                            deviations[names[secondIndex], default: []].append(diff)
+                            compared[names[firstIndex], default: 0] += 1
+                            compared[names[secondIndex], default: 0] += 1
+                            i += 1
+                            j += 1
+                        } else if gap < 0 {
+                            i += 1
+                        } else {
+                            j += 1
+                        }
+                    }
+                    if differences.count >= 5, let center = median(differences) {
+                        agreements.append(IMUNHeartRateAgreement(
+                            first: names[firstIndex], second: names[secondIndex],
+                            pairs: differences.count, medianDifferenceBPM: center,
+                            nearAgreementPercent: 100 * Double(differences.filter {
+                                $0 <= 5
+                            }.count) / Double(differences.count)))
+                    }
+                }
+            }
+        }
+
+        let reports = names.map { name -> IMUNHeartRateSourceReport in
+            let samples = (groups[name] ?? []).sorted { $0.midpoint < $1.midpoint }
+            var jumps = 0
+            if samples.count >= 2 {
+                for i in 1..<samples.count {
+                    let gap = samples[i].midpoint.timeIntervalSince(
+                        samples[i - 1].midpoint)
+                    if gap > 0 && gap <= 15 &&
+                        abs(samples[i].bpm - samples[i - 1].bpm) > 40 {
+                        jumps += 1
+                    }
+                }
+            }
+            let minutes = Set(samples.map {
+                Int($0.midpoint.timeIntervalSince1970 / 60)
+            }).count
+            return IMUNHeartRateSourceReport(
+                source: name, sampleCount: samples.count,
+                uniqueMinutes: minutes,
+                comparedSamples: compared[name, default: 0],
+                unusualJumps: jumps,
+                pairedMedianDifferenceBPM: median(deviations[name] ?? []))
+        }.sorted { $0.sampleCount == $1.sampleCount ?
+            $0.source < $1.source : $0.sampleCount > $1.sampleCount }
+
+        let summary: String
+        if reports.isEmpty {
+            summary = "No recent, comparable heart-rate recordings are available."
+        } else if reports.count == 1 {
+            summary = "One heart-rate source is available. Additional sources are needed for simultaneous comparison."
+        } else if let bestSupported = agreements.max(by: { $0.pairs < $1.pairs }) {
+            summary = String(format:
+                "%d aligned windows across %@ and %@; median disagreement %.1f bpm. This measures agreement, not which wearable is more accurate.",
+                bestSupported.pairs, bestSupported.first,
+                bestSupported.second, bestSupported.medianDifferenceBPM)
+        } else {
+            summary = "Multiple sources are connected, but there are not yet five short-interval recordings aligned closely enough to compare."
+        }
+        return IMUNWearableIntelligenceSnapshot(
+            primary: primary, sources: reports,
+            agreements: agreements.sorted { $0.pairs > $1.pairs },
+            summary: summary)
+    }
+}
+
 
 /// EITAN is a transparent personal wellness trend, not a medical diagnosis,
 /// injury predictor, or another provider's proprietary recovery algorithm.
@@ -1674,6 +1843,7 @@ private final class HCHealthReadBatch {
     private let lock = NSLock()
     private var loadedMetrics: [HCHealthMetric] = []
     private var loadedHistory: [HCHealthTrendSample] = []
+    private var loadedHeartRates: [IMUNHeartRateObservation] = []
 
     func append(metric: HCHealthMetric, points: [HCHealthTrendSample]) {
         lock.lock()
@@ -1682,16 +1852,25 @@ private final class HCHealthReadBatch {
         loadedHistory.append(contentsOf: points)
     }
 
-    func snapshot() -> (metrics: [HCHealthMetric], history: [HCHealthTrendSample]) {
+    func appendHeartRates(_ observations: [IMUNHeartRateObservation]) {
         lock.lock()
         defer { lock.unlock() }
-        return (loadedMetrics, loadedHistory)
+        loadedHeartRates.append(contentsOf: observations)
+    }
+
+    func snapshot() -> (metrics: [HCHealthMetric],
+                        history: [HCHealthTrendSample],
+                        heartRates: [IMUNHeartRateObservation]) {
+        lock.lock()
+        defer { lock.unlock() }
+        return (loadedMetrics, loadedHistory, loadedHeartRates)
     }
 }
 
 final class HCAppleHealthReader: ObservableObject {
     @Published private(set) var metrics: [HCHealthMetric] = []
     @Published private(set) var metricHistory: [HCHealthTrendSample] = []
+    @Published private(set) var heartRateObservations: [IMUNHeartRateObservation] = []
     @Published private(set) var status =
         "Connect Apple Health to view available measurements, trends, and sources."
     @Published private(set) var loading = false
@@ -1966,6 +2145,8 @@ final class HCAppleHealthReader: ObservableObject {
         if primaryWearable == "WHOOP" {
             lines.append("Important: WHOOP HRV/RMSSD is not written to Apple Health. No Apple Watch SDNN substitution; use a separately authorized direct WHOOP API source when available.")
         }
+        lines.append(IMUNWearableIntelligence.analyze(
+            heartRateObservations, primary: primaryWearable).coachingContext)
         return lines.joined(separator: "\n")
     }
 
@@ -2039,6 +2220,33 @@ final class HCAppleHealthReader: ObservableObject {
             }
             store.execute(query)
         }
+        // Short-interval timestamps are required for cross-device agreement.
+        // Daily medians above cannot answer "what did each sensor read now?".
+        if let heartType = HKObjectType.quantityType(forIdentifier: .heartRate) {
+            group.enter()
+            let recent = HKQuery.predicateForSamples(
+                withStart: Date().addingTimeInterval(-48 * 3600),
+                end: Date(), options: .strictStartDate)
+            let recentQuery = HKSampleQuery(
+                sampleType: heartType, predicate: recent, limit: 8000,
+                sortDescriptors: [NSSortDescriptor(
+                    key: HKSampleSortIdentifierEndDate, ascending: false)]) {
+                _, results, error in
+                defer { group.leave() }
+                guard error == nil, let samples = results as? [HKQuantitySample]
+                else { return }
+                let unit = HKUnit.count().unitDivided(by: .minute())
+                batch.appendHeartRates(samples.map { sample in
+                    IMUNHeartRateObservation(
+                        id: sample.uuid,
+                        source: sample.sourceRevision.source.name,
+                        bundleID: sample.sourceRevision.source.bundleIdentifier,
+                        start: sample.startDate, end: sample.endDate,
+                        bpm: sample.quantity.doubleValue(for: unit))
+                })
+            }
+            store.execute(recentQuery)
+        }
         group.enter()
         readSleep(group: group, batch: batch)
         group.enter()
@@ -2051,6 +2259,7 @@ final class HCAppleHealthReader: ObservableObject {
                 return $0.category < $1.category
             }
             self.metricHistory = result.history
+            self.heartRateObservations = result.heartRates
             self.loading = false
             self.status = self.metrics.isEmpty ?
                 "No readable samples found. Review Health permissions and device sync." :
