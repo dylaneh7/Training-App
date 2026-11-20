@@ -1468,15 +1468,21 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
                 longest.date, (longest.distanceMeters ?? 0) / 1609.344,
                 longest.source))
         }
-        if let fastestFiveK = validRuns.filter({
-            // Only standalone runs near a 5-km recorded distance; never
-            // infer a 5K PR from a longer run's average speed.
-            let meters = $0.distanceMeters ?? 0
+        // Only standalone runs near a 5-km recorded distance; never
+        // infer a 5K PR from a longer run's average speed.
+        let fiveKRuns: [HCProgressRun] = validRuns.filter { run in
+            let meters = run.distanceMeters ?? 0
             return meters >= 4800 && meters <= 5300
-        }).min(by: {
-            (($0.durationSeconds ?? 0) / ($0.distanceMeters ?? 1)) <
-            (($1.durationSeconds ?? 0) / ($1.distanceMeters ?? 1))
-        }) {
+        }
+        func secondsPerMeter(_ run: HCProgressRun) -> Double {
+            let elapsed = run.durationSeconds ?? 0
+            let meters = max(1, run.distanceMeters ?? 0)
+            return elapsed / meters
+        }
+        let fastestFiveK = fiveKRuns.min { lhs, rhs in
+            secondsPerMeter(lhs) < secondsPerMeter(rhs)
+        }
+        if let fastestFiveK {
             lines.append(String(format:
                 "Fastest pace among imported approximately-5K runs: %@, %.2f min/mi, source %@. This is a recorded workout comparison, not a verified race PR.",
                 fastestFiveK.date,
