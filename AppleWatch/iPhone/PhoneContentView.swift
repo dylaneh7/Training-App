@@ -1315,30 +1315,39 @@ enum IMUNWearableIntelligence {
             }
         }
 
-        let reports = names.map { name -> IMUNHeartRateSourceReport in
-            let samples = (groups[name] ?? []).sorted { $0.midpoint < $1.midpoint }
+        var reports: [IMUNHeartRateSourceReport] = []
+        for name in names {
+            let samples: [IMUNHeartRateObservation] = (groups[name] ?? [])
+                .sorted { lhs, rhs in lhs.midpoint < rhs.midpoint }
             var jumps = 0
             if samples.count >= 2 {
-                for i in 1..<samples.count {
-                    let gap = samples[i].midpoint.timeIntervalSince(
-                        samples[i - 1].midpoint)
+                for index in 1..<samples.count {
+                    let earlier = samples[index - 1]
+                    let later = samples[index]
+                    let gap = later.midpoint.timeIntervalSince(earlier.midpoint)
                     if gap > 0 && gap <= 15 &&
-                        abs(samples[i].bpm - samples[i - 1].bpm) > 40 {
+                        abs(later.bpm - earlier.bpm) > 40 {
                         jumps += 1
                     }
                 }
             }
-            let minutes = Set(samples.map {
-                Int($0.midpoint.timeIntervalSince1970 / 60)
-            }).count
-            return IMUNHeartRateSourceReport(
+            let minuteBuckets: [Int] = samples.map { sample in
+                Int(sample.midpoint.timeIntervalSince1970 / 60)
+            }
+            let center: Double? = median(deviations[name] ?? [])
+            let matchedCount: Int = compared[name] ?? 0
+            let sourceReport = IMUNHeartRateSourceReport(
                 source: name, sampleCount: samples.count,
-                uniqueMinutes: minutes,
-                comparedSamples: compared[name, default: 0],
+                uniqueMinutes: Set(minuteBuckets).count,
+                comparedSamples: matchedCount,
                 unusualJumps: jumps,
-                pairedMedianDifferenceBPM: median(deviations[name] ?? []))
-        }.sorted { $0.sampleCount == $1.sampleCount ?
-            $0.source < $1.source : $0.sampleCount > $1.sampleCount }
+                pairedMedianDifferenceBPM: center)
+            reports.append(sourceReport)
+        }
+        reports.sort { lhs, rhs in
+            if lhs.sampleCount == rhs.sampleCount { return lhs.source < rhs.source }
+            return lhs.sampleCount > rhs.sampleCount
+        }
 
         let summary: String
         if reports.isEmpty {
