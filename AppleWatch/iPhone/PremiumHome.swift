@@ -2737,6 +2737,92 @@ private struct IMUNMotionExerciseTrendView: View {
     }
 }
 
+
+/// Local session analysis from compact Apple Watch motion summaries. We retain
+/// the per-set quality and movement proxies without fabricating biomechanics.
+private enum IMUNMotionSessionReview {
+    static func observations(_ sets: [HCLoggedSet]) -> [String] {
+        let tracked = sets.compactMap(\.motionInsight)
+        guard !tracked.isEmpty else {
+            return ["No wrist-motion summaries for this session. Logged reps and weight remain available, but movement quality cannot be inferred."]
+        }
+        var result: [String] = []
+        let confidence = tracked.filter { $0.analysisConfidence == "Moderate" }.count
+        result.append("\(tracked.count) recorded sets have movement evidence; \(confidence) have moderate capture confidence. These are sensor-quality labels, not movement-quality grades.")
+        let coverage = tracked.compactMap(\.sampleCoveragePercent)
+            .filter(\.isFinite)
+        if !coverage.isEmpty {
+            let mean = coverage.reduce(0, +) / Double(coverage.count)
+            result.append(String(format: "Average wrist-signal sample coverage was %.0f%% across %d sets.", mean, coverage.count))
+        }
+        let slowdown = tracked.compactMap(\.lastCycleSlowdownPercent)
+            .filter { $0.isFinite && $0 > 18 }
+        if !slowdown.isEmpty {
+            result.append("\(slowdown.count) sets ended with a detected cycle over 18% slower than their earlier cycles. Check exercise, tempo intention and effort before treating this as fatigue.")
+        }
+        let travel = tracked.compactMap(\.lastWristRotationChangePercent)
+            .filter { $0.isFinite && $0 < -18 }
+        if !travel.isEmpty {
+            result.append("\(travel.count) sets showed reduced final-cycle relative wrist rotation. This is not joint range of motion.")
+        }
+        let gaps = tracked.reduce(0) { $0 + ($1.samplingGapCount ?? 0) }
+        if gaps > 0 {
+            result.append("\(gaps) sensor interruptions may limit rep timing or comparison reliability.")
+        }
+        let corrections = sets.filter {
+            guard let estimate = $0.motionInsight?.detectedReps else { return false }
+            return estimate != $0.reps
+        }.count
+        if corrections > 0 {
+            result.append("\(corrections) sets differ between saved reps and detected cycles. Manual corrections remain authoritative.")
+        }
+        return result
+    }
+
+    static func coachContext(title: String, sets: [HCLoggedSet]) -> String {
+        var lines = [
+            "The athlete opened a workout-specific IsAIah movement review for " + title + ".",
+            "Evidence is from experimental Apple Watch wrist accelerometer/gyroscope proxies; not bar speed, force, anatomical joint ROM or verified lifting form.",
+            "Only analyze captured sets and comparable placement. Never diagnose injury or issue automatic workout edits.",
+            "SESSION FINDINGS: " + observations(sets).joined(separator: " ")
+        ]
+        for item in sets.prefix(28) {
+            let prefix = "\(item.exerciseName) / set \(item.index) / saved reps \(item.reps)"
+            guard let data = item.motionInsight else {
+                lines.append(prefix + " / no motion capture")
+                continue
+            }
+            var facts = [
+                prefix,
+                "detected cycles \(data.detectedReps)",
+                "sensor \(data.source)",
+                "position \(data.wearableLocation ?? data.wearSide)",
+                "capture confidence \(data.analysisConfidence ?? "unrated")"
+            ]
+            if let coverage = data.sampleCoveragePercent {
+                facts.append(String(format: "coverage %.0f%%", coverage))
+            }
+            if let tempo = data.averageCycleSeconds {
+                facts.append(String(format: "average cycle %.2f sec", tempo))
+            }
+            if let last = data.lastCycleSlowdownPercent {
+                facts.append(String(format: "last-cycle slowdown %+.0f%%", last))
+            }
+            if let rotation = data.meanWristRotationDegrees {
+                facts.append(String(format: "mean integrated wrist rotation %.0f degrees (proxy)", rotation))
+            }
+            if let peak = data.peakWristRotationDegreesPerSecond {
+                facts.append(String(format: "peak wrist rotation %.0f degrees/sec", peak))
+            }
+            if let warnings = data.analysisWarnings, !warnings.isEmpty {
+                facts.append("warnings " + warnings.joined(separator: "; "))
+            }
+            lines.append(facts.joined(separator: " | "))
+        }
+        return lines.joined(separator: "\n")
+    }
+}
+
 private struct IMUNMotionWorkoutDetail: View {
     @EnvironmentObject private var coach: PhoneWorkoutBridge
     let session: IMUNMotionSession
@@ -2826,6 +2912,44 @@ private struct IMUNMotionWorkoutDetail: View {
                                 .font(.system(size: 10))
                                 .foregroundStyle(HCDesign.secondary)
                         }
+                    }
+                }
+                HCSectionTitle(title: "Session interpretation",
+                               detail: "Evidence from captured Apple Watch sets")
+                HCCard {
+                    VStack(alignment: .leading, spacing: 12) {
+                        ForEach(Array(IMUNMotionSessionReview.observations(sets).enumerated()),
+                                id: .offset) { entry in
+                            HStack(alignment: .top, spacing: 10) {
+                                Image(systemName: "waveform.path")
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(HCDesign.aqua)
+                                    .frame(width: 16)
+                                Text(entry.element)
+                                    .font(.system(size: 12))
+                                    .foregroundStyle(HCDesign.ink)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                        }
+                        NavigationLink {
+                            PremiumCoachConversation(
+                                launchContext: IMUNMotionSessionReview.coachContext(
+                                    title: session.title, sets: sets))
+                        } label: {
+                            HStack(spacing: 9) {
+                                Image(systemName: "sparkle.magnifyingglass")
+                                Text("Analyze this workout with IsAIah")
+                                Spacer(minLength: 4)
+                                Image(systemName: "arrow.up.right")
+                            }
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(HCDesign.electric)
+                            .padding(.vertical, 10)
+                        }
+                        .buttonStyle(.plain)
+                        Text("Opening IsAIah prepares a summary; it is sent only when you submit a message.")
+                            .font(.system(size: 10))
+                            .foregroundStyle(HCDesign.secondary)
                     }
                 }
                 HCSectionTitle(title: "Exercises and rep analysis",
