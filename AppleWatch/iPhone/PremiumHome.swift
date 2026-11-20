@@ -4243,6 +4243,10 @@ private struct IMUNWearableIntelligenceCard: View {
                 .font(.system(size: 13, weight: .medium))
                 .foregroundStyle(HCDesign.ink)
                 .fixedSize(horizontal: false, vertical: true)
+            Text(report.sourceGuidance)
+                .font(.system(size: 11))
+                .foregroundStyle(HCDesign.secondary)
+                .fixedSize(horizontal: false, vertical: true)
             if !coverage.isEmpty {
                 Text("\(coverage.reduce(0) { $0 + $1.signals }) source-specific measured signals across \(coverage.count) publishers")
                     .font(.system(size: 11))
