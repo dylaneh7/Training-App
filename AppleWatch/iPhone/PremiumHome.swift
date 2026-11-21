@@ -6255,16 +6255,18 @@ struct PremiumCoachConversation: View {
             return coach.movingWorkoutID == nil &&
                 selected.date != HCPlanBuilder.dateString(actionMoveDate)
         case .createStrength:
-            return coach.workout == nil &&
+            let plan = coach.workout
+            return (plan == nil || (plan?.date == HCPlanBuilder.dateString(Date()) &&
+                    plan?.isPreview == false && plan?.exercises.isEmpty == true)) &&
+                !action.strengthExercises.isEmpty &&
                 !actionWorkoutTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         case .createRun:
-            return coach.runPlan == nil &&
-                !actionWorkoutTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
-                (1...360).contains(actionRunMinutes) &&
-                (!actionRunHasHR ||
-                 ((35...230).contains(actionRunMinHR) &&
-                  (35...230).contains(actionRunMaxHR) &&
-                  actionRunMinHR <= actionRunMaxHR))
+            let plan = coach.runPlan
+            return (plan == nil || (plan?.id.hasPrefix("imun-local-") == true &&
+                    plan?.date == HCPlanBuilder.dateString(Date()) &&
+                    plan?.isCompleted == false)) &&
+                !action.runSteps.isEmpty &&
+                !actionWorkoutTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         case .renameStrength:
             return coach.workout != nil &&
                 !actionWorkoutTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -6376,22 +6378,29 @@ struct PremiumCoachConversation: View {
         case .setTheme:
             reply = "iMun now uses Selah Stone throughout the app. Custom visual themes have been retired."
         case .createStrength:
-            coach.newWorkout(date: Date(), title: actionWorkoutTitle)
+            guard coach.createStrengthToday(
+                title: actionWorkoutTitle, exercises: action.strengthExercises)
+            else {
+                errorMessage = coach.status
+                return
+            }
             selectedActivity = "weightlifting"
             selectedTab = "training"
-            reply = "Created a custom strength workout with no fabricated sets. Open Training to add your exercises."
+            reply = "Saved today's " + actionWorkoutTitle + " with " +
+                String(action.strengthExercises.count) +
+                " exercises and their prescribed sets, reps and rest. The complete plan is queued for Watch sync."
         case .createRun:
-            guard coach.createRunToday(
-                title: actionWorkoutTitle, minutes: actionRunMinutes,
-                minimumBPM: actionRunHasHR ? actionRunMinHR : nil,
-                maximumBPM: actionRunHasHR ? actionRunMaxHR : nil)
+            guard coach.createStructuredRunToday(
+                title: actionWorkoutTitle, steps: action.runSteps)
             else {
                 errorMessage = coach.status
                 return
             }
             selectedActivity = "run"
             selectedTab = "training"
-            reply = "Created today's \(actionRunMinutes)-minute run with your selected targets and queued it for iMun Watch."
+            reply = "Saved today's structured run with " +
+                String(action.runSteps.count) +
+                " warmup, work, recovery and cooldown phases, queued for Watch sync."
         case .renameStrength:
             guard let workout = coach.workout else { return }
             coach.saveEditedWorkout(HCWorkout(id: workout.id, date: workout.date,
@@ -6487,13 +6496,19 @@ struct PremiumCoachConversation: View {
         }
         turns.append(IMUNCoachTurn(
             role: "assistant",
-            text: "I can prepare that change. Review the exact details below and confirm before iMun applies it."))
+            text: proposed.kind == .createStrength ?
+                "I've built the full strength session. Review the movements and targets below; one confirmation saves all of them." :
+                proposed.kind == .createRun ?
+                "Your structured run is ready. Review each work and recovery interval below; one confirmation saves it to Training and queues Watch sync." :
+                "Review the proposed change below and confirm when it's right."))
         pendingAction = proposed
         selectedActionWorkoutID = proposed.suggestedWorkoutID ?? ""
         actionMoveDate = proposed.suggestedDate ?? Date()
-        actionWorkoutTitle = proposed.kind == .createRun ? "Easy Run" :
-            (proposed.parameter ?? "Custom Strength Workout")
-        actionRunMinutes = Int(proposed.parameter ?? "") ?? 40
+        actionWorkoutTitle = proposed.parameter ??
+            (proposed.kind == .createRun ? "Structured Run" : "Strength Workout")
+        actionRunMinutes = proposed.runSteps.isEmpty ?
+            (Int(proposed.parameter ?? "") ?? 40) :
+            proposed.runSteps.reduce(0) { $0 + $1.seconds } / 60
         actionRunHasHR = false
         actionPreferenceKey = proposed.settingKey ?? "hcRunCueMinutes"
         actionPreferenceValue = IMUNCoachPreference.byID(actionPreferenceKey)
@@ -6566,7 +6581,10 @@ struct PremiumCoachConversation: View {
             persist()
             return
         }
-        if uploads.isEmpty, let proposed = IMUNCoachActionInterpreter.propose(
+        let requiresFullWorkout = IMUNCoachActionInterpreter.needsCompleteWorkoutDraft(
+            questionText)
+        if uploads.isEmpty, !requiresFullWorkout,
+           let proposed = IMUNCoachActionInterpreter.propose(
             questionText, sessions: coach.plannedSessions,
             workout: coach.workout, run: coach.runPlan) {
             question = ""
@@ -6591,10 +6609,12 @@ struct PremiumCoachConversation: View {
             // The service is a language classifier only: it cannot mutate
             // workouts, choose an unvalidated ID, or bypass confirmation.
             if uploads.isEmpty &&
-                IMUNCoachActionInterpreter.mightNeedModelProposal(questionText) {
+                (requiresFullWorkout ||
+                 IMUNCoachActionInterpreter.mightNeedModelProposal(questionText)) {
                 await MainActor.run { thinkingPhase = "Reviewing your request" }
                 if let classification = try? await coach.classifyIMUNCoachAction(
-                    request: questionText, screenContext: launchContext),
+                    request: questionText, screenContext: launchContext,
+                    recentConversation: currentHistory, shareHealth: shareRecovery),
                    let proposal = IMUNCoachActionInterpreter.proposalFromModel(
                     classification, sessions: coach.plannedSessions,
                     workout: coach.workout, run: coach.runPlan) {
@@ -6605,6 +6625,21 @@ struct PremiumCoachConversation: View {
                             return
                         }
                         presentAction(proposal, for: questionText, appendUser: false)
+                    }
+                    return
+                }
+                if requiresFullWorkout {
+                    await MainActor.run {
+                        guard coach.coachAccountID == requestAccountID,
+                              threadLibrary.selectedID == requestThreadID else {
+                            isSending = false
+                            return
+                        }
+                        if turns.last?.role == "user" { turns.removeLast() }
+                        question = originalDraft
+                        errorMessage = "IsAIah couldn't prepare a complete, validated workout. Nothing was saved. Try submitting the request again."
+                        isSending = false
+                        persist()
                     }
                     return
                 }
