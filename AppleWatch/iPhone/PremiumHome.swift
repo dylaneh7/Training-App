@@ -626,7 +626,8 @@ private struct IMUNPrimaryNavigation: View {
 
     var body: some View {
         HStack(spacing: 0) {
-            ForEach(destinations, id: \.key) { destination in
+            ForEach(destinations.indices, id: \.self) { index in
+                let destination = destinations[index]
                 let selected = selectedTab == destination.key
                 Button {
                     selectedTab = destination.key
@@ -5595,27 +5596,27 @@ struct PremiumCoachConversation: View {
                                     IMUNIsaiahMark(size: 42)
                                         .clipShape(RoundedRectangle(cornerRadius: 12))
                                     VStack(alignment: .leading, spacing: 5) {
-                                        Text("YOUR COACHING SPACE")
+                                        Text("PERSONAL TRAINING INTELLIGENCE")
                                             .font(HCDesign.label(10))
                                             .tracking(1.4)
                                             .foregroundStyle(HCDesign.aqua)
-                                        Text("What are we working on?")
+                                        Text("What will we build today?")
                                             .font(HCDesign.display(24))
                                             .foregroundStyle(HCDesign.ink)
                                     }
                                 }
-                                Text("Talk through a workout, interpret a running trend, or ask IsAIah to prepare a change in your training. Your records are never edited without review.")
+                                Text("Build a full workout, design a precise run or understand your training. IsAIah puts the complete plan here for one review.")
                                     .font(.system(size: 13))
                                     .foregroundStyle(HCDesign.secondary)
                                     .fixedSize(horizontal: false, vertical: true)
                                 VStack(alignment: .leading, spacing: 8) {
-                                    Text("SUGGESTED STARTS")
+                                    Text("START A CONVERSATION")
                                         .font(HCDesign.label(10))
                                         .tracking(1.2)
                                         .foregroundStyle(HCDesign.secondary)
-                                    suggestion("Assess this week's running and strength load")
-                                    suggestion("What is changing in my running performance?")
-                                    suggestion("Review today's training and suggest adjustments")
+                                    suggestion("Build today's full-body strength workout with exercises")
+                                    suggestion("Build a 3×8-minute tempo run for today")
+                                    suggestion("Adjust today's training using my recent workouts")
                                     suggestion("Compare my wearable heart-rate readings")
                                 }
                             }
@@ -5831,9 +5832,10 @@ struct PremiumCoachConversation: View {
                 Text("IsAIah")
                     .font(HCDesign.display(20))
                     .foregroundStyle(HCDesign.ink)
-                Text(coach.signedIn ? "Personal training intelligence" :
-                     "Sign in to begin coaching")
-                    .font(.system(size: 10))
+                Text(coach.signedIn ? "TRAINING · RECOVERY · PROGRESS" :
+                     "SIGN IN TO BEGIN")
+                    .font(.system(size: 9, weight: .medium, design: .rounded))
+                    .tracking(1.0)
                     .foregroundStyle(HCDesign.secondary)
                     .lineLimit(1)
             }
@@ -5896,7 +5898,7 @@ struct PremiumCoachConversation: View {
         }
         .foregroundStyle(HCDesign.secondary)
         .padding(.horizontal, 17)
-        .padding(.vertical, 9)
+        .padding(.vertical, 12)
         .background(HCDesign.canvas)
         .overlay(alignment: .bottom) {
             Rectangle().fill(HCDesign.outline.opacity(0.70))
@@ -5952,7 +5954,7 @@ struct PremiumCoachConversation: View {
                         .frame(width: 29, height: 42)
                 }
                 .accessibilityLabel("Attach a photo")
-                TextField("Ask IsAIah anything…",
+                TextField("Ask IsAIah to build or analyze…",
                           text: $question, axis: .vertical)
                     .lineLimit(1...5)
                     .focused($composerFocused)
@@ -6008,7 +6010,7 @@ struct PremiumCoachConversation: View {
                         .foregroundStyle(HCDesign.caution)
                         .lineLimit(1)
                 } else {
-                    Text("Your message is sent when submitted")
+                    Text("PRIVATE · SEND TO ANALYZE")
                         .foregroundStyle(HCDesign.secondary)
                         .lineLimit(1)
                 }
@@ -6125,8 +6127,8 @@ struct PremiumCoachConversation: View {
             .font(.system(size: 13, weight: .medium))
             .padding(.horizontal, 14)
             .padding(.vertical, 13)
-            .background(HCDesign.raised.opacity(0.55),
-                        in: RoundedRectangle(cornerRadius: 10))
+            .background(HCDesign.raised.opacity(0.72),
+                        in: RoundedRectangle(cornerRadius: 13))
         }
         .buttonStyle(.plain)
     }
