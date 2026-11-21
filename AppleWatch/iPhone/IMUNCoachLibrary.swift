@@ -278,18 +278,26 @@ struct IMUNCoachBubble: View {
                     .clipShape(RoundedRectangle(cornerRadius: 7))
                     .padding(.top, 3)
             }
-            VStack(alignment: fromUser ? .trailing : .leading, spacing: 7) {
+            VStack(alignment: fromUser ? .trailing : .leading, spacing: 8) {
+                if !fromUser {
+                    Text("IsAIah · TRAINING INTELLIGENCE")
+                        .font(.system(size: 9, weight: .semibold, design: .rounded))
+                        .tracking(1.0)
+                        .foregroundStyle(HCDesign.secondary)
+                }
                 Text(.init(turn.text))
-                    .font(.system(size: 14))
+                    .font(.system(size: fromUser ? 14 : 14.5,
+                                  weight: .regular, design: .default))
                     .foregroundStyle(HCDesign.ink)
                     .textSelection(.enabled)
                     .tint(HCDesign.electric)
-                    .lineSpacing(3)
-                    .padding(.horizontal, fromUser ? 14 : 0)
-                    .padding(.vertical, fromUser ? 12 : 0)
+                    .lineSpacing(4)
+                    .padding(.horizontal, fromUser ? 15 : 0)
+                    .padding(.vertical, fromUser ? 12 : 1)
                     .background(fromUser ?
                                 HCDesign.raised : Color.clear,
-                                in: RoundedRectangle(cornerRadius: 17))
+                                in: RoundedRectangle(cornerRadius: 18,
+                                                     style: .continuous))
                     .frame(maxWidth: .infinity, alignment:
                            fromUser ? .trailing : .leading)
                 if !fromUser {
