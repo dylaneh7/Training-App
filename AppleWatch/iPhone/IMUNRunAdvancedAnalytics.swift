@@ -399,6 +399,116 @@ enum IMUNRunAdvancedAnalytics {
         }
     }
 
+    /// Descriptive pacing from actually recorded complete laps or route
+    /// miles; only equally sized laps are compared. This is not a judgment
+    /// about intentional progression or training success.
+    static func pacingPattern(_ run: HCProgressRun) -> IMUNRunningObservation? {
+        let splits = (run.routeMileSplits ?? []).filter {
+            $0.distanceMeters.map {
+                abs($0 - IMUNRunningIntelligence.mile) <= 15
+            } == true && $0.elapsedSeconds > 90
+        }
+        guard splits.count >= 4 else { return nil }
+        let count = splits.count / 2
+        let early = splits.prefix(count).map(\.elapsedSeconds)
+        let late = splits.suffix(count).map(\.elapsedSeconds)
+        let first = early.reduce(0,+) / Double(count)
+        let last = late.reduce(0,+) / Double(count)
+        let percent = 100 * abs(last - first) / max(first, 1)
+        let label = percent < 1.5 ? "similar" :
+            last < first ? "faster" : "slower"
+        return IMUNRunningObservation(id: "measured-pacing",
+            title: "First versus last complete-mile splits",
+            detail: String(format:
+                "The final %d complete route miles averaged %.1f%% %@ per mile than the first %d. Derived GPS splits exclude any unfinished final mile; conditions and route grade can explain differences.",
+                count, percent, label, count))
+    }
+
+    static func aerobicEfficiency(_ run: HCProgressRun,
+                                  history: [HCProgressRun]) -> IMUNRunningObservation? {
+        guard let speed = run.averageRunningSpeedMPS,
+              let heart = run.averageBPM,
+              speed.isFinite, heart.isFinite,
+              (1.2...8.5).contains(speed),
+              (70...220).contains(heart) else { return nil }
+        let peers = IMUNRunningIntelligence.uniqueRuns(history).filter {
+            $0.id != run.id && $0.date < run.date &&
+            $0.averageRunningSpeedMPS.map {
+                abs($0-speed)/speed < 0.12
+            } == true &&
+            $0.averageBPM.map { (70...220).contains($0) } == true
+        }
+        guard peers.count >= 3 else { return nil }
+        let earlier = Array(peers.prefix(12))
+        let ratios: [Double] = earlier.compactMap {
+            guard let pace = $0.averageRunningSpeedMPS,
+                  let bpm = $0.averageBPM,
+                  bpm > 0 else { return nil }
+            return pace / bpm
+        }
+        guard ratios.count >= 3 else { return nil }
+        let reference = ratios.reduce(0,+) / Double(ratios.count)
+        let this = speed / heart
+        let percent = 100 * (this - reference) / max(reference, 0.001)
+        return IMUNRunningObservation(id: "speed-to-hr",
+            title: "Speed-to-heart-rate observation",
+            detail: String(format:
+                "Current recorded speed/HR ratio %.4f versus %.4f from %d comparable-speed runs (%+.1f%%). This is a descriptive proxy—not a measured running economy or oxygen-consumption test.",
+                this, reference, ratios.count, percent))
+    }
+
+    /// A four-week *preview* based on recorded mileage and any optional goal.
+    /// Never changes HealthKit, Tredict, calendar, or coach prescriptions.
+    static func fourWeekPreview(_ runs: [HCProgressRun],
+                                targetMiles: Double?,
+                                raceDate: Date?,
+                                now: Date = Date())
+        -> [(week: Int, miles: Double, focus: String)] {
+        let load = IMUNRunningIntelligence.weeklyLoad(runs, now: now)
+        guard load.distinctRuns7 >= 2,
+              let prior = load.prior21WeeklyMiles,
+              load.comparisons >= 3,
+              prior > 1.5 else { return [] }
+        let base = max(1, min(load.recent7Miles, prior * 1.15))
+        let cappedGoal = targetMiles.flatMap {
+            $0.isFinite && $0 > 0 ? $0 : nil
+        }
+        let daysToRace: Int? = raceDate.flatMap {
+            Calendar.current.dateComponents([.day], from: now, to: $0).day
+        }
+        let taper = daysToRace.map { $0 >= 7 && $0 <= 28 } ?? false
+        let factors: [Double] = taper ? [1, 0.85, 0.70, 0.50] :
+            [1, 1.05, 1.10, 0.85]
+        return (0..<4).map { index in
+            let unconstrained = base * factors[index]
+            let capped = cappedGoal.map {
+                min(unconstrained, max(base, $0))
+            } ?? unconstrained
+            let focus: String
+            if taper {
+                focus = index == 3 ? "Taper/race week; race miles excluded" :
+                    "Keep routine, reduce nonessential volume"
+            } else if index == 3 {
+                focus = "Lower-volume consolidation"
+            } else if base < 15 || load.distinctRuns7 < 3 {
+                focus = "Consistent easy runs and rest days"
+            } else {
+                focus = "Mostly easy mileage; one purposeful session if recovered"
+            }
+            return (week: index + 1, miles: capped, focus: focus)
+        }
+    }
+
+    static func trainingLoadNote(_ runs: [HCProgressRun]) -> String? {
+        let load = IMUNRunningIntelligence.weeklyLoad(runs)
+        guard let baseline = load.prior21WeeklyMiles,
+              baseline >= 3, load.comparisons >= 3 else { return nil }
+        let difference = load.recent7Miles - baseline
+        return String(format:
+            "Past seven days %.1f mi versus %.1f mi/week in the preceding 21 days (%+.0f%%). Review the planned workload, recovery and whether recent runs were easy or demanding. Volume change by itself is not an injury-risk score.",
+            load.recent7Miles, baseline, 100 * difference / baseline)
+    }
+
     static func insightSummary(_ run: HCProgressRun,
                                history: [HCProgressRun],
                                power: Int,
@@ -421,6 +531,15 @@ enum IMUNRunAdvancedAnalytics {
                 terrain.elevationGainMeters.map {
                     String(format:"%.0f m", $0)
                 } ?? "not available"))
+        }
+        if let pacing = pacingPattern(run) {
+            sentences.append(pacing.detail)
+        }
+        if let efficient = aerobicEfficiency(run, history: history) {
+            sentences.append(efficient.detail)
+        }
+        if let loadNote = trainingLoadNote(history) {
+            sentences.append(loadNote)
         }
         let surges = candidateSurges(run)
         if !surges.isEmpty {
