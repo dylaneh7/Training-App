@@ -101,8 +101,7 @@ struct IMUNRunningLabPage: View {
                     }
                 }
                 ForEach(Array(runs.prefix(90))) { run in
-                    NavigationLink {
-                        IMUNRunningLabDetail(run: run, history: runs)
+                    NavigationLink {                        IMUNRunningLabDetail(run: run, history: coach.runHistory)
                     } label: {
                         HStack(spacing: 13) {
                             VStack(alignment: .leading, spacing: 5) {
