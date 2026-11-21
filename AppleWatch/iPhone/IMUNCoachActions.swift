@@ -265,6 +265,8 @@ enum IMUNCoachActionInterpreter {
                        "strength", "tempo run", "interval run", "run"]
             .contains(where: { value.contains($0) })
         return (planning && workout) ||
+            value.contains("put the exercises in") ||
+            value.contains("add the exercises") ||
             ((value.contains("tempo") || value.contains("interval")) &&
              value.range(of: #"\d+\s*[x×]\s*\d+"#, options: .regularExpression) != nil)
     }
@@ -1126,19 +1128,61 @@ struct IMUNCoachActionReviewCard: View {
                     TextField("Workout name", text: $workoutTitle)
                         .textInputAutocapitalization(.words)
                 }
+                if action.kind == .createStrength {
+                    HStack {
+                        Text("EXERCISE PRESCRIPTION")
+                            .font(HCDesign.label(10)).tracking(1.1)
+                        Spacer()
+                        Text("\(action.strengthExercises.count) movements")
+                            .font(.system(size: 11))
+                    }
+                    .foregroundStyle(HCDesign.secondary)
+                    ForEach(Array(action.strengthExercises.enumerated()), id: \.offset) { index, item in
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("\(index + 1). " + item.name)
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundStyle(HCDesign.ink)
+                            Text("\(item.sets) × \(item.repMin)–\(item.repMax) reps  ·  \(item.restSeconds)s rest" +
+                                 (item.weightLb.map { "  ·  \(String(format: "%.1f", $0)) lb suggested" } ?? ""))
+                                .font(.system(size: 11))
+                                .foregroundStyle(HCDesign.secondary)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.vertical, 5)
+                        if index < action.strengthExercises.count - 1 {
+                            Divider().overlay(HCDesign.outline)
+                        }
+                    }
+                }
                 if action.kind == .createRun {
                     TextField("Run name", text: $workoutTitle)
                         .textInputAutocapitalization(.words)
-                    Stepper("Duration: \(runMinutes) minutes",
-                            value: $runMinutes, in: 1...360)
-                    Toggle("Add target BPM range", isOn: $runHasHR)
-                    if runHasHR {
-                        HStack {
-                            TextField("Minimum BPM", value: $runMinBPM, format: .number)
-                                .keyboardType(.numberPad)
-                            Text("to")
-                            TextField("Maximum BPM", value: $runMaxBPM, format: .number)
-                                .keyboardType(.numberPad)
+                    Text("\(action.runSteps.reduce(0) { $0 + $1.seconds } / 60) minutes · \(action.runSteps.count) steps")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(HCDesign.secondary)
+                    ForEach(Array(action.runSteps.enumerated()), id: \.offset) { index, step in
+                        HStack(alignment: .top, spacing: 12) {
+                            Text(String(format: "%02d", index + 1))
+                                .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                                .foregroundStyle(HCDesign.secondary)
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(step.title)
+                                    .font(.system(size: 13, weight: .semibold))
+                                    .foregroundStyle(HCDesign.ink)
+                                Text(step.phase.capitalized + "  ·  " +
+                                     String(step.seconds / 60) + " min" +
+                                     (step.seconds % 60 == 0 ? "" : " \(step.seconds % 60) sec") +
+                                     (step.minBPM.flatMap { low in step.maxBPM.map {
+                                         " · \(low)–\($0) BPM"
+                                     } } ?? ""))
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(HCDesign.secondary)
+                            }
+                            Spacer(minLength: 0)
+                        }
+                        .padding(.vertical, 4)
+                        if index < action.runSteps.count - 1 {
+                            Divider().overlay(HCDesign.outline)
                         }
                     }
                 }
@@ -1157,7 +1201,10 @@ struct IMUNCoachActionReviewCard: View {
                         .buttonStyle(.bordered)
                         .tint(HCDesign.secondary)
                     Button(action.kind == .undoWorkout ? "Undo Workout" :
-                           action.kind == .undoSet ? "Undo Set" : "Confirm action",
+                           action.kind == .undoSet ? "Undo Set" :
+                           action.kind == .createStrength ? "Save full workout" :
+                           action.kind == .createRun ? "Save structured run" :
+                           "Confirm action",
                            action: onConfirm)
                         .buttonStyle(.borderedProminent)
                         .tint(action.kind == .undoWorkout ?
