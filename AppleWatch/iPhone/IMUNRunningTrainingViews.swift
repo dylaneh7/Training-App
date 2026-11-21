@@ -63,7 +63,8 @@ struct IMUNRunningTrainingTools: View {
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 } else {
-                    ForEach(weekPreview, id: \.week) { entry in
+                    ForEach(weekPreview.indices, id: \.self) { index in
+                        let entry = weekPreview[index]
                         HStack {
                             VStack(alignment: .leading, spacing: 3) {
                                 Text("Week \(entry.week)")
