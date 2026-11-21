@@ -154,199 +154,66 @@ struct IMUNPalette {
 }
 
 /// Visual tokens are data only: no file I/O beyond preferences.
+/// A single, permanent iMun identity — Selah Stone.
+/// Visual vocabulary: the ash of the wilderness, limestone, parchment and
+/// quiet silver. References are conceptual; no faith or worship preference
+/// is imposed on athletes. Scripture content remains separately opt-in.
 enum IMUNStyle {
-    private static var prefs: UserDefaults { .standard }
-    static var preset: IMUNPreset {
-        IMUNPreset(rawValue: prefs.string(forKey: "hcDesignPreset") ?? "") ?? .techno
-    }
-    static var appearanceMode: String {
-        #if os(watchOS)
-        // watchOS uses its own dark presentation even when iPhone is light.
-        return "dark"
-        #else
-        return prefs.string(forKey: "hcDesignMode") ?? "dark"
-        #endif
-    }
-    static var customPalette: Bool { prefs.bool(forKey: "hcDesignCustomPalette") }
-    static var customGeometry: Bool { prefs.bool(forKey: "hcDesignCustomGeometry") }
-    static var cardShape: String {
-        customGeometry ? (prefs.string(forKey: "hcDesignShape") ?? "rounded") : preset.defaultShape
-    }
-    static var font: String {
-        customGeometry ? (prefs.string(forKey: "hcDesignFont") ?? "standard") : preset.defaultFont
-    }
-    static var buttonShape: String {
-        customGeometry ? (prefs.string(forKey: "hcDesignButtonShape") ?? "rounded") : preset.defaultShape
-    }
-    static var density: String {
-        customGeometry ? (prefs.string(forKey: "hcDesignDensity") ?? "balanced") : preset.defaultDensity
-    }
-    static var motif: String {
-        customGeometry ? (prefs.string(forKey: "hcDesignMotif") ?? "none") : preset.defaultMotif
-    }
-    static var navigation: String {
-        customGeometry ? (prefs.string(forKey: "hcDesignNavigation") ?? "standard") :
-            (preset == .rally ? "sport" : (preset == .atelier ? "editorial" : "standard"))
-    }
-    static var progressStyle: String {
-        customGeometry ? (prefs.string(forKey: "hcDesignProgress") ?? "ring") :
-            (preset == .rally || preset == .techno ? "segmented" : "ring")
-    }
+    // Older user-customization keys may remain in UserDefaults for migration,
+    // but they no longer change visuals or sync to a second device.
+    static var preset: IMUNPreset { .heritage }
+    static var appearanceMode: String { "dark" }
+    static var customPalette: Bool { false }
+    static var customGeometry: Bool { false }
+    static var cardShape: String { "rounded" }
+    static var font: String { "serif" }
+    static var buttonShape: String { "rounded" }
+    static var density: String { "balanced" }
+    static var motif: String { "keylines" }
+    static var navigation: String { "standard" }
+    static var progressStyle: String { "ring" }
     static var animationsEnabled: Bool {
-        !prefs.bool(forKey: "hcDesignReduceMotion")
+        !UserDefaults.standard.bool(forKey: "hcDesignReduceMotion")
     }
-    static var preferredScheme: ColorScheme? {
-        switch appearanceMode {
-        case "light": return .light
-        case "dark": return .dark
-        default: return nil
-        }
-    }
-    static var padding: CGFloat {
-        switch density {
-        case "compact": return 13
-        case "airy": return 23
-        default: return 18
-        }
-    }
-    static var radius: CGFloat {
-        switch cardShape {
-        case "square": return 2
-        case "pill": return 32
-        case "chamfered": return 10
-        default: return 21
-        }
-    }
-    static var headingDesign: Font.Design {
-        switch font {
-        case "serif": return .serif
-        case "rounded": return .rounded
-        case "monospaced": return .monospaced
-        default: return .default
-        }
-    }
+    static var preferredScheme: ColorScheme? { .dark }
+    static var padding: CGFloat { 17 }
+    static var radius: CGFloat { 15 }
+    static var headingDesign: Font.Design { .serif }
 
     static func resolvedColor(_ hex: String) -> Color {
         let clean = hex.trimmingCharacters(in: CharacterSet.alphanumerics.inverted)
-        guard clean.count == 6, let number = UInt64(clean, radix: 16) else { return .white }
-        return Color(red: Double((number >> 16) & 255)/255,
-                     green: Double((number >> 8) & 255)/255,
-                     blue: Double(number & 255)/255)
-    }
-    #if os(iOS)
-    private static func uiColor(_ hex: String) -> UIColor {
-        let clean = hex.trimmingCharacters(in: CharacterSet.alphanumerics.inverted)
-        let n = UInt64(clean, radix: 16) ?? 0xFFFFFF
-        return UIColor(red: CGFloat((n >> 16) & 255)/255,
-                       green: CGFloat((n >> 8) & 255)/255,
-                       blue: CGFloat(n & 255)/255, alpha: 1)
-    }
-    #endif
-    private static func adaptive(light: String, dark: String) -> Color {
-        switch appearanceMode {
-        case "light": return resolvedColor(light)
-        case "system":
-            #if os(iOS)
-            return Color(uiColor: UIColor { traits in
-                uiColor(traits.userInterfaceStyle == .light ? light : dark)
-            })
-            #else
-            return resolvedColor(dark) // watchOS interface is dark by design.
-            #endif
-        default: return resolvedColor(dark)
+        guard clean.count == 6, let number = UInt64(clean, radix: 16) else {
+            return .white
         }
+        return Color(red: Double((number >> 16) & 255) / 255,
+                     green: Double((number >> 8) & 255) / 255,
+                     blue: Double(number & 255) / 255)
     }
+
     static var palette: IMUNPalette {
-        let p = preset
-        let background = customPalette
-            ? resolvedColor(prefs.string(forKey: "hcDesignBackgroundHex") ?? p.darkBackground)
-            : adaptive(light: p.lightBackground, dark: p.darkBackground)
-        let surface = customPalette
-            ? resolvedColor(prefs.string(forKey: "hcDesignSurfaceHex") ?? "243332")
-            : adaptive(light: "FFFFFF", dark: p.darkSurface)
-        let raised = customPalette ? surface.opacity(0.94) :
-            adaptive(light: "E6E2D9", dark: p.darkSurface)
-        let ink = customPalette
-            ? resolvedColor(prefs.string(forKey: "hcDesignTextHex") ?? "F4F5F2")
-            : adaptive(light: "222727", dark: "F6F3E9")
-        let secondary = customPalette ? ink.opacity(0.70) :
-            adaptive(light: "616968", dark: "A9B0AD")
-        let accent = customPalette
-            ? resolvedColor(prefs.string(forKey: "hcDesignAccentHex") ?? p.accent)
-            : resolvedColor(p.accent)
-        return IMUNPalette(canvas: background, surface: surface,
-            raised: raised, outline: ink.opacity(0.20), ink: ink,
-            secondary: secondary, accent: accent,
-            supporting: resolvedColor(p.accentTwo))
+        // All UI accents are neutral; meaningful warning and success colors
+        // may still appear in medical/training status indicators.
+        IMUNPalette(
+            canvas: resolvedColor("131516"),   // wilderness charcoal
+            surface: resolvedColor("1E2122"),  // slate stone
+            raised: resolvedColor("2A2D2D"),   // carved graphite
+            outline: resolvedColor("6E7372").opacity(0.52),
+            ink: resolvedColor("F0EEE9"),      // limestone parchment
+            secondary: resolvedColor("A4A6A3"), // weathered silver
+            accent: resolvedColor("D8D3C7"),   // sandstone silver
+            supporting: resolvedColor("B9B7B0"))
     }
-    /// Small, explicitly whitelisted appearance snapshot. No workout data,
-    /// HealthKit values or credentials are ever part of the cloud design row.
-    private static let designStrings: [String] = [
-        "hcDesignPreset", "hcDesignMode", "hcDesignAccentHex",
-        "hcDesignBackgroundHex", "hcDesignSurfaceHex", "hcDesignTextHex",
-        "hcDesignShape", "hcDesignButtonShape", "hcDesignFont",
-        "hcDesignDensity", "hcDesignMotif", "hcDesignNavigation",
-        "hcDesignProgress"
-    ]
-    private static let designFlags: [String] = [
-        "hcDesignCustomPalette", "hcDesignCustomGeometry",
-        "hcDesignReduceMotion"
-    ]
 
+    /// Compatibility with older cloud clients. No changeable theme leaves the
+    /// phone, and incoming legacy theme payloads are not applied.
     static func cloudDesignPayload() -> [String: Any] {
-        var result: [String: Any] = [
-            "version": 1,
-            "watchSyncEnabled": prefs.bool(forKey: "hcDesignWatchSyncEnabled"),
-            "hcDesignPreset": preset.rawValue
-        ]
-        for key in designStrings {
-            if let value = prefs.string(forKey: key), value.count <= 40 {
-                result[key] = value
-            }
-        }
-        for key in designFlags {
-            result[key] = prefs.bool(forKey: key)
-        }
-        return result
+        ["version": 2, "identity": "selah-stone"]
     }
-
     static func applyCloudDesign(_ data: [String: Any]) -> Bool {
-        guard data["version"] as? Int == 1,
-              data["watchSyncEnabled"] as? Bool == true,
-              let name = data["hcDesignPreset"] as? String,
-              IMUNPreset(rawValue: name) != nil else { return false }
-        for key in designStrings {
-            guard let value = data[key] as? String,
-                  !value.isEmpty, value.count <= 40 else { continue }
-            if key.hasSuffix("Hex") &&
-               (value.count != 6 || UInt64(value, radix: 16) == nil) { continue }
-            prefs.set(value, forKey: key)
-        }
-        for key in designFlags {
-            if let value = data[key] as? Bool { prefs.set(value, forKey: key) }
-        }
-        prefs.set(name, forKey: "hcDesignPreset")
-        return true
+        false
     }
 
-    static var onAccent: Color {
-        // Contrast-aware foreground for the preset or athlete-selected accent.
-        // 0.179 is the relative-luminance crossover for black vs. white text.
-        let hex = customPalette
-            ? (prefs.string(forKey: "hcDesignAccentHex") ?? preset.accent)
-            : preset.accent
-        let clean = hex.trimmingCharacters(in: CharacterSet.alphanumerics.inverted)
-        let number = UInt64(clean, radix: 16) ?? 0xFFFFFF
-        let channels = [Double((number >> 16) & 255) / 255,
-                        Double((number >> 8) & 255) / 255,
-                        Double(number & 255) / 255]
-        let linear = channels.map { v in
-            v <= 0.04045 ? v / 12.92 : pow((v + 0.055) / 1.055, 2.4)
-        }
-        let luminance = linear[0] * 0.2126 + linear[1] * 0.7152 +
-                        linear[2] * 0.0722
-        return luminance > 0.179 ? resolvedColor("0B1519") : .white
-    }
+    static var onAccent: Color { resolvedColor("17191A") }
 }
 
 /// Supports genuinely different panel silhouettes across every feature.
