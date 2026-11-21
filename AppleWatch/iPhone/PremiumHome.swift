@@ -5468,6 +5468,10 @@ struct PremiumCoachConversation: View {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 14) {
                         if turns.isEmpty {
+                            if !coach.signedIn {
+                                PremiumLogin()
+                                    .padding(.bottom, 12)
+                            }
                             VStack(alignment: .leading, spacing: 19) {
                                 HStack(spacing: 13) {
                                     IMUNIsaiahMark(size: 42)
@@ -5603,6 +5607,15 @@ struct PremiumCoachConversation: View {
         }
         .onChange(of: coach.coachAccountID) { _, _ in
             restoreConversationHistory()
+        }
+        .onChange(of: threadLibrary.selectedID) { _, newID in
+            if let selected = threadLibrary.selected,
+               selected.id == newID,
+               selected.messages.map(\.id) != turns.map(\.id) {
+                turns = selected.messages
+                pendingAction = nil
+                question = ""
+            }
         }
         .sheet(isPresented: $showThreadHistory) {
             IMUNCoachHistorySheet(
