@@ -6486,13 +6486,13 @@ struct PremiumCoachConversation: View {
                     recentConversation: history,
                     screenContext: launchContext,
                     healthSnapshot: shareRecovery ?
-                        (appleHealth.isaiahHealthSnapshot(
+                        (eitanSharedCoachContext + "\n" +
+                         appleHealth.isaiahHealthSnapshot(
                             selectedCategory: selectedHealthCategory,
                             selectedMetric: selectedHealthMetric,
                             question: questionText,
                             primaryWearable: UserDefaults.standard.string(
-                                forKey: "hcEitanPrimaryWearable") ?? "Auto") +
-                         eitanSharedCoachContext) : "",
+                                forKey: "hcEitanPrimaryWearable") ?? "Auto")) : "",
                     attachments: uploads)
                 await MainActor.run {
                     guard coach.coachAccountID == requestAccountID,
