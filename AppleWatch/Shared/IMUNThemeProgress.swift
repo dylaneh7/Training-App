@@ -7,9 +7,9 @@ struct IMUNThemeProgressView: View {
     // This view MUST observe the selected preset itself. Reading the
     // UserDefaults-backed IMUNStyle.preset alone does not invalidate SwiftUI
     // when someone switches from Rally to another theme while this page lives.
-    @AppStorage("hcDesignPreset") private var designPresetName = "techno"
+    private let designPresetName = "heritage"
     private var theme: IMUNPreset {
-        IMUNPreset(rawValue: designPresetName) ?? .techno
+        .heritage
     }
 
     let completed: Int
