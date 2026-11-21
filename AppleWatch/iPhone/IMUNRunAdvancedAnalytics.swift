@@ -253,6 +253,55 @@ enum IMUNRunAdvancedAnalytics {
         }.prefix(30).map { $0 }
     }
 
+    /// Other publishers' summaries of the *same* run remain inspectable.
+    /// Agreement is descriptive, not an accuracy reference.
+    static func otherSourceComparisons(_ run: HCProgressRun,
+                                       history: [HCProgressRun])
+        -> [IMUNRunningObservation] {
+        let comparable = history.filter { other in
+            guard other.id != run.id, other.source != run.source,
+                  other.date == run.date,
+                  let a = run.distanceMeters, let b = other.distanceMeters,
+                  let first = run.durationSeconds,
+                  let second = other.durationSeconds,
+                  a > 0, b > 0, first > 0, second > 0,
+                  abs(a-b) / max(a,b) < 0.03,
+                  abs(first-second) / max(first,second) < 0.03
+            else { return false }
+            if let left = run.startedAt, let right = other.startedAt {
+                return abs(left.timeIntervalSince(right)) < 180
+            }
+            return abs(a-b) / max(a,b) < 0.005 &&
+                abs(first-second) / max(first,second) < 0.005
+        }
+        return comparable.prefix(6).map { other in
+            var facts: [String] = []
+            if let a = run.averageBPM, let b = other.averageBPM {
+                facts.append(String(format:
+                    "Mean HR %.0f vs %.0f bpm (%.0f bpm apart)",
+                    a,b,abs(a-b)))
+            }
+            if let a = run.averagePowerWatts,
+               let b = other.averagePowerWatts {
+                facts.append(String(format:
+                    "Power %.0f vs %.0f W",a,b))
+            }
+            if let a = run.averageCadenceSPM,
+               let b = other.averageCadenceSPM {
+                facts.append(String(format:
+                    "Cadence %.0f vs %.0f spm",a,b))
+            }
+            facts.append(
+                "Dynamic series \(Set((run.sensorSeries ?? []).map(\.kind)).count) vs " +
+                "\(Set((other.sensorSeries ?? []).map(\.kind)).count) source channels")
+            return IMUNRunningObservation(
+                id: "cross-source:" + other.id,
+                title: run.source + " / " + other.source,
+                detail: facts.joined(separator: "; ") +
+                    ". Matching recordings from separate publishers; differences do not identify a more accurate device.")
+        }
+    }
+
     /// Individualized, descriptive comparisons normalized by the closest
     /// recorded running speed. No "ideal" contact time or stride is assumed.
     static func mechanicsComparison(_ run: HCProgressRun,
@@ -545,6 +594,8 @@ enum IMUNRunAdvancedAnalytics {
         if !surges.isEmpty {
             sentences.append("\(surges.count) candidate higher-speed surges, not verified prescribed intervals.")
         }
+        sentences.append(contentsOf:
+            otherSourceComparisons(run, history: history).map(\.detail))
         sentences.append(contentsOf:
             mechanicsComparison(run, history: history).map(\.detail))
         sentences.append(contentsOf: heartRateRecovery(run).map(\.detail))
