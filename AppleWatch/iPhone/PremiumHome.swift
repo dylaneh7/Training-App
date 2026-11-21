@@ -5954,7 +5954,8 @@ private struct PremiumCoachConversation: View {
                     UUID(uuidString: $0.id) != nil
                 })
         case .setTheme:
-            return action.themeID.flatMap(IMUNPreset.init(rawValue:)) != nil
+            // The fixed Selah Stone identity cannot be changed by the coach.
+            return false
         case .setRestDuration:
             return action.parameter.flatMap(Int.init).map {
                 [0, 60, 90, 120, 180].contains($0)
@@ -6014,10 +6015,7 @@ private struct PremiumCoachConversation: View {
             coach.refreshAndSendToWatch()
             reply = "Requested today's training plan to sync over iMun's phone and cloud connections."
         case .setTheme:
-            guard let theme = action.themeID else { return }
-            designPreset = theme
-            coach.publishDesignToCloud()
-            reply = "Changed the visual theme to \(IMUNPreset(rawValue: theme)?.title ?? theme)."
+            reply = "iMun now uses Selah Stone throughout the app. Custom visual themes have been retired."
         case .createStrength:
             coach.newWorkout(date: Date(), title: actionWorkoutTitle)
             selectedActivity = "weightlifting"
@@ -6604,7 +6602,6 @@ private struct PremiumSettingsPage: View {
     @AppStorage("hcWidgetShareHealth") private var shareWidgetHealth = false
     @AppStorage("hcLiveActivitiesEnabled") private var enableLiveActivities = true
     @AppStorage("hcAccentStyle") private var accentStyle = "crimson"
-    @AppStorage("hcDesignPreset") private var designPreset = "techno"
     @AppStorage("hcMotivationSource") private var motivationSource = "off"
     @AppStorage("hcWeightIncrement") private var weightIncrement = 5.0
     @AppStorage("hcRestOverrideSeconds") private var restOverride = 0
@@ -6841,32 +6838,24 @@ private struct PremiumSettingsPage: View {
                             .foregroundStyle(HCDesign.secondary)
                     }
                 }
-                                HCSectionTitle(title: "Identity", detail: "Your look & your mindset")
-                NavigationLink {
-                    IMUNDesignStudioPage()
-                } label: {
-                    HCCard(accent: HCDesign.electric) {
-                        HStack(spacing: 14) {
-                            Image(systemName: IMUNStyle.preset.symbol)
-                                .font(.system(size: 25, weight: .light))
-                                .foregroundStyle(HCDesign.electric)
-                                .frame(width: 40)
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text("DESIGN STUDIO")
-                                    .font(HCDesign.label(12)).tracking(1.2)
-                                    .foregroundStyle(HCDesign.ink)
-                                Text(IMUNStyle.preset.title + " · " +
-                                     IMUNStyle.preset.tagline)
-                                    .font(.caption)
-                                    .foregroundStyle(HCDesign.secondary)
-                            }
-                            Spacer(minLength: 0)
-                            Image(systemName: "chevron.right")
+                                HCSectionTitle(title: "Identity", detail: "A unified design · optional mindset")
+                HCCard {
+                    HStack(spacing: 13) {
+                        Image(systemName: "square.stack.3d.up")
+                            .font(.system(size: 22, weight: .light))
+                            .foregroundStyle(HCDesign.electric)
+                            .frame(width: 36)
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("SELAH STONE")
+                                .font(HCDesign.label(12))
+                                .tracking(1.0)
+                                .foregroundStyle(HCDesign.ink)
+                            Text("A permanent visual identity: graphite, limestone and parchment.")
+                                .font(.caption)
                                 .foregroundStyle(HCDesign.secondary)
                         }
                     }
                 }
-                .buttonStyle(.plain)
                 NavigationLink {
                     IMUNMotivationPage()
                 } label: {
