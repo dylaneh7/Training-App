@@ -379,3 +379,83 @@ check(IMUNMotionAnalytics.forecastMotion(lowQuality,
     exerciseName:"One-arm dumbbell row",location:"leftWrist") == nil,
     "Low-quality sensor sessions must not produce confident predictions")
 print("Build 64 device placement, historical motion, capture quality and guarded forecasts passed.")
+
+
+// Selah Stone Running Lab — deterministic source/measurement regression tests.
+// This test suite uses no Apple Health permissions and no fabricated GPS route.
+var testRun = HCProgressRun(
+    id: "healthkit:test-run", date: "2026-11-20",
+    title: "Morning Run", source: "Apple Watch",
+    distanceMeters: 5000, durationSeconds: 1500,
+    averageBPM: 143, splits: [])
+testRun.startedAt = Date(timeIntervalSince1970: 1795147200)
+testRun.endedAt = testRun.startedAt!.addingTimeInterval(1500)
+testRun.sensorSeries = [
+    HCRunSensorReading(kind: "runningPower",
+        at: testRun.startedAt!, value: 280),
+    HCRunSensorReading(kind: "runningStrideLength",
+        at: testRun.startedAt!, value: 1.12)
+]
+testRun.averageStrideLengthMeters = 1.12
+
+let encodedRunning = try JSONEncoder().encode(testRun)
+let restoredRunning = try JSONDecoder().decode(
+    HCProgressRun.self, from: encodedRunning)
+check(restoredRunning.sensorSeries?.count == 2 &&
+      restoredRunning.averageStrideLengthMeters == 1.12,
+      "Source-observed running dynamics must persist in the on-device archive")
+
+// An older persisted run omits all Running Lab keys but retains the existing
+// original model shape; new optional fields must never break its decoding.
+var oldObject = try JSONSerialization.jsonObject(with: encodedRunning) as! [String: Any]
+for key in ["sensorSeries", "averageStrideLengthMeters",
+            "averageGroundContactTimeMS", "averageVerticalOscillationCM",
+            "averageRunningSpeedMPS", "routeMileSplits"] {
+    oldObject.removeValue(forKey: key)
+}
+let oldJSON = try JSONSerialization.data(withJSONObject: oldObject)
+let oldRunRestored = try JSONDecoder().decode(HCProgressRun.self, from: oldJSON)
+check(oldRunRestored.sensorSeries == nil &&
+      oldRunRestored.averageStrideLengthMeters == nil,
+      "Legacy runs cannot lose their history when Running Lab is introduced")
+
+var importedDuplicate = testRun
+importedDuplicate = HCProgressRun(
+    id: "tredict:test-run", date: testRun.date,
+    title: "Same run from Garmin", source: "Garmin via Tredict",
+    distanceMeters: 5010, durationSeconds: 1504,
+    averageBPM: 144, splits: [])
+importedDuplicate.startedAt = testRun.startedAt
+let uniqueRunning = IMUNRunningIntelligence.uniqueRuns(
+    [testRun, importedDuplicate])
+check(uniqueRunning.count == 1,
+      "Duplicate Apple Health and Garmin publishes must not double-count mileage")
+let loadRunning = IMUNRunningIntelligence.weeklyLoad(
+    [testRun, importedDuplicate],
+    now: Date(timeIntervalSince1970: 1795200000))
+check(loadRunning.distinctRuns7 == 1 &&
+      loadRunning.recent7Miles > 3 && loadRunning.recent7Miles < 3.2,
+      "A single 5K recorded twice remains one run in weekly mileage")
+
+let bestRunning = IMUNRunningIntelligence.bestEfforts([testRun])
+check(bestRunning.count == 1 &&
+      bestRunning.first?.distanceName == "5K",
+      "Whole recorded runs match only actual benchmark-distance efforts")
+check(IMUNRunningIntelligence.formatPace(
+    IMUNRunningIntelligence.pacePerMile(testRun)) == "8:03",
+    "5,000 meters in 25 minutes should be 8:03 per mile")
+
+testRun.heartRateTrace = [
+    HCRunHeartPoint(at: testRun.startedAt!, bpm: 100),
+    HCRunHeartPoint(at: testRun.startedAt!.addingTimeInterval(30), bpm: 117),
+    HCRunHeartPoint(at: testRun.startedAt!.addingTimeInterval(60), bpm: 140),
+    HCRunHeartPoint(at: testRun.startedAt!.addingTimeInterval(90), bpm: 165),
+    HCRunHeartPoint(at: testRun.startedAt!.addingTimeInterval(120), bpm: 173)
+]
+check(IMUNRunningIntelligence.heartRateZones(testRun, maxBPM: 0).isEmpty,
+      "Heart-rate zones are never estimated from age or a missing maximum")
+let zones = IMUNRunningIntelligence.heartRateZones(testRun, maxBPM: 180)
+check(zones.count == 5 &&
+      abs(zones.reduce(0.0) { $0 + $1.seconds } - 120) < 0.01,
+      "Heart-rate zones use actual sample intervals, not invented minutes")
+print("Running Lab provenance, old-cache, duplicate, best effort and zone tests passed.")
