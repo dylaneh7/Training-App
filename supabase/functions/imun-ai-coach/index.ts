@@ -124,10 +124,16 @@ export default {
       "If an action isn't on that list, if user only seeks advice, or if input is ambiguous, use action none.",
       "For editStrength you may include operation: update, add, replace, remove, moveUp, moveDown.",
       "Optional editStrength fields: exerciseName string (current exercise to change), replacementName string (new exercise name when replacing), sets integer 1-12, repMin integer 1-30, repMax integer 1-40, restSeconds integer 15-360 in multiples of 15, weightLb finite number 0-1500.",
-      "For createRun you may include minutes integer 1-360. Optional parameter string is for allowed settings and display names.",
+      "For createStrength, output action createStrength, title (max 80 characters), and exercises: 3-10 fully specified realistic movements. Every exercise has name, sets (1-12), repMin (1-30), repMax (repMin-40), restSeconds (15-360, multiple of 15), and optionally weightLb ONLY when the athlete supplied a real known prescription. Do not output an empty workout.", 
+      "If the athlete says add the exercises, finish the workout, or put the movements in after creating an empty plan, inspect the supplied chat/context and return the complete createStrength exercises array for that plan. Do not ask them to hunt through a manual editor.",
+      "For createRun, output action createRun, title, and ordered steps: each {title, phase, seconds} and optionally both minBPM/maxBPM when anchored to observed data or user targets. phase MUST be warmup, work, recovery, or cooldown. Each step lasts 30-7200 seconds; at most 32 steps, total under 21600 seconds.",
+      "Interpret NxM tempo runs as N repetitions of M minutes of controlled tempo work, with a sensible easy warmup, easy recovery between repetitions, and cooldown. Example 3x8 minutes tempo: 10-15 minute warmup, 8 minute tempo x3, 2-3 minute easy recovery between, then 10 minute cooldown. Do not collapse interval workouts into one long run.",
+      "The title may contain an RPE or conversational intensity cue. Only specify numeric pace or heart-rate prescriptions if verified context supplies a user-entered threshold or suitable real values; do not fabricate pace from unrelated run averages. Prefer a qualitative tempo cue when evidence is missing.",
+      "No fabricated strength loads or workout history, no injury diagnosis, no automatic execution. These drafts go to the user for one combined review and approval.",
+      "For createRun you may include minutes integer 1-360 only as a legacy fallback. Optional parameter string is for allowed settings and display names.",
       "For setAppPreference use a settingKey from this exact list and a parameter from its allowed values: hcDesignReduceMotion(on,off), hcEitanPrimaryWearable(Auto,WHOOP,Apple Watch,Garmin,Chargerless), hcMotivationTone(quiet,direct,rigorous), hcMotivationTranslation(ESV,LSB), hcMotivationShowTraining(on,off), hcAggressiveProgression(on,off), hcWeightIncrement(2.5,5,10), hcRunCueMinutes(1,3,5,10,15), hcRunIntervals(on,off). Never return any other keys.",
       "iMun uses one permanent Selah Stone grayscale identity. Never propose editing the theme, UI colors or app fonts. Accessibility settings remain available.",
-      "Tab values: training, progress, health, coach, settings; sport values: run, weightlifting.",
+      "Tab values: training, progress, health, settings; Coach opens as the floating IsAIah sheet; sport values: run, weightlifting.",
       "Motivation values: off, scripture, original, performance, custom; haptics/voice/laps: on or off; rest seconds: 0,60,90,120,180.",
       "Never invent app record IDs or claim that you made a change. A separate signed-in iPhone executor verifies the target and requires confirmation.",
       "No medical diagnoses. No rewriting HealthKit data, fabricated workout metrics, arbitrary code, SQL or permission bypass.",
@@ -171,7 +177,7 @@ export default {
           body: JSON.stringify({
             model: actionMode ? classifierModel : model,
             instructions, input: multimodalInput, store: false,
-            max_output_tokens: actionMode ? 1000 : 3200
+            max_output_tokens: actionMode ? 2300 : 3200
           }),
           signal: controller.signal,
         });
