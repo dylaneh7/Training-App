@@ -113,6 +113,13 @@ copy = HCProgressRun(id: "garmin-copy", date: run.date,
 copy.startedAt = start
 check(IMUNRunningIntelligence.uniqueRuns([run,copy]).count == 1,
       "Identical sourced workouts must count once")
+let sourceChoices = IMUNRunAdvancedAnalytics.otherSourceComparisons(
+    run, history: [run,copy])
+check(sourceChoices.count == 1 &&
+      sourceChoices[0].detail.contains("Mean HR"),
+      "Same-run Garmin and Watch evidence must remain source-comparable")
+check(IMUNRunningIntelligence.uniqueRuns([run,copy])[0].routePoints.count > 50,
+      "Duplicate-free mileage must keep the richer, intact source recording")
 let load = IMUNRunningIntelligence.weeklyLoad(
     [run,copy], now: start.addingTimeInterval(3600))
 check(load.distinctRuns7 == 1,
