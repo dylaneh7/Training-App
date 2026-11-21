@@ -201,13 +201,22 @@ enum IMUNRunningIntelligence {
                 percent < 0.90 ? 3 : 4
             durations[zone] += dt
         }
-        return (0..<5).map { index in
-            IMUNRunningZone(index: index + 1,
-                lowBPM: Int((Double(maxBPM) * ([0.0,0.60,0.70,0.80,0.90][index])).rounded()),
-                highBPM: index == 4 ? nil :
-                    Int((Double(maxBPM) * ([0.60,0.70,0.80,0.90][index])).rounded()),
-                seconds: durations[index])
+        let lowerFractions: [Double] = [0, 0.60, 0.70, 0.80, 0.90]
+        let upperFractions: [Double] = [0.60, 0.70, 0.80, 0.90]
+        let maximum = Double(maxBPM)
+        var zoneResults: [IMUNRunningZone] = []
+        for index in 0..<5 {
+            let low = Int((maximum * lowerFractions[index]).rounded())
+            let high: Int?
+            if index < 4 {
+                high = Int((maximum * upperFractions[index]).rounded())
+            } else {
+                high = nil
+            }
+            zoneResults.append(IMUNRunningZone(index: index + 1,
+                lowBPM: low, highBPM: high, seconds: durations[index]))
         }
+        return zoneResults
     }
 
     private static func median(_ items: [Double]) -> Double? {
