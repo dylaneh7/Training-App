@@ -403,6 +403,7 @@ struct HCProgressRun: Codable, Identifiable {
     var averageVerticalOscillationCM: Double? = nil
     var averageRunningSpeedMPS: Double? = nil
     var routeMileSplits: [HCRunSplit]? = nil
+    var postRunHeartRateTrace: [HCRunHeartPoint]? = nil
 }
 
 struct HCRunSensorReading: Codable, Hashable, Identifiable {
