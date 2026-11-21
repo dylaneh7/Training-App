@@ -735,7 +735,6 @@ Section("YOUR TRAINING") {
                 store.refreshCloudWorkout()
                 store.refreshCloudSets()
                 store.refreshCloudRunHistory(force: true)
-                store.refreshCloudAppearance(force: true)
                 store.refreshCloudEitan(force: true)
             }
         }
@@ -765,7 +764,6 @@ Section("YOUR TRAINING") {
             if now.timeIntervalSince(lastCloudEitanCheck) >= 30 {
                 lastCloudEitanCheck = now
                 store.refreshCloudEitan()
-                store.refreshCloudAppearance()
             }
         }
         .onChange(of: scenePhase) { _, phase in
