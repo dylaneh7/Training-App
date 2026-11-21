@@ -10,7 +10,7 @@ enum IMUNPreset: String, CaseIterable, Identifiable {
     var id: String { rawValue }
     var title: String {
         switch self {
-        case .heritage: return "Heritage"
+        case .heritage: return "Selah Stone"
         case .retro: return "Retro"
         case .techno: return "Techno"
         case .coast: return "Coast"
@@ -22,7 +22,7 @@ enum IMUNPreset: String, CaseIterable, Identifiable {
     }
     var tagline: String {
         switch self {
-        case .heritage: return "Sporting club · forest, cream & oxblood"
+        case .heritage: return "Ash, limestone & parchment · a quiet visual identity"
         case .retro: return "Warm analog · vintage athletic scoreboard"
         case .techno: return "Telemetry · focused contrast & precision"
         case .coast: return "Sea glass · sand & open breathing room"
