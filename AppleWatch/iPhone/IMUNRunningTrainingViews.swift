@@ -17,6 +17,14 @@ struct IMUNRunningTrainingTools: View {
     private var activeShoes: [IMUNRunningShoe] {
         book.data.shoes.filter { !$0.retired }
     }
+    private var weekPreview: [(week: Int, miles: Double, focus: String)] {
+        let upcoming = book.data.races.filter {
+            $0.on >= Date()
+        }.sorted { $0.on < $1.on }.first?.on
+        return IMUNRunAdvancedAnalytics.fourWeekPreview(
+            runs, targetMiles: book.data.goalMilesPerWeek,
+            raceDate: upcoming)
+    }
 
     var body: some View {
         Form {
@@ -47,6 +55,32 @@ struct IMUNRunningTrainingTools: View {
             } header: { Text("Weekly goals") }
             footer: {
                 Text("Rolling seven-day recorded results. These are self-selected goals, not injury-risk thresholds or automatically prescribed mileage.")
+            }
+
+            Section {
+                if weekPreview.isEmpty {
+                    Text("Once multiple recent weeks and at least two runs in the last seven days are recorded, iMun can show a conservative four-week mileage preview.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(weekPreview, id: \.week) { entry in
+                        HStack {
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text("Week \(entry.week)")
+                                    .font(.system(size: 14, weight: .semibold))
+                                Text(entry.focus)
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer(minLength: 8)
+                            Text(String(format:"%.1f mi", entry.miles))
+                                .font(HCDesign.metric(16))
+                        }
+                    }
+                }
+            } header: { Text("Four-week mileage preview") }
+            footer: {
+                Text("Illustrative progression based on recorded volume, not a prescribed plan or injury assessment. Taper preview excludes event distance. IsAIah or your coach should confirm workout intensity, progression and race goals.")
             }
 
             if let score = book.scheduleAdherence(planned, runs: runs) {
