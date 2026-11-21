@@ -684,9 +684,12 @@ struct PremiumHomeView: View {
                                                   openCoach: presentIsaiah) }
                 .tabItem { Label("Health", systemImage: "heart.text.square.fill") }
                 .tag("health")
-            NavigationStack { PremiumSettingsPage(appleHealth: appleHealth) }
-                .tabItem { Label("Settings", systemImage: "gearshape.fill") }
-                .tag("settings")
+            NavigationStack {
+                PremiumCoachConversation(launchContext: "Screen: Coach")
+                    .toolbar(.hidden, for: .navigationBar)
+            }
+                .tabItem { Label("Coach", systemImage: "bubble.left.and.bubble.right.fill") }
+                .tag("coach")
         }
         .tint(HCDesign.electric)
         .preferredColorScheme(IMUNStyle.preferredScheme)
@@ -705,9 +708,11 @@ struct PremiumHomeView: View {
             }
         }
         .overlay(alignment: .bottomTrailing) {
-            IMUNIsaiahLauncherButton(glow: HCDesign.electric, action: presentIsaiah)
-                .padding(.trailing, 18)
-                .padding(.bottom, coach.isWorkoutActive ? 147 : 70)
+            if selectedTab != "coach" {
+                IMUNIsaiahLauncherButton(glow: HCDesign.electric, action: presentIsaiah)
+                    .padding(.trailing, 18)
+                    .padding(.bottom, coach.isWorkoutActive ? 147 : 70)
+            }
         }
         .sheet(isPresented: $isIsaiahPresented) {
             NavigationStack {
@@ -726,7 +731,8 @@ struct PremiumHomeView: View {
             guard url.scheme == "imun" else { return }
             let destination = url.host ?? ""
             if destination == "today" || destination == "training" ||
-               destination == "health" || destination == "progress" {
+               destination == "health" || destination == "progress" ||
+               destination == "coach" {
                 selectedTab = destination
             }
         }
@@ -6681,7 +6687,7 @@ private struct IMUNIsaiahMemorySettings: View {
     var body: some View {
         HCCard {
             VStack(alignment: .leading, spacing: 12) {
-                Toggle("Remember past IsAIah conversations", isOn: $rememberChats)
+                Toggle("Use earlier IsAIah chats as coaching context", isOn: $rememberChats)
                     .font(.system(size: 14, weight: .semibold))
                     .tint(HCDesign.electric)
                 Text("IsAIah keeps your prior chat messages on this iPhone. When enabled, relevant excerpts are shared with the online coach only after you send a new message. Past chats may contain personal details.")
@@ -6698,9 +6704,11 @@ private struct IMUNIsaiahMemorySettings: View {
                                     titleVisibility: .visible) {
                     Button("Clear remembered conversations", role: .destructive) {
                         IMUNCoachLocalMemory.clear()
+                        IMUNCoachThreadLibrary.shared.clear()
+                        UserDefaults.standard.removeObject(forKey: "hcCoachConversationLocalV1")
                     }
                 } message: {
-                    Text("This removes the stored long-term chat archive from this iPhone. The visible chat and your workout history are not deleted.")
+                    Text("This removes IsAIah's saved conversations for the signed-in account on this iPhone. Your workouts and Health records are not deleted.")
                 }
             }
         }
