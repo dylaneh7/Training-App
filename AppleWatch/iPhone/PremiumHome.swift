@@ -6259,7 +6259,9 @@ struct PremiumCoachConversation: View {
         case .createStrength:
             let plan = coach.workout
             return (plan == nil || (plan?.date == HCPlanBuilder.dateString(Date()) &&
-                    plan?.isPreview == false && plan?.exercises.isEmpty == true)) &&
+                    plan?.isPreview == false &&
+                    coach.phoneSessionStartedAt == nil &&
+                    (plan.map { coach.completedSets(for: $0).isEmpty } ?? true))) &&
                 !action.strengthExercises.isEmpty &&
                 !actionWorkoutTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         case .createRun:
