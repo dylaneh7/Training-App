@@ -248,7 +248,17 @@ struct IMUNRunningLabDetail: View {
             ("runningPower", "Running power", "W"),
             ("runningStrideLength", "Stride length", "m"),
             ("runningGroundContactTime", "Ground contact time", "ms"),
-            ("runningVerticalOscillation", "Vertical oscillation", "cm")
+            ("runningVerticalOscillation", "Vertical oscillation", "cm"),
+            ("runningCadence", "Running cadence", "spm"),
+            ("runningGradeAdjustedSpeed", "Provider grade-adjusted speed", "m/s"),
+            ("runningSourceGrade", "Recorded source grade", "provider units"),
+            ("runningAltitude", "Recorded route altitude", "m"),
+            ("runningSourceTemperature", "Recorded sensor temperature", "provider units"),
+            ("providerVerticalOscillation", "External motion oscillation", "provider units"),
+            ("providerWatchVerticalOscillation", "Watch motion oscillation", "provider units"),
+            ("providerFlightTime", "Recorded flight time", "provider units"),
+            ("providerFormPower", "Recorded form power", "W"),
+            ("runningPowerWatch", "Watch-native running power", "W")
         ]
     }
 
