@@ -5,6 +5,16 @@
 	};
 	objectVersion = 56;
 	objects = {
+		0000000000000000000000F0 = {
+			isa = PBXFileReference;
+			lastKnownFileType = "sourcecode.swift";
+			path = "IMUNCoachLibrary.swift";
+			sourceTree = "<group>";
+		};
+		0000000000000000000000F1 = {
+			isa = PBXBuildFile;
+			fileRef = 0000000000000000000000F0;
+		};
 		0000000000000000000000E0 = {
 			isa = PBXFileReference;
 			lastKnownFileType = "sourcecode.swift";
@@ -323,6 +333,7 @@
 				0000000000000000000000E2,
 				0000000000000000000000E4,
 				0000000000000000000000E6,
+				0000000000000000000000F0,
 			);
 			path = iPhone;
 			sourceTree = "<group>";
@@ -503,6 +514,7 @@
 				0000000000000000000000E3,
 				0000000000000000000000E5,
 				0000000000000000000000E7,
+				0000000000000000000000F1,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
