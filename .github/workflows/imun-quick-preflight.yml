@@ -29,6 +29,17 @@ jobs:
               echo "Parsing $source"
               swiftc -frontend -parse "$source"
             done
+      - name: Compile and run pure running intelligence regressions
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/imun-portable
+          cp AppleWatch/Tests/RunningAnalyticsPortable.swift /tmp/imun-portable/main.swift
+          swiftc \
+            AppleWatch/iPhone/IMUNRunningIntelligence.swift \
+            AppleWatch/iPhone/IMUNRunAdvancedAnalytics.swift \
+            /tmp/imun-portable/main.swift \
+            -o /tmp/imun-running-intelligence-tests
+          /tmp/imun-running-intelligence-tests
       - name: Validate native project and plist files
         run: |
           python3 - <<'PY'

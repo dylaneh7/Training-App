@@ -59,6 +59,8 @@ jobs:
             AppleWatch/Shared/WorkoutModels.swift \
             AppleWatch/Shared/ProgramCatalog.swift \
             AppleWatch/Shared/HCSetReconciliation.swift \
+            AppleWatch/iPhone/IMUNRunningIntelligence.swift \
+            AppleWatch/iPhone/IMUNRunAdvancedAnalytics.swift \
             AppleWatch/Tests/main.swift \
             -o /tmp/imun-build63-unit-tests
           /tmp/imun-build63-unit-tests

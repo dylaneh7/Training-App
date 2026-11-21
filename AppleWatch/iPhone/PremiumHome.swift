@@ -117,7 +117,7 @@ private struct IMUNTodayPage: View {
     let openCoach: () -> Void
     @AppStorage("hcSelectedTab") private var selectedTab = "today"
     @AppStorage("hcTrainingActivity") private var activity = "weightlifting"
-    @AppStorage("hcPreferredHealthSource") private var preferredSource = "Auto"
+    @AppStorage("hcEitanPrimaryWearable") private var preferredSource = "Auto"
 
     private var today: String { HCPlanBuilder.dateString(Date()) }
     private var lift: HCWorkout? {
@@ -680,12 +680,16 @@ struct PremiumHomeView: View {
             NavigationStack { PremiumProgressPage() }
                 .tabItem { Label("Progress", systemImage: "chart.xyaxis.line") }
                 .tag("progress")
-            NavigationStack { PremiumRecoveryPage(appleHealth: appleHealth) }
+            NavigationStack { PremiumRecoveryPage(appleHealth: appleHealth,
+                                                  openCoach: presentIsaiah) }
                 .tabItem { Label("Health", systemImage: "heart.text.square.fill") }
                 .tag("health")
-            NavigationStack { PremiumSettingsPage(appleHealth: appleHealth) }
-                .tabItem { Label("Settings", systemImage: "gearshape.fill") }
-                .tag("settings")
+            NavigationStack {
+                PremiumCoachConversation(launchContext: "Screen: Coach")
+                    .toolbar(.hidden, for: .navigationBar)
+            }
+                .tabItem { Label("Coach", systemImage: "bubble.left.and.bubble.right.fill") }
+                .tag("coach")
         }
         .tint(HCDesign.electric)
         .preferredColorScheme(IMUNStyle.preferredScheme)
@@ -704,9 +708,11 @@ struct PremiumHomeView: View {
             }
         }
         .overlay(alignment: .bottomTrailing) {
-            IMUNIsaiahLauncherButton(glow: HCDesign.electric, action: presentIsaiah)
-                .padding(.trailing, 18)
-                .padding(.bottom, coach.isWorkoutActive ? 147 : 70)
+            if selectedTab != "coach" {
+                IMUNIsaiahLauncherButton(glow: HCDesign.electric, action: presentIsaiah)
+                    .padding(.trailing, 18)
+                    .padding(.bottom, coach.isWorkoutActive ? 147 : 70)
+            }
         }
         .sheet(isPresented: $isIsaiahPresented) {
             NavigationStack {
@@ -725,7 +731,8 @@ struct PremiumHomeView: View {
             guard url.scheme == "imun" else { return }
             let destination = url.host ?? ""
             if destination == "today" || destination == "training" ||
-               destination == "health" || destination == "progress" {
+               destination == "health" || destination == "progress" ||
+               destination == "coach" {
                 selectedTab = destination
             }
         }
@@ -791,10 +798,7 @@ struct PremiumHomeView: View {
             if tab == "progress" && coach.signedIn {
                 coach.refreshCloudProgress()
             }
-            if tab == "coach" {
-                selectedTab = "training"
-                presentIsaiah()
-            }
+            // Coach is now a real tab rather than an old pop-up shortcut.
         }
         )
     }
@@ -858,7 +862,9 @@ struct PremiumHomeView: View {
         .onAppear {
             migratePreviousHealthSourceChoice()
             runImporter.startIfAuthorized()
-            if selectedTab == "coach" { selectedTab = "training" }
+            // The former Settings tab moves to Coach > App settings.
+            // Migrate persisted tab selection before showing TabView.
+            if selectedTab == "settings" { selectedTab = "coach" }
             if coach.signedIn && coach.workout == nil { coach.refresh(date: Date()) }
             if coach.signedIn {
                 coach.refreshCloudProgress()
@@ -2208,6 +2214,32 @@ private struct PremiumRunPage: View {
                     }
                 }
                 IMUNTredictWorkoutCard()
+                NavigationLink {
+                    IMUNRunningLabPage()
+                } label: {
+                    HCCard {
+                        HStack(spacing: 14) {
+                            Image(systemName: "figure.run.circle")
+                                .font(.system(size: 24, weight: .ultraLight))
+                                .foregroundStyle(HCDesign.aqua)
+                                .frame(width: 38)
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("RUNNING LAB")
+                                    .font(HCDesign.label(11))
+                                    .tracking(1.1)
+                                    .foregroundStyle(HCDesign.aqua)
+                                Text("Dynamics · zones · pacing · progression")
+                                    .font(.system(size: 12, weight: .medium))
+                                    .foregroundStyle(HCDesign.ink)
+                            }
+                            Spacer(minLength: 5)
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 12))
+                                .foregroundStyle(HCDesign.secondary)
+                        }
+                    }
+                }
+                .buttonStyle(.plain)
                 if let actual {
                     if let distance = actual.distanceMeters,
                        let target = coach.runPlan?.targetDistanceMiles,
@@ -2407,6 +2439,7 @@ private struct IMUNCreateRunSheet: View {
 }
 
 private struct PremiumRunDetails: View {
+    @EnvironmentObject private var coach: PhoneWorkoutBridge
     let run: HCProgressRun
 
     private func number(_ v: Double?, unit: String = "", digits: Int = 0) -> String {
@@ -2420,6 +2453,30 @@ private struct PremiumRunDetails: View {
                 PremiumHeader(eyebrow: "RUN / RECORDED", title: run.title,
                               subtitle: run.date + " · " + run.source,
                               badge: run.fromAppleHealth ? "APPLE HEALTH" : "CONNECTED")
+                NavigationLink {
+                    IMUNRunningLabDetail(run: run, history: coach.runHistory)
+                } label: {
+                    HStack(spacing: 12) {
+                        Image(systemName: "waveform.path.ecg")
+                            .foregroundStyle(HCDesign.electric)
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("EXPLORE IN RUNNING LAB")
+                                .font(HCDesign.label(11))
+                                .tracking(1.1)
+                                .foregroundStyle(HCDesign.electric)
+                            Text("Recorded dynamics, pacing and training interpretation")
+                                .font(.system(size: 11))
+                                .foregroundStyle(HCDesign.secondary)
+                        }
+                        Spacer(minLength: 4)
+                        Image(systemName: "chevron.right")
+                            .foregroundStyle(HCDesign.secondary)
+                    }
+                    .padding(15)
+                    .background(HCDesign.card,
+                                in: RoundedRectangle(cornerRadius: 13))
+                }
+                .buttonStyle(.plain)
                 HCCard(accent: HCDesign.aqua) {
                     VStack(spacing: 17) {
                         HStack {
@@ -2737,6 +2794,92 @@ private struct IMUNMotionExerciseTrendView: View {
     }
 }
 
+
+/// Local session analysis from compact Apple Watch motion summaries. We retain
+/// the per-set quality and movement proxies without fabricating biomechanics.
+private enum IMUNMotionSessionReview {
+    static func observations(_ sets: [HCLoggedSet]) -> [String] {
+        let tracked = sets.compactMap(\.motionInsight)
+        guard !tracked.isEmpty else {
+            return ["No wrist-motion summaries for this session. Logged reps and weight remain available, but movement quality cannot be inferred."]
+        }
+        var result: [String] = []
+        let confidence = tracked.filter { $0.analysisConfidence == "Moderate" }.count
+        result.append("\(tracked.count) recorded sets have movement evidence; \(confidence) have moderate capture confidence. These are sensor-quality labels, not movement-quality grades.")
+        let coverage = tracked.compactMap(\.sampleCoveragePercent)
+            .filter(\.isFinite)
+        if !coverage.isEmpty {
+            let mean = coverage.reduce(0, +) / Double(coverage.count)
+            result.append(String(format: "Average wrist-signal sample coverage was %.0f%% across %d sets.", mean, coverage.count))
+        }
+        let slowdown = tracked.compactMap(\.lastCycleSlowdownPercent)
+            .filter { $0.isFinite && $0 > 18 }
+        if !slowdown.isEmpty {
+            result.append("\(slowdown.count) sets ended with a detected cycle over 18% slower than their earlier cycles. Check exercise, tempo intention and effort before treating this as fatigue.")
+        }
+        let travel = tracked.compactMap(\.lastWristRotationChangePercent)
+            .filter { $0.isFinite && $0 < -18 }
+        if !travel.isEmpty {
+            result.append("\(travel.count) sets showed reduced final-cycle relative wrist rotation. This is not joint range of motion.")
+        }
+        let gaps = tracked.reduce(0) { $0 + ($1.samplingGapCount ?? 0) }
+        if gaps > 0 {
+            result.append("\(gaps) sensor interruptions may limit rep timing or comparison reliability.")
+        }
+        let corrections = sets.filter {
+            guard let estimate = $0.motionInsight?.detectedReps else { return false }
+            return estimate != $0.reps
+        }.count
+        if corrections > 0 {
+            result.append("\(corrections) sets differ between saved reps and detected cycles. Manual corrections remain authoritative.")
+        }
+        return result
+    }
+
+    static func coachContext(title: String, sets: [HCLoggedSet]) -> String {
+        var lines = [
+            "The athlete opened a workout-specific IsAIah movement review for " + title + ".",
+            "Evidence is from experimental Apple Watch wrist accelerometer/gyroscope proxies; not bar speed, force, anatomical joint ROM or verified lifting form.",
+            "Only analyze captured sets and comparable placement. Never diagnose injury or issue automatic workout edits.",
+            "SESSION FINDINGS: " + observations(sets).joined(separator: " ")
+        ]
+        for item in sets.prefix(28) {
+            let prefix = "\(item.exerciseName) / set \(item.index) / saved reps \(item.reps)"
+            guard let data = item.motionInsight else {
+                lines.append(prefix + " / no motion capture")
+                continue
+            }
+            var facts = [
+                prefix,
+                "detected cycles \(data.detectedReps)",
+                "sensor \(data.source)",
+                "position \(data.wearableLocation ?? data.wearSide)",
+                "capture confidence \(data.analysisConfidence ?? "unrated")"
+            ]
+            if let coverage = data.sampleCoveragePercent {
+                facts.append(String(format: "coverage %.0f%%", coverage))
+            }
+            if let tempo = data.averageCycleSeconds {
+                facts.append(String(format: "average cycle %.2f sec", tempo))
+            }
+            if let last = data.lastCycleSlowdownPercent {
+                facts.append(String(format: "last-cycle slowdown %+.0f%%", last))
+            }
+            if let rotation = data.meanWristRotationDegrees {
+                facts.append(String(format: "mean integrated wrist rotation %.0f degrees (proxy)", rotation))
+            }
+            if let peak = data.peakWristRotationDegreesPerSecond {
+                facts.append(String(format: "peak wrist rotation %.0f degrees/sec", peak))
+            }
+            if let warnings = data.analysisWarnings, !warnings.isEmpty {
+                facts.append("warnings " + warnings.joined(separator: "; "))
+            }
+            lines.append(facts.joined(separator: " | "))
+        }
+        return lines.joined(separator: "\n")
+    }
+}
+
 private struct IMUNMotionWorkoutDetail: View {
     @EnvironmentObject private var coach: PhoneWorkoutBridge
     let session: IMUNMotionSession
@@ -2826,6 +2969,41 @@ private struct IMUNMotionWorkoutDetail: View {
                                 .font(.system(size: 10))
                                 .foregroundStyle(HCDesign.secondary)
                         }
+                    }
+                }
+                HCSectionTitle(title: "Session interpretation",
+                               detail: "Evidence from captured Apple Watch sets")
+                HCCard {
+                    VStack(alignment: .leading, spacing: 12) {
+                        ForEach(Array(IMUNMotionSessionReview.observations(sets).enumerated()),
+                                id: \.offset) { entry in
+                            HStack(alignment: .top, spacing: 10) {
+                                Image(systemName: "waveform.path")
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(HCDesign.aqua)
+                                    .frame(width: 16)
+                                Text(entry.element)
+                                    .font(.system(size: 12))
+                                    .foregroundStyle(HCDesign.ink)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                        }
+                        NavigationLink {
+                            PremiumCoachConversation(
+                                launchContext: IMUNMotionSessionReview.coachContext(
+                                    title: session.title, sets: sets))
+                        } label: {
+                            HStack(spacing: 9) {
+                                Image(systemName: "sparkle.magnifyingglass")
+                                Text("Analyze this workout with IsAIah")
+                                Spacer(minLength: 4)
+                                Image(systemName: "arrow.up.right")
+                            }
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(HCDesign.electric)
+                            .padding(.vertical, 10)
+                        }
+                        .buttonStyle(.plain)
                     }
                 }
                 HCSectionTitle(title: "Exercises and rep analysis",
@@ -4049,14 +4227,190 @@ private struct HCHealthCategoryGroup: Identifiable {
     var id: String { name }
 }
 
+
+private struct IMUNWearableIntelligenceCard: View {
+    @ObservedObject var health: HCAppleHealthReader
+    @Binding var primary: String
+    @State private var report = IMUNWearableIntelligence.analyze([], primary: "Auto")
+    @State private var details = false
+    @State private var coverage: [CoverageRow] = []
+
+    private struct CoverageRow: Identifiable {
+        let source: String
+        let signals: Int
+        let days: Int
+        var id: String { source }
+    }
+
+    private var sources: [String] {
+        Array(Set(["WHOOP", "Apple Watch", "Garmin", "Chargerless", primary]
+            .filter { $0 != "Auto" } +
+            health.metrics.map { IMUNDataProvenance.provider($0.source) })).sorted()
+    }
+    private func update() {
+        report = IMUNWearableIntelligence.analyze(
+            health.heartRateObservations, primary: primary)
+        let all = Dictionary(grouping: health.metricHistory, by: \.source)
+        coverage = all.map { source, rows in
+            CoverageRow(source: source,
+                        signals: Set(rows.map(\.name)).count,
+                        days: Set(rows.map(\.date)).count)
+        }.sorted { lhs, rhs in
+            lhs.signals == rhs.signals ? lhs.source < rhs.source :
+                lhs.signals > rhs.signals
+        }
+    }
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("IMUN  /  SENSOR INTELLIGENCE")
+                        .font(HCDesign.label(9))
+                        .tracking(1.4)
+                        .foregroundStyle(HCDesign.aqua)
+                    Text("Wearable intelligence")
+                        .font(HCDesign.display(21))
+                        .foregroundStyle(HCDesign.ink)
+                    Text("The evidence behind every measurement.")
+                        .font(.system(size: 12))
+                        .foregroundStyle(HCDesign.secondary)
+                }
+                Spacer()
+                Image(systemName: "waveform.path.ecg.rectangle")
+                    .font(.system(size: 23, weight: .light))
+                    .foregroundStyle(HCDesign.electric)
+            }
+            HStack {
+                Text("PRIMARY WEARABLE")
+                    .font(HCDesign.label(10))
+                    .foregroundStyle(HCDesign.secondary)
+                Spacer()
+                Picker("Primary wearable", selection: $primary) {
+                    Text("Automatic").tag("Auto")
+                    ForEach(sources, id: \.self) { name in
+                        Text(name).tag(name)
+                    }
+                }
+                .pickerStyle(.menu)
+                .tint(HCDesign.electric)
+            }
+            Divider().overlay(HCDesign.outline)
+            Text(report.summary)
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(HCDesign.ink)
+                .fixedSize(horizontal: false, vertical: true)
+            Text(report.sourceGuidance)
+                .font(.system(size: 11))
+                .foregroundStyle(HCDesign.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            if !coverage.isEmpty {
+                Text("\(coverage.reduce(0) { $0 + $1.signals }) source-specific measured signals across \(coverage.count) publishers")
+                    .font(.system(size: 11))
+                    .foregroundStyle(HCDesign.secondary)
+            }
+            HStack(spacing: 20) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("\(report.sources.count)").font(HCDesign.metric(23))
+                    Text("Sources").font(HCDesign.label(10))
+                }
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("\(report.alignedWindows)").font(HCDesign.metric(23))
+                    Text("Aligned windows").font(HCDesign.label(10))
+                }
+                Spacer()
+            }
+            .foregroundStyle(HCDesign.ink)
+            if !report.sources.isEmpty {
+                DisclosureGroup(isExpanded: $details) {
+                    VStack(alignment: .leading, spacing: 12) {
+                        if !coverage.isEmpty {
+                            Text("HEALTH PROFILE COVERAGE")
+                                .font(HCDesign.label(9))
+                                .foregroundStyle(HCDesign.aqua)
+                            ForEach(coverage.prefix(8)) { row in
+                                HStack(alignment: .firstTextBaseline) {
+                                    Text(row.source)
+                                        .font(.system(size: 12, weight: .medium))
+                                    Spacer()
+                                    Text("\(row.signals) signals · \(row.days) days")
+                                        .font(HCDesign.label(10))
+                                        .foregroundStyle(HCDesign.secondary)
+                                }
+                            }
+                            Divider().overlay(HCDesign.outline)
+                        }
+                        Text("ALIGNED HEART RATE SOURCES")
+                            .font(HCDesign.label(9))
+                            .foregroundStyle(HCDesign.aqua)
+                        ForEach(report.sources) { item in
+                            HStack(alignment: .top) {
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text(item.source).font(.system(size: 12, weight: .semibold))
+                                    Text("\(item.uniqueMinutes) sampled minutes · \(item.comparedSamples) paired" +
+                                         (item.unusualJumps > 0 ? " · \(item.unusualJumps) rapid changes" : ""))
+                                        .font(.system(size: 10))
+                                        .foregroundStyle(HCDesign.secondary)
+                                }
+                                Spacer(minLength: 8)
+                                Text("\(item.sampleCount) samples")
+                                    .font(HCDesign.label(10))
+                                    .foregroundStyle(HCDesign.secondary)
+                            }
+                        }
+                        ForEach(report.agreements) { item in
+                            HStack {
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text(item.first + " / " + item.second)
+                                        .font(.system(size: 12, weight: .semibold))
+                                    Text("\(item.pairs) windows · \(Int(item.nearAgreementPercent.rounded()))% within 5 bpm")
+                                        .font(.system(size: 10))
+                                        .foregroundStyle(HCDesign.secondary)
+                                }
+                                Spacer(minLength: 8)
+                                Text(String(format: "%.1f bpm", item.medianDifferenceBPM))
+                                    .font(HCDesign.metric(15))
+                                    .monospacedDigit()
+                            }
+                        }
+                        Text("Time-matched agreement is not a calibrated accuracy ranking. Missing data and unlike HRV methods are never blended.")
+                            .font(.system(size: 10))
+                            .foregroundStyle(HCDesign.secondary)
+                    }
+                    .padding(.top, 10)
+                } label: {
+                    Text("Review sensor agreement")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(HCDesign.electric)
+                }
+                .tint(HCDesign.electric)
+            }
+
+        }
+        .padding(16)
+        .background(HCDesign.card,
+                    in: RoundedRectangle(cornerRadius: 17, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 17, style: .continuous)
+                    .strokeBorder(HCDesign.outline, lineWidth: 1))
+        .onAppear(perform: update)
+        .onReceive(health.$heartRateObservations) { _ in
+            DispatchQueue.main.async { update() }
+        }
+        .onReceive(health.$metricHistory) { _ in
+            DispatchQueue.main.async { update() }
+        }
+        .onChange(of: primary) { _, _ in update() }
+    }
+}
+
 private struct PremiumRecoveryPage: View {
     @EnvironmentObject private var coach: PhoneWorkoutBridge
     @ObservedObject var appleHealth: HCAppleHealthReader
+    let openCoach: () -> Void
     @State private var showHistory = false
     @State private var showRawReadings = false
     @AppStorage("hcSelectedHealthCategory") private var selectedHealthCategory = "Overview"
     @AppStorage("hcSelectedHealthMetric") private var selectedHealthMetric = ""
-    @AppStorage("hcPreferredHealthSource") private var preferredSource = "Auto"
+    @AppStorage("hcEitanPrimaryWearable") private var preferredSource = "Auto"
     @State private var metricSearch = ""
     @State private var expandedTrends: Set<String> = []
     @State private var expandedHealthGroups: Set<String> = ["Sleep", "Heart & Vitals"]
@@ -4303,12 +4657,12 @@ private struct PremiumRecoveryPage: View {
                             .foregroundStyle(HCDesign.secondary)
                     }
                     .padding(.bottom, 8)
-                    Text("Your health, clearly.")
-                        .font(.system(size: 33, weight: .semibold, design: .default))
-                        .tracking(-1.1)
+                    Text("Health.")
+                        .font(HCDesign.display(31))
+                        .tracking(-0.8)
                         .foregroundStyle(HCDesign.ink)
                         .fixedSize(horizontal: false, vertical: true)
-                    Text("One view of your measurements. Every source keeps its own data and baseline.")
+                    Text("Your measurements, their sources, and the patterns that matter.")
                         .font(.system(size: 14))
                         .foregroundStyle(HCDesign.secondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -4331,25 +4685,6 @@ private struct PremiumRecoveryPage: View {
                                         title: "With baselines")
                 }
 
-                HStack(spacing: 8) {
-                    Text("PREFERRED SOURCE")
-                        .font(HCDesign.label(9))
-                        .foregroundStyle(HCDesign.secondary)
-                    Spacer(minLength: 8)
-                    Picker("Health source", selection: $preferredSource) {
-                        Text("Automatic").tag("Auto")
-                        ForEach(Array(Set(allFamilies.flatMap { family in
-                            family.readings.map {
-                                HCMetricFamily.sourceName($0.source)
-                            }
-                        })).sorted(), id: \.self) { source in
-                            Text(source).tag(source)
-                        }
-                    }
-                    .pickerStyle(.menu)
-                    .tint(HCDesign.electric)
-                    .accessibilityLabel("Preferred Health reading source")
-                }
                 HCSectionTitle(title: "At a glance", detail: "Latest available readings")
                 if appleHealth.loading && allFamilies.isEmpty {
                     IMUNLoadingPlaceholder(lines: 4, height: 170)
@@ -4378,6 +4713,21 @@ private struct PremiumRecoveryPage: View {
                     .padding(.vertical, 4)
                 }
 
+                IMUNWearableIntelligenceCard(health: appleHealth,
+                                            primary: $preferredSource)
+                Button(action: openCoach) {
+                    HStack(spacing: 10) {
+                        Image(systemName: "sparkles")
+                        Text("Review your health profile with IsAIah")
+                        Spacer(minLength: 8)
+                        Image(systemName: "arrow.up.right")
+                    }
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(HCDesign.electric)
+                    .padding(.horizontal, 4)
+                }
+                .buttonStyle(.plain)
+                .accessibilityHint("Opens IsAIah. Health information is shared only with permission when you send a message.")
                 HCSectionTitle(title: "Measurements",
                                detail: selectedHealthCategory == "Overview" ?
                                     "At a glance" : selectedHealthCategory)
@@ -4771,7 +5121,7 @@ private struct PremiumCoachPage: View {
 // All original settings, exports and integrations are preserved here.
 // Real on-screen AI conversation. The model is called only on explicit Send.
 // The server uses the signed-in user's JWT; provider credentials stay server-side.
-private struct IMUNCoachTurn: Identifiable, Codable {
+struct IMUNCoachTurn: Identifiable, Codable {
     var id: UUID = UUID()
     let role: String
     let text: String
@@ -4779,14 +5129,14 @@ private struct IMUNCoachTurn: Identifiable, Codable {
 
 /// Private, locally stored conversation memory. This is retrieval, not
 /// on-device model training. Nothing is uploaded until the athlete taps Send.
-private enum IMUNCoachLocalMemory {
+enum IMUNCoachLocalMemory {
     private static var archiveURL: URL? {
         FileManager.default.urls(for: .applicationSupportDirectory,
                                  in: .userDomainMask).first?
             .appendingPathComponent("imun-isaiah-conversation-memory.json")
     }
 
-    private static func read() -> [IMUNCoachTurn] {
+    static func read() -> [IMUNCoachTurn] {
         guard let archiveURL,
               let data = try? Data(contentsOf: archiveURL),
               let value = try? JSONDecoder().decode([IMUNCoachTurn].self, from: data)
@@ -5032,7 +5382,7 @@ private struct IMUNCoachVO2Evidence: View {
 
 // A real conversation surface, not a backend diagnostics panel. Chats remain
 // on the phone. Nothing is transmitted until the athlete chooses Send.
-private struct PremiumCoachConversation: View {
+struct PremiumCoachConversation: View {
     let launchContext: String
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var coach: PhoneWorkoutBridge
@@ -5043,6 +5393,11 @@ private struct PremiumCoachConversation: View {
     @AppStorage("hcAIShareRecovery") private var shareRecovery = false
     @AppStorage("hcIsaiahRememberChats") private var rememberChats = true
     @AppStorage("hcCoachConversationLocalV1") private var storedConversation = Data()
+    @ObservedObject private var threadLibrary = IMUNCoachThreadLibrary.shared
+    @State private var showThreadHistory = false
+    @State private var showPrivacyPanel = false
+    @State private var showCoachSettings = false
+    @State private var confirmEraseHistory = false
     @FocusState private var composerFocused: Bool
     @State private var question = ""
     @State private var pendingAttachments: [IMUNCoachAttachment] = []
@@ -5056,7 +5411,6 @@ private struct PremiumCoachConversation: View {
     @State private var pendingAction: IMUNCoachActionProposal?
     @State private var selectedActionWorkoutID = ""
     @State private var actionMoveDate = Date()
-    @AppStorage("hcDesignPreset") private var designPreset = "techno"
     @AppStorage("hcSelectedTab") private var selectedTab = "training"
     @AppStorage("hcTrainingActivity") private var selectedActivity = "weightlifting"
     @AppStorage("hcMotivationSource") private var motivationSource = "off"
@@ -5079,12 +5433,13 @@ private struct PremiumCoachConversation: View {
     @State private var actionEditRestSeconds = 120
     @State private var actionEditWeightText = ""
     @State private var actionWorkoutSignature = ""
-    @State private var actionPreferenceKey = "hcDesignMode"
-    @State private var actionPreferenceValue = "system"
+    @State private var actionPreferenceKey = "hcRunCueMinutes"
+    @State private var actionPreferenceValue = "5"
 
     private var context: String {
-        turns.suffix(6).map { turn in
-            (turn.role == "user" ? "Athlete: " : "IsAIah: ") + turn.text
+        turns.suffix(14).map { turn in
+            (turn.role == "user" ? "Athlete: " : "IsAIah: ") +
+                String(turn.text.prefix(850))
         }.joined(separator: "\n")
     }
     private var canSend: Bool {
@@ -5112,40 +5467,45 @@ private struct PremiumCoachConversation: View {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 14) {
                         if turns.isEmpty {
-                            VStack(alignment: .leading, spacing: 12) {
-                                Text("What can I help with?")
-                                    .font(.system(size: 21, weight: .semibold))
-                                    .foregroundStyle(HCDesign.ink)
-                                Text("Ask naturally about this screen, your training or your health.")
+                            if !coach.signedIn {
+                                PremiumLogin()
+                                    .padding(.bottom, 12)
+                            }
+                            VStack(alignment: .leading, spacing: 19) {
+                                HStack(spacing: 13) {
+                                    IMUNIsaiahMark(size: 42)
+                                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                                    VStack(alignment: .leading, spacing: 5) {
+                                        Text("YOUR COACHING SPACE")
+                                            .font(HCDesign.label(10))
+                                            .tracking(1.4)
+                                            .foregroundStyle(HCDesign.aqua)
+                                        Text("What are we working on?")
+                                            .font(HCDesign.display(24))
+                                            .foregroundStyle(HCDesign.ink)
+                                    }
+                                }
+                                Text("Talk through a workout, interpret a running trend, or ask IsAIah to prepare a change in your training. Your records are never edited without review.")
                                     .font(.system(size: 13))
                                     .foregroundStyle(HCDesign.secondary)
-                                suggestion("Is my running fitness improving since September?")
-                                suggestion("Are my legs tired from recent training?")
-                                suggestion("Compare my training load and recovery this week")
-                                suggestion("Review today's workout")
+                                    .fixedSize(horizontal: false, vertical: true)
+                                VStack(alignment: .leading, spacing: 8) {
+                                    Text("SUGGESTED STARTS")
+                                        .font(HCDesign.label(10))
+                                        .tracking(1.2)
+                                        .foregroundStyle(HCDesign.secondary)
+                                    suggestion("Assess this week's running and strength load")
+                                    suggestion("What is changing in my running performance?")
+                                    suggestion("Review today's training and suggest adjustments")
+                                    suggestion("Compare my wearable heart-rate readings")
+                                }
                             }
-                            .padding(.vertical, 14)
+                            .padding(.top, 23)
+                            .padding(.bottom, 18)
                         }
 
                         ForEach(turns) { turn in
-                            HStack(alignment: .bottom, spacing: 9) {
-                                if turn.role == "user" {
-                                    Spacer(minLength: 35)
-                                } else {
-                                    IMUNIsaiahMark(size: 29)
-                                }
-                                Text(turn.text)
-                                    .font(.system(size: 14))
-                                    .foregroundStyle(HCDesign.ink)
-                                    .textSelection(.enabled)
-                                    .padding(.horizontal, 14)
-                                    .padding(.vertical, 12)
-                                    .background(turn.role == "user" ?
-                                                HCDesign.electric.opacity(0.14) :
-                                                HCDesign.card,
-                                                in: RoundedRectangle(cornerRadius: 16))
-                                if turn.role != "user" { Spacer(minLength: 35) }
-                            }
+                            IMUNCoachBubble(turn: turn)
                         }
                         if !isSending && turns.last?.role == "assistant" {
                             if shouldShowRunEvidence {
@@ -5239,14 +5599,56 @@ private struct PremiumCoachConversation: View {
         .toolbarBackground(.visible, for: .navigationBar)
         .safeAreaInset(edge: .bottom, spacing: 0) { composer }
         .onAppear {
-            if let decoded = try? JSONDecoder().decode([IMUNCoachTurn].self,
-                                                       from: storedConversation) {
-                turns = Array(decoded.suffix(24))
-                if rememberChats { IMUNCoachLocalMemory.save(turns) }
-            }
+            restoreConversationHistory()
             // Refresh all authorized Apple Health workout types, including
             // older records, before answering history questions.
             runImporter.startIfAuthorized()
+        }
+        .onChange(of: coach.coachAccountID) { _, _ in
+            restoreConversationHistory()
+        }
+        .onChange(of: threadLibrary.selectedID) { _, newID in
+            if let selected = threadLibrary.selected,
+               selected.id == newID,
+               selected.messages.map(\.id) != turns.map(\.id) {
+                turns = selected.messages
+                pendingAction = nil
+                question = ""
+            }
+        }
+        .onReceive(threadLibrary.$threads) { _ in
+            // @Published notifies before the new value commits.
+            DispatchQueue.main.async {
+                // Coach tab and floating sheet share one private archive.
+                guard !isSending, let selected = threadLibrary.selected else {
+                    return
+                }
+                if selected.messages.map(\.id) != turns.map(\.id) {
+                    turns = selected.messages
+                }
+            }
+        }
+        .sheet(isPresented: $showThreadHistory) {
+            IMUNCoachHistorySheet(
+                library: threadLibrary,
+                onSelect: { switchConversation(to: $0) },
+                onCreate: { newConversation() },
+                onDelete: { deleteConversation($0) })
+        }
+        .sheet(isPresented: $showPrivacyPanel) {
+            privacyPanel
+        }
+        .sheet(isPresented: $showCoachSettings) {
+            NavigationStack {
+                PremiumSettingsPage(appleHealth: appleHealth)
+                    .toolbar {
+                        ToolbarItem(placement: .topBarTrailing) {
+                            Button("Done") { showCoachSettings = false }
+                        }
+                    }
+            }
+            .environmentObject(coach)
+            .environmentObject(appleHealth)
         }
         .task {
             try? await Task.sleep(nanoseconds: 350_000_000)
@@ -5304,65 +5706,90 @@ private struct PremiumCoachConversation: View {
     // and the extra iOS navigation bar, maximizing the conversation viewport.
     private var isaiahBanner: some View {
         HStack(spacing: 10) {
-            IMUNIsaiahArtwork(layout: .full)
-                .frame(width: 121, height: 26)
-                .accessibilityLabel("IsAIah")
-            Spacer(minLength: 2)
-            HStack(spacing: 4) {
-                Circle()
-                    .fill(HCDesign.electric)
-                    .frame(width: 4, height: 4)
-                Text((launchContext.components(separatedBy: "\n").first ??
-                      "iMun").replacingOccurrences(of: "Screen: ", with: ""))
+            IMUNIsaiahMark(size: 31)
+                .clipShape(RoundedRectangle(cornerRadius: 9))
+            VStack(alignment: .leading, spacing: 3) {
+                Text("IsAIah")
+                    .font(HCDesign.display(20))
+                    .foregroundStyle(HCDesign.ink)
+                Text(coach.signedIn ? "Personal training intelligence" :
+                     "Sign in to begin coaching")
+                    .font(.system(size: 10))
+                    .foregroundStyle(HCDesign.secondary)
                     .lineLimit(1)
-                    .truncationMode(.tail)
             }
-            .font(.system(size: 10, weight: .medium))
-            .foregroundStyle(HCDesign.secondary)
-            .accessibilityLabel("Current screen: " +
-                (launchContext.components(separatedBy: "\n").first ?? "iMun"))
-            if !turns.isEmpty {
-                Button {
-                    turns.removeAll()
-                    storedConversation = Data()
-                    pendingAction = nil
-                    errorMessage = nil
-                    composerFocused = true
-                } label: {
-                    Image(systemName: "square.and.pencil")
-                        .frame(width: 25, height: 28)
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("New IsAIah conversation")
-            }
+            Spacer(minLength: 0)
             Button {
-                dismiss()
+                composerFocused = false
+                showThreadHistory = true
             } label: {
-                Image(systemName: "xmark")
-                    .font(.system(size: 12, weight: .semibold))
-                    .frame(width: 27, height: 28)
+                Image(systemName: "clock.arrow.circlepath")
+                    .font(.system(size: 17, weight: .regular))
+                    .frame(width: 30, height: 35)
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("Close IsAIah")
+            .disabled(isSending)
+            .accessibilityLabel("View previous IsAIah conversations")
+            Button {
+                newConversation()
+            } label: {
+                Image(systemName: "square.and.pencil")
+                    .font(.system(size: 17, weight: .regular))
+                    .frame(width: 30, height: 35)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .disabled(isSending)
+            .accessibilityLabel("Start a new IsAIah conversation")
+            Menu {
+                Button {
+                    showPrivacyPanel = true
+                    composerFocused = false
+                } label: {
+                    Label("Privacy and data sharing", systemImage: "lock.shield")
+                }
+                Button {
+                    showCoachSettings = true
+                    composerFocused = false
+                } label: {
+                    Label("App settings", systemImage: "gearshape")
+                }
+            } label: {
+                Image(systemName: "gearshape")
+                    .font(.system(size: 17, weight: .regular))
+                    .frame(width: 29, height: 35)
+                    .contentShape(Rectangle())
+            }
+            .accessibilityLabel("IsAIah settings and privacy")
+            if selectedTab != "coach" {
+                Button {
+                    dismiss()
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 12, weight: .semibold))
+                        .frame(width: 27, height: 35)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Close IsAIah")
+            }
         }
-        .frame(maxWidth: .infinity)
-        .padding(.horizontal, 15)
-        .padding(.vertical, 8)
         .foregroundStyle(HCDesign.secondary)
-        .background(IMUNIsaiahBrand.graphite)
+        .padding(.horizontal, 17)
+        .padding(.vertical, 9)
+        .background(HCDesign.canvas)
         .overlay(alignment: .bottom) {
-            Rectangle()
-                .fill(HCDesign.electric.opacity(0.2))
-                .frame(height: 0.5)
+            Rectangle().fill(HCDesign.outline.opacity(0.70))
+                .frame(height: 0.7)
         }
     }
 
     private var composer: some View {
-        VStack(spacing: 9) {
+        VStack(spacing: 8) {
             if !pendingAttachments.isEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 7) {
+                    HStack(spacing: 8) {
                         ForEach(pendingAttachments) { item in
                             HStack(spacing: 6) {
                                 Image(systemName: item.kind == "image" ?
@@ -5379,9 +5806,8 @@ private struct PremiumCoachConversation: View {
                             .font(.system(size: 11, weight: .medium))
                             .foregroundStyle(HCDesign.ink)
                             .padding(.horizontal, 10)
-                            .padding(.vertical, 8)
-                            .background(HCDesign.raised,
-                                        in: Capsule())
+                            .padding(.vertical, 7)
+                            .background(HCDesign.raised, in: Capsule())
                         }
                     }
                 }
@@ -5392,101 +5818,159 @@ private struct PremiumCoachConversation: View {
                     .foregroundStyle(HCDesign.caution)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
-            HStack(alignment: .bottom, spacing: 6) {
+            HStack(alignment: .bottom, spacing: 4) {
                 Button {
                     showFileImporter = true
                 } label: {
                     Image(systemName: "paperclip")
-                        .font(.system(size: 17, weight: .medium))
-                        .frame(width: 31, height: 43)
+                        .font(.system(size: 16, weight: .regular))
+                        .frame(width: 31, height: 42)
                 }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Attach a workout file")
+                .accessibilityLabel("Attach a training file")
                 PhotosPicker(selection: $selectedPhoto, matching: .images) {
-                    Image(systemName: "photo.on.rectangle")
-                        .font(.system(size: 17, weight: .medium))
-                        .frame(width: 31, height: 43)
+                    Image(systemName: "photo")
+                        .font(.system(size: 16, weight: .regular))
+                        .frame(width: 29, height: 42)
                 }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Attach a training photo")
-                TextField("Message IsAIah…", text: $question, axis: .vertical)
+                .accessibilityLabel("Attach a photo")
+                TextField("Ask IsAIah anything…",
+                          text: $question, axis: .vertical)
                     .lineLimit(1...5)
                     .focused($composerFocused)
                     .submitLabel(.send)
                     .font(.system(size: 15))
                     .tint(HCDesign.electric)
                     .foregroundStyle(HCDesign.ink)
-                    .padding(.leading, 14)
-                    .padding(.vertical, 11)
+                    .padding(.leading, 8)
+                    .padding(.vertical, 10)
                     .onSubmit { if canSend { send() } }
                     .accessibilityLabel("Message IsAIah")
                 Button(action: send) {
                     Image(systemName: "arrow.up")
-                        .font(.system(size: 17, weight: .bold))
-                        .foregroundStyle(canSend ? Color.white : HCDesign.secondary)
-                        .frame(width: 43, height: 43)
-                        .background(canSend ?
-                                    Color(red: 0.13, green: 0.47, blue: 0.97) :
-                                    HCDesign.raised,
-                                    in: Circle())
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(canSend ? IMUNStyle.onAccent :
+                                         HCDesign.secondary)
+                        .frame(width: 38, height: 38)
+                        .background(canSend ? HCDesign.electric :
+                                    HCDesign.raised, in: Circle())
                 }
                 .disabled(!canSend)
                 .buttonStyle(.plain)
-                .accessibilityLabel("Send message to IsAIah")
-                .padding(5)
+                .accessibilityLabel("Send message")
+                .padding(4)
             }
+            .foregroundStyle(HCDesign.secondary)
             .background(HCDesign.card,
-                        in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+                        in: RoundedRectangle(cornerRadius: 20, style: .continuous))
             .overlay {
-                RoundedRectangle(cornerRadius: 22)
-                    .strokeBorder(HCDesign.outline, lineWidth: 1)
+                RoundedRectangle(cornerRadius: 20)
+                    .strokeBorder(HCDesign.outline.opacity(0.72), lineWidth: 1)
             }
-            Toggle(isOn: $shareRecovery) {
-                HStack(spacing: 6) {
-                    Image(systemName: "heart.text.square")
-                    Text("Share Apple Health workouts & recovery")
-                    Spacer(minLength: 0)
-                    if shareRecovery {
-                        Text("\(runImporter.workouts.count) workouts")
-                            .foregroundStyle(HCDesign.electric)
+            HStack(spacing: 6) {
+                Button {
+                    showPrivacyPanel = true
+                    composerFocused = false
+                } label: {
+                    HStack(spacing: 5) {
+                        Image(systemName: shareRecovery ?
+                              "heart.text.square.fill" : "lock.shield")
+                        Text(shareRecovery ? "Apple Health on" :
+                             "Apple Health off")
+                        Image(systemName: "chevron.down")
+                            .font(.system(size: 8, weight: .semibold))
                     }
+                    .font(.system(size: 10, weight: .medium))
                 }
-                .font(.system(size: 11))
-                .foregroundStyle(HCDesign.secondary)
-            }
-            .tint(HCDesign.electric)
-            if shareRecovery && runImporter.workouts.isEmpty &&
-                !runImporter.refreshing {
-                HStack(spacing: 9) {
-                    Text("No Apple Health workout history loaded yet.")
-                        .font(.system(size: 11))
+                .buttonStyle(.plain)
+                .accessibilityLabel("Review IsAIah health-sharing preferences")
+                Spacer(minLength: 4)
+                if let failure = threadLibrary.storageMessage {
+                    Text(failure)
+                        .foregroundStyle(HCDesign.caution)
+                        .lineLimit(1)
+                } else {
+                    Text("Your message is sent when submitted")
                         .foregroundStyle(HCDesign.secondary)
-                    Spacer(minLength: 4)
-                    Button("Connect") {
-                        appleHealth.connect(onRequestCompleted: {
-                            runImporter.startIfAuthorized()
-                        })
-                    }
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(HCDesign.aqua)
+                        .lineLimit(1)
                 }
             }
-            Toggle("Use relevant previous IsAIah chats", isOn: $rememberChats)
-                .font(.system(size: 11))
-                .tint(HCDesign.electric)
-                .foregroundStyle(HCDesign.secondary)
-                .onChange(of: rememberChats) { _, enabled in
-                    if enabled { IMUNCoachLocalMemory.save(turns) }
-                }
-
+            .foregroundStyle(HCDesign.secondary)
+            .font(.system(size: 10))
         }
         .padding(.horizontal, 14)
-        .padding(.top, 12)
+        .padding(.top, 10)
         .padding(.bottom, 8)
         .background(HCDesign.canvas)
         .overlay(alignment: .top) {
-            Rectangle().fill(HCDesign.outline).frame(height: 1)
+            Rectangle()
+                .fill(HCDesign.outline.opacity(0.65))
+                .frame(height: 0.7)
         }
+    }
+
+    private var privacyPanel: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    Toggle("Include Apple Health and recovery context",
+                           isOn: $shareRecovery)
+                        .tint(HCDesign.electric)
+                    Text("iMun training and connected Garmin/Tredict summaries are shared only when you send a message. This optional switch additionally includes authorized Apple Health workouts, metrics, and EITAN context. The primary wearable setting remains separate.")
+                        .font(.footnote)
+                        .foregroundStyle(HCDesign.secondary)
+                    if shareRecovery && runImporter.workouts.isEmpty &&
+                       !runImporter.refreshing {
+                        Button("Connect Apple Health") {
+                            appleHealth.connect(onRequestCompleted: {
+                                runImporter.startIfAuthorized()
+                            })
+                        }
+                    }
+                } header: { Text("Data sharing") }
+                Section {
+                    Toggle("Use earlier IsAIah chats for continuity",
+                           isOn: $rememberChats)
+                        .tint(HCDesign.electric)
+                    Text("Conversations are saved privately on this iPhone under your iMun account. This setting controls whether relevant earlier messages are included with future AI requests.")
+                        .font(.footnote)
+                        .foregroundStyle(HCDesign.secondary)
+                    Button("Delete my saved conversations",
+                           role: .destructive) {
+                        confirmEraseHistory = true
+                    }
+                    .disabled(isSending)
+                } header: { Text("Conversation history") }
+                Section {
+                    Text("IsAIah analyzes source-labeled evidence and suggests actions. Changes to workouts or app settings still require your review and confirmation.")
+                        .font(.footnote)
+                        .foregroundStyle(HCDesign.secondary)
+                } header: { Text("Your control") }
+            }
+            .scrollContentBackground(.hidden)
+            .background(HCDesign.canvas)
+            .navigationTitle("Privacy & memory")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") { showPrivacyPanel = false }
+                }
+            }
+            .confirmationDialog("Delete all IsAIah conversations?",
+                isPresented: $confirmEraseHistory,
+                titleVisibility: .visible) {
+                Button("Delete saved conversations", role: .destructive) {
+                    threadLibrary.clear()
+                    IMUNCoachLocalMemory.clear()
+                    storedConversation = Data()
+                    turns = []
+                    pendingAction = nil
+                    question = ""
+                }
+            } message: {
+                Text("This clears the saved chat archive for this iMun account on this iPhone. It does not delete your workouts or Health measurements.")
+            }
+        }
+        .presentationDetents([.medium, .large])
     }
 
     private func followUp(_ text: String) -> some View {
@@ -5529,10 +6013,60 @@ private struct PremiumCoachConversation: View {
     }
 
     private func persist() {
-        if let saved = try? JSONEncoder().encode(Array(turns.suffix(24))) {
-            storedConversation = saved
+        threadLibrary.update(turns, screen: launchContext)
+    }
+
+    private func restoreConversationHistory() {
+        let stored = (try? JSONDecoder().decode([IMUNCoachTurn].self,
+                                               from: storedConversation)) ?? []
+        let archived = IMUNCoachLocalMemory.read()
+        let legacy = archived.count > stored.count ? archived : stored
+        threadLibrary.open(accountID: coach.coachAccountID, legacy: legacy)
+        turns = threadLibrary.selected?.messages ?? []
+        pendingAction = nil
+        errorMessage = nil
+        question = ""
+        if threadLibrary.owner != nil &&
+           threadLibrary.storageMessage == nil && !legacy.isEmpty {
+            // The historical unscoped file is migrated to an account-bound
+            // archive and then removed to avoid cross-account leakage.
+            storedConversation = Data()
+            IMUNCoachLocalMemory.clear()
         }
-        if rememberChats { IMUNCoachLocalMemory.save(turns) }
+    }
+
+    private func newConversation() {
+        guard !isSending else { return }
+        persist()
+        threadLibrary.create(screen: launchContext)
+        turns = []
+        question = ""
+        pendingAction = nil
+        pendingAttachments = []
+        errorMessage = nil
+        composerFocused = true
+    }
+
+    private func switchConversation(to id: UUID) {
+        guard !isSending else { return }
+        persist()
+        threadLibrary.select(id)
+        turns = threadLibrary.selected?.messages ?? []
+        question = ""
+        pendingAction = nil
+        pendingAttachments = []
+        errorMessage = nil
+        composerFocused = true
+    }
+
+    private func deleteConversation(_ id: UUID) {
+        guard !isSending else { return }
+        threadLibrary.delete(id)
+        turns = threadLibrary.selected?.messages ?? []
+        question = ""
+        pendingAction = nil
+        pendingAttachments = []
+        errorMessage = nil
     }
 
     private func populateEditFields(for exerciseID: String,
@@ -5660,7 +6194,8 @@ private struct PremiumCoachConversation: View {
                     UUID(uuidString: $0.id) != nil
                 })
         case .setTheme:
-            return action.themeID.flatMap(IMUNPreset.init(rawValue:)) != nil
+            // The fixed Selah Stone identity cannot be changed by the coach.
+            return false
         case .setRestDuration:
             return action.parameter.flatMap(Int.init).map {
                 [0, 60, 90, 120, 180].contains($0)
@@ -5720,10 +6255,7 @@ private struct PremiumCoachConversation: View {
             coach.refreshAndSendToWatch()
             reply = "Requested today's training plan to sync over iMun's phone and cloud connections."
         case .setTheme:
-            guard let theme = action.themeID else { return }
-            designPreset = theme
-            coach.publishDesignToCloud()
-            reply = "Changed the visual theme to \(IMUNPreset(rawValue: theme)?.title ?? theme)."
+            reply = "iMun now uses Selah Stone throughout the app. Custom visual themes have been retired."
         case .createStrength:
             coach.newWorkout(date: Date(), title: actionWorkoutTitle)
             selectedActivity = "weightlifting"
@@ -5777,9 +6309,14 @@ private struct PremiumCoachConversation: View {
             reply = "Opened the \(activity == "run" ? "Running" : "Strength") training view."
         case .openTab:
             guard let destination = action.parameter else { return }
-            selectedTab = destination
-            reply = destination == "coach" ?
-                "Opened IsAIah." : "Opened the \(destination.capitalized) tab."
+            if destination == "settings" {
+                showCoachSettings = true
+                reply = "Opened iMun Settings."
+            } else {
+                selectedTab = destination
+                reply = destination == "coach" ?
+                    "Opened IsAIah." : "Opened the \(destination.capitalized) tab."
+            }
         case .setMotivation:
             guard let source = action.parameter else { return }
             motivationSource = source
@@ -5839,13 +6376,13 @@ private struct PremiumCoachConversation: View {
             (proposed.parameter ?? "Custom Strength Workout")
         actionRunMinutes = Int(proposed.parameter ?? "") ?? 40
         actionRunHasHR = false
-        actionPreferenceKey = proposed.settingKey ?? "hcDesignMode"
+        actionPreferenceKey = proposed.settingKey ?? "hcRunCueMinutes"
         actionPreferenceValue = IMUNCoachPreference.byID(actionPreferenceKey)
             .flatMap { setting in
                 proposed.parameter.flatMap { requested in
                     setting.choices.contains(requested) ? requested : nil
                 } ?? setting.choices.first
-            } ?? "system"
+            } ?? "5"
         prepareEditFields(proposed)
         isSending = false
         errorMessage = nil
@@ -5866,7 +6403,7 @@ private struct PremiumCoachConversation: View {
         }.joined(separator: "; ")
         let primary = UserDefaults.standard.string(forKey: "hcEitanPrimaryWearable") ?? "Auto"
         return "\nPRIMARY WEARABLE FOR EITAN: " + primary +
-            ". Use only this wearable for physiological trends when selected; do not substitute Apple Watch HRV for WHOOP or historical Garmin/Tredict recovery. WHOOP HRV is unavailable through Apple Health unless a direct WHOOP API integration is authorized. " +
+            ". The primary wearable controls EITAN baselines. IsAIah should compare all user-shared wearable sources, keeping methods and source identities distinct; never silently substitute missing primary data or merge HRV methods. " +
             "\nEITAN observational body-wellness score: " +
             (snapshot.value.map(String.init) ?? "insufficient data") +
             "/100. Consecutive lower-score days: \(snapshot.consecutiveLowDays). " +
@@ -5892,6 +6429,8 @@ private struct PremiumCoachConversation: View {
         let originalDraft = question.trimmingCharacters(in: .whitespacesAndNewlines)
         guard canSend else { return }
         let uploads = pendingAttachments
+        let requestAccountID = coach.coachAccountID
+        let requestThreadID = threadLibrary.selectedID
         let questionText = originalDraft.isEmpty ?
             "Please analyze the attached exercise data. Explain what you can verify and what is missing." :
             originalDraft
@@ -5918,7 +6457,7 @@ private struct PremiumCoachConversation: View {
             return
         }
         let currentHistory = context
-        let past = rememberChats ? IMUNCoachLocalMemory.relevantUserNotes(
+        let past = rememberChats ? threadLibrary.relevantNotes(
             for: questionText, excluding: Set(turns.map(\.id))) : ""
         let history = [currentHistory, past].filter { !$0.isEmpty }
             .joined(separator: "\n")
@@ -5941,6 +6480,11 @@ private struct PremiumCoachConversation: View {
                     classification, sessions: coach.plannedSessions,
                     workout: coach.workout, run: coach.runPlan) {
                     await MainActor.run {
+                        guard coach.coachAccountID == requestAccountID,
+                              threadLibrary.selectedID == requestThreadID else {
+                            isSending = false
+                            return
+                        }
                         presentAction(proposal, for: questionText, appendUser: false)
                     }
                     return
@@ -5954,15 +6498,20 @@ private struct PremiumCoachConversation: View {
                     recentConversation: history,
                     screenContext: launchContext,
                     healthSnapshot: shareRecovery ?
-                        (appleHealth.isaiahHealthSnapshot(
+                        (eitanSharedCoachContext + "\n" +
+                         appleHealth.isaiahHealthSnapshot(
                             selectedCategory: selectedHealthCategory,
                             selectedMetric: selectedHealthMetric,
                             question: questionText,
                             primaryWearable: UserDefaults.standard.string(
-                                forKey: "hcIsaiahRecoveryPriority") ?? "WHOOP") +
-                         eitanSharedCoachContext) : "",
+                                forKey: "hcEitanPrimaryWearable") ?? "Auto")) : "",
                     attachments: uploads)
                 await MainActor.run {
+                    guard coach.coachAccountID == requestAccountID,
+                          threadLibrary.selectedID == requestThreadID else {
+                        isSending = false
+                        return
+                    }
                     pendingAttachments.removeAll()
                     turns.append(IMUNCoachTurn(role: "assistant", text: reply))
                     isSending = false
@@ -5970,6 +6519,11 @@ private struct PremiumCoachConversation: View {
                 }
             } catch {
                 await MainActor.run {
+                    guard coach.coachAccountID == requestAccountID,
+                          threadLibrary.selectedID == requestThreadID else {
+                        isSending = false
+                        return
+                    }
                     // Restore the draft without keeping a duplicate failed turn.
                     if turns.last?.role == "user" {
                         turns.removeLast()
@@ -5987,7 +6541,14 @@ private struct PremiumCoachConversation: View {
 /// Explicit, strictly attributed physiological source for EITAN and the
 /// opt-in IsAIah context. Tredict remains available for training history.
 private struct HCEitanPrimaryWearableSelector: View {
+    @EnvironmentObject private var appleHealth: HCAppleHealthReader
     @Binding var primaryWearable: String
+
+    private var choices: [String] {
+        Array(Set(["WHOOP", "Apple Watch", "Garmin", "Chargerless", primaryWearable]
+            .filter { $0 != "Auto" } +
+            appleHealth.metrics.map { IMUNDataProvenance.provider($0.source) })).sorted()
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 7) {
@@ -5996,13 +6557,13 @@ private struct HCEitanPrimaryWearableSelector: View {
                 .foregroundStyle(HCDesign.secondary)
             Picker("Primary wearable", selection: $primaryWearable) {
                 Text("Automatic").tag("Auto")
-                Text("WHOOP").tag("WHOOP")
-                Text("Apple Watch").tag("Apple Watch")
-                Text("Garmin").tag("Garmin")
+                ForEach(choices, id: \.self) { source in
+                    Text(source).tag(source)
+                }
             }
             .pickerStyle(.menu)
             .tint(HCDesign.electric)
-            Text("EITAN and IsAIah prioritize this wearable's HRV, resting heart rate, sleep and physiological trends. No fallback to another device's readings when a primary is selected.")
+            Text("Primary controls EITAN's physiological baseline. IsAIah can compare all authorized sources with separate baselines when sharing is enabled. No silent EITAN fallback.")
                 .font(.system(size: 11))
                 .foregroundStyle(HCDesign.secondary)
             if primaryWearable == "WHOOP" {
@@ -6179,7 +6740,7 @@ private struct IMUNIsaiahMemorySettings: View {
     var body: some View {
         HCCard {
             VStack(alignment: .leading, spacing: 12) {
-                Toggle("Remember past IsAIah conversations", isOn: $rememberChats)
+                Toggle("Use earlier IsAIah chats as coaching context", isOn: $rememberChats)
                     .font(.system(size: 14, weight: .semibold))
                     .tint(HCDesign.electric)
                 Text("IsAIah keeps your prior chat messages on this iPhone. When enabled, relevant excerpts are shared with the online coach only after you send a new message. Past chats may contain personal details.")
@@ -6196,9 +6757,11 @@ private struct IMUNIsaiahMemorySettings: View {
                                     titleVisibility: .visible) {
                     Button("Clear remembered conversations", role: .destructive) {
                         IMUNCoachLocalMemory.clear()
+                        IMUNCoachThreadLibrary.shared.clear()
+                        UserDefaults.standard.removeObject(forKey: "hcCoachConversationLocalV1")
                     }
                 } message: {
-                    Text("This removes the stored long-term chat archive from this iPhone. The visible chat and your workout history are not deleted.")
+                    Text("This removes IsAIah's saved conversations for the signed-in account on this iPhone. Your workouts and Health records are not deleted.")
                 }
             }
         }
@@ -6292,7 +6855,6 @@ private struct PremiumSettingsPage: View {
     @AppStorage("hcEitanCoachingEnabled") private var eitanCoachingEnabled = true
     @AppStorage("hcEitanCoachStyle") private var eitanCoachStyle = "driven"
     @AppStorage("hcEitanPrimaryWearable") private var primaryWearable = "Auto"
-    @AppStorage("hcIsaiahRecoveryPriority") private var isaiahRecoveryPriority = "WHOOP"
     @State private var wearableLocations: [String: IMUNWearableLocation] = [:]
     @AppStorage("hcWatchMotionRepEstimate") private var motionAutoReps = true
     @AppStorage("hcWatchMotionRecognitionEnabled") private var learnMovementPatterns = false
@@ -6304,7 +6866,6 @@ private struct PremiumSettingsPage: View {
     @AppStorage("hcWidgetShareHealth") private var shareWidgetHealth = false
     @AppStorage("hcLiveActivitiesEnabled") private var enableLiveActivities = true
     @AppStorage("hcAccentStyle") private var accentStyle = "crimson"
-    @AppStorage("hcDesignPreset") private var designPreset = "techno"
     @AppStorage("hcMotivationSource") private var motivationSource = "off"
     @AppStorage("hcWeightIncrement") private var weightIncrement = 5.0
     @AppStorage("hcRestOverrideSeconds") private var restOverride = 0
@@ -6427,24 +6988,6 @@ private struct PremiumSettingsPage: View {
 
     @ViewBuilder
     private var settingsIntelligence: some View {
-                HCSectionTitle(title: "IsAIah sources", detail: "Your recovery, across devices")
-                HCCard {
-                    VStack(alignment: .leading, spacing: 11) {
-                        Picker("Preferred recovery source", selection: $isaiahRecoveryPriority) {
-                            Text("WHOOP first").tag("WHOOP")
-                            Text("Garmin first").tag("Garmin")
-                            Text("Apple Watch first").tag("Apple Watch")
-                            Text("All sources, labeled").tag("Auto")
-                        }
-                        .tint(HCDesign.electric)
-                        Text("This prioritizes the source IsAIah discusses first—not the only data he can read. WHOOP, Apple Watch, Garmin and Tredict remain separate in long-term comparisons. Missing workouts are unknown, not rest days.")
-                            .font(.system(size: 12))
-                            .foregroundStyle(HCDesign.secondary)
-                        Text("EITAN has a separate primary-wearable setting below for its daily wellness score.")
-                            .font(.system(size: 11))
-                            .foregroundStyle(HCDesign.secondary)
-                    }
-                }
                 HCSectionTitle(title: "IsAIah memory", detail: "Conversation continuity")
                 IMUNIsaiahMemorySettings()
                 HCSectionTitle(title: "EITAN", detail: "Wellness & adaptive coaching")
@@ -6559,32 +7102,24 @@ private struct PremiumSettingsPage: View {
                             .foregroundStyle(HCDesign.secondary)
                     }
                 }
-                                HCSectionTitle(title: "Identity", detail: "Your look & your mindset")
-                NavigationLink {
-                    IMUNDesignStudioPage()
-                } label: {
-                    HCCard(accent: HCDesign.electric) {
-                        HStack(spacing: 14) {
-                            Image(systemName: IMUNStyle.preset.symbol)
-                                .font(.system(size: 25, weight: .light))
-                                .foregroundStyle(HCDesign.electric)
-                                .frame(width: 40)
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text("DESIGN STUDIO")
-                                    .font(HCDesign.label(12)).tracking(1.2)
-                                    .foregroundStyle(HCDesign.ink)
-                                Text(IMUNStyle.preset.title + " · " +
-                                     IMUNStyle.preset.tagline)
-                                    .font(.caption)
-                                    .foregroundStyle(HCDesign.secondary)
-                            }
-                            Spacer(minLength: 0)
-                            Image(systemName: "chevron.right")
+                                HCSectionTitle(title: "Identity", detail: "A unified design · optional mindset")
+                HCCard {
+                    HStack(spacing: 13) {
+                        Image(systemName: "square.stack.3d.up")
+                            .font(.system(size: 22, weight: .light))
+                            .foregroundStyle(HCDesign.electric)
+                            .frame(width: 36)
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("SELAH STONE")
+                                .font(HCDesign.label(12))
+                                .tracking(1.0)
+                                .foregroundStyle(HCDesign.ink)
+                            Text("A permanent visual identity: graphite, limestone and parchment.")
+                                .font(.caption)
                                 .foregroundStyle(HCDesign.secondary)
                         }
                     }
                 }
-                .buttonStyle(.plain)
                 NavigationLink {
                     IMUNMotivationPage()
                 } label: {

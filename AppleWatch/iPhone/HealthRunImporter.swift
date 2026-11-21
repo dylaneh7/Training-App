@@ -60,7 +60,9 @@ final class HCRunHealthImporter: ObservableObject {
         }
         let quantityIDs: [HKQuantityTypeIdentifier] = [
             .distanceWalkingRunning, .heartRate, .activeEnergyBurned,
-            .runningPower, .runningSpeed, .stepCount
+            .runningPower, .runningSpeed, .stepCount,
+            .runningStrideLength, .runningVerticalOscillation,
+            .runningGroundContactTime
         ]
         var readable: Set<HKObjectType> = [HKObjectType.workoutType(), HKSeriesType.workoutRoute()]
         for id in quantityIDs {
@@ -165,6 +167,12 @@ final class HCRunHealthImporter: ObservableObject {
                         if let stored = previous[item.id] {
                             item.heartRateTrace = stored.heartRateTrace
                             item.routePoints = stored.routePoints
+                            item.sensorSeries = stored.sensorSeries
+                            item.postRunHeartRateTrace = stored.postRunHeartRateTrace
+                            item.averageStrideLengthMeters = stored.averageStrideLengthMeters
+                            item.averageGroundContactTimeMS = stored.averageGroundContactTimeMS
+                            item.averageVerticalOscillationCM = stored.averageVerticalOscillationCM
+                            item.averageRunningSpeedMPS = stored.averageRunningSpeedMPS
                             if item.averageBPM == nil { item.averageBPM = stored.averageBPM }
                             if item.maxBPM == nil { item.maxBPM = stored.maxBPM }
                         }
@@ -189,6 +197,10 @@ final class HCRunHealthImporter: ObservableObject {
                     for workout in workouts.prefix(16) {
                         self.enrichHeartRate(workout)
                         self.enrichRoute(workout)
+                    }
+                    for workout in workouts.prefix(8) {
+                        self.enrichRunningDynamics(workout)
+                        self.enrichPostRunHeartRate(workout)
                     }
                 }
                 self.isLoading = false
@@ -254,6 +266,123 @@ final class HCRunHealthImporter: ObservableObject {
         store.execute(query)
     }
 
+    /// Keep source-specific, time-stamped running dynamics local. Garmin/
+    /// Tredict sessions are not assumed to have unshared Apple Watch signals.
+    private func enrichRunningDynamics(_ workout: HKWorkout) {
+        let id = "healthkit:\(workout.uuid.uuidString)"
+        guard let existing = runs.first(where: { $0.id == id }) else { return }
+        let metrics: [(type: HKQuantityTypeIdentifier, key: String, unit: HKUnit)] = [
+            (.runningPower, "runningPower", .watt()),
+            (.runningSpeed, "runningSpeed", .meter().unitDivided(by: .second())),
+            (.runningStrideLength, "runningStrideLength", .meter()),
+            (.runningVerticalOscillation, "runningVerticalOscillation",
+             .meterUnit(with: .centi)),
+            (.runningGroundContactTime, "runningGroundContactTime",
+             .secondUnit(with: .milli))
+        ]
+        let source = workout.sourceRevision.source.bundleIdentifier
+        let predicate = HKQuery.predicateForSamples(
+            withStart: workout.startDate, end: workout.endDate,
+            options: [.strictStartDate])
+        let sort = NSSortDescriptor(key: HKSampleSortIdentifierStartDate,
+                                    ascending: true)
+        for metric in metrics {
+            if existing.sensorSeries?.contains(where: { $0.kind == metric.key }) == true {
+                continue
+            }
+            guard let quantityType = HKObjectType.quantityType(
+                forIdentifier: metric.type) else { continue }
+            let query = HKSampleQuery(sampleType: quantityType,
+                                      predicate: predicate, limit: 4000,
+                                      sortDescriptors: [sort]) { [weak self] _, found, error in
+                guard error == nil,
+                      let found = found as? [HKQuantitySample] else { return }
+                let series: [HCRunSensorReading] = found.compactMap { sample in
+                    guard sample.sourceRevision.source.bundleIdentifier == source else {
+                        return nil
+                    }
+                    let value = sample.quantity.doubleValue(for: metric.unit)
+                    guard value.isFinite, value > 0 else { return nil }
+                    return HCRunSensorReading(kind: metric.key,
+                                              at: sample.startDate, value: value)
+                }
+                guard !series.isEmpty else { return }
+                let sorted = series.map(\.value).sorted()
+                let midpoint = sorted.count / 2
+                let median = sorted.count.isMultiple(of: 2)
+                    ? (sorted[midpoint - 1] + sorted[midpoint]) / 2
+                    : sorted[midpoint]
+                let stride = max(1, Int(ceil(Double(series.count) / 480)))
+                let condensed = series.enumerated().compactMap { index, sample in
+                    index % stride == 0 ? sample : nil
+                }
+                DispatchQueue.main.async {
+                    self?.patchRun(id: id) { run in
+                        var values = (run.sensorSeries ?? []).filter {
+                            $0.kind != metric.key
+                        }
+                        values.append(contentsOf: condensed)
+                        run.sensorSeries = values.sorted { $0.at < $1.at }
+                        switch metric.key {
+                        case "runningPower":
+                            if run.averagePowerWatts == nil {
+                                run.averagePowerWatts = median
+                            }
+                        case "runningSpeed": run.averageRunningSpeedMPS = median
+                        case "runningStrideLength": run.averageStrideLengthMeters = median
+                        case "runningVerticalOscillation": run.averageVerticalOscillationCM = median
+                        case "runningGroundContactTime": run.averageGroundContactTimeMS = median
+                        default: break
+                        }
+                    }
+                }
+            }
+            store.execute(query)
+        }
+    }
+
+    /// HealthKit observations in the two minutes following a running
+    /// session, from its own publishing app only. The user must have
+    /// granted HR read access; missing observations are never imputed.
+    private func enrichPostRunHeartRate(_ workout: HKWorkout) {
+        let id = "healthkit:\(workout.uuid.uuidString)"
+        guard let existing = runs.first(where: { $0.id == id }),
+              existing.postRunHeartRateTrace == nil,
+              let type = HKObjectType.quantityType(forIdentifier: .heartRate)
+        else { return }
+        let stop = workout.endDate
+        let end = stop.addingTimeInterval(140)
+        let predicate = HKQuery.predicateForSamples(
+            withStart: stop, end: end,
+            options: [.strictStartDate])
+        let sort = NSSortDescriptor(
+            key: HKSampleSortIdentifierStartDate, ascending: true)
+        let publisher = workout.sourceRevision.source.bundleIdentifier
+        let query = HKSampleQuery(sampleType: type, predicate: predicate,
+                                  limit: 300, sortDescriptors: [sort]) {
+            [weak self] _, results, error in
+            guard error == nil, let samples = results as? [HKQuantitySample]
+            else { return }
+            let bpm = HKUnit.count().unitDivided(by: .minute())
+            let trace: [HCRunHeartPoint] = samples.compactMap { sample in
+                guard sample.sourceRevision.source.bundleIdentifier == publisher,
+                      sample.startDate > stop,
+                      sample.startDate <= end else { return nil }
+                let value = sample.quantity.doubleValue(for: bpm)
+                guard value.isFinite && (35...240).contains(value) else {
+                    return nil
+                }
+                return HCRunHeartPoint(at: sample.startDate, bpm: value)
+            }
+            DispatchQueue.main.async {
+                self?.patchRun(id: id) {
+                    $0.postRunHeartRateTrace = trace
+                }
+            }
+        }
+        store.execute(query)
+    }
+
     private func enrichRoute(_ workout: HKWorkout) {
         let id = "healthkit:\(workout.uuid.uuidString)"
         guard runs.first(where: { $0.id == id })?.routePoints.isEmpty == true else { return }
@@ -274,14 +403,65 @@ final class HCRunHealthImporter: ObservableObject {
                         guard index % stride == 0 || index == coordinates.count - 1 else { return nil }
                         return HCRunRoutePoint(latitude: value.coordinate.latitude,
                                                longitude: value.coordinate.longitude,
-                                               altitudeMeters: value.altitude)
+                                               altitudeMeters: value.altitude,
+                                               recordedAt: value.timestamp)
                     }
-                    self?.patchRun(id: id) { $0.routePoints = path }
+                    let derived = self?.gpsMileSplits(
+                        coordinates, workoutDistance: workout.totalDistance?
+                            .doubleValue(for: .meter()))
+                    self?.patchRun(id: id) { run in
+                        run.routePoints = path
+                        run.routeMileSplits = derived
+                    }
                 }
             }
             self?.store.execute(routeQuery)
         }
         store.execute(sampleQuery)
+    }
+
+    /// Derive a distance/time split from valid GPS evidence, never from
+    /// a total-workout average. Reject low-coverage or implausible GPS traces.
+    private func gpsMileSplits(_ points: [CLLocation],
+                               workoutDistance: Double?) -> [HCRunSplit]? {
+        let sorted = points.filter {
+            $0.horizontalAccuracy >= 0 && $0.horizontalAccuracy <= 35
+        }.sorted { $0.timestamp < $1.timestamp }
+        guard sorted.count >= 20, let first = sorted.first else { return nil }
+        var distance = 0.0
+        var previous = first
+        var lastSplitAt = first.timestamp
+        let mile = 1609.344
+        var splits: [HCRunSplit] = []
+        for location in sorted.dropFirst() {
+            let dt = location.timestamp.timeIntervalSince(previous.timestamp)
+            guard dt > 0, dt <= 45 else {
+                previous = location
+                continue
+            }
+            let segment = location.distance(from: previous)
+            if segment > 0.5 && segment / dt <= 12.0 {
+                let before = distance
+                distance += segment
+                let nextMile = Double(splits.count + 1) * mile
+                if before < nextMile && distance >= nextMile {
+                    let fraction = (nextMile - before) / segment
+                    let reachedAt = previous.timestamp.addingTimeInterval(dt * fraction)
+                    let elapsed = reachedAt.timeIntervalSince(lastSplitAt)
+                    if elapsed >= 120 && elapsed <= 5400 {
+                        splits.append(HCRunSplit(index: splits.count + 1,
+                                                 elapsedSeconds: elapsed,
+                                                 distanceMeters: mile))
+                        lastSplitAt = reachedAt
+                    }
+                }
+            }
+            previous = location
+        }
+        guard !splits.isEmpty, distance >= mile,
+              workoutDistance.map({ abs(distance - $0) / max($0, 1) < 0.20 }) ?? true
+        else { return nil }
+        return splits
     }
 
     /// One source-attributed activity for every exercise type HealthKit exposes.

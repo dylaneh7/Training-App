@@ -568,15 +568,6 @@ struct WatchWorkoutView: View {
     @EnvironmentObject private var store: WatchWorkoutStore
     @AppStorage("hcEitanEnabled") private var eitanEnabled = true
     @AppStorage("hcAccentStyle") private var accent = "crimson"
-    @AppStorage("hcDesignPreset") private var visualPreset = "techno"
-    @AppStorage("hcDesignCustomGeometry") private var visualCustom = false
-    @AppStorage("hcDesignShape") private var visualShape = "rounded"
-    @AppStorage("hcDesignFont") private var visualFont = "standard"
-    @AppStorage("hcDesignCustomPalette") private var visualPalette = false
-    @AppStorage("hcDesignAccentHex") private var visualAccent = "D4324F"
-    @AppStorage("hcDesignBackgroundHex") private var visualBackground = "070C16"
-    @AppStorage("hcDesignSurfaceHex") private var visualSurface = "212831"
-    @AppStorage("hcDesignTextHex") private var visualInk = "F6F3E9"
     @Environment(\.scenePhase) private var scenePhase
     @State private var lastCloudScheduleCheck = Date.distantPast
     @State private var lastCloudProgressCheck = Date.distantPast
@@ -737,10 +728,6 @@ Section("YOUR TRAINING") {
         }
         .tint(WTheme.lime)
         .preferredColorScheme(.dark)
-        .animation(IMUNStyle.animationsEnabled ? .easeInOut(duration: 0.18) : nil,
-                   value: visualPreset)
-        .animation(IMUNStyle.animationsEnabled ? .easeInOut(duration: 0.18) : nil,
-                   value: visualShape)
         .onAppear {
             store.checkPhoneConnection()
             store.requestCurrentSchedule()
@@ -748,7 +735,6 @@ Section("YOUR TRAINING") {
                 store.refreshCloudWorkout()
                 store.refreshCloudSets()
                 store.refreshCloudRunHistory(force: true)
-                store.refreshCloudAppearance(force: true)
                 store.refreshCloudEitan(force: true)
             }
         }
@@ -778,7 +764,6 @@ Section("YOUR TRAINING") {
             if now.timeIntervalSince(lastCloudEitanCheck) >= 30 {
                 lastCloudEitanCheck = now
                 store.refreshCloudEitan()
-                store.refreshCloudAppearance()
             }
         }
         .onChange(of: scenePhase) { _, phase in
@@ -1508,12 +1493,6 @@ private struct WatchMovementPicker: View {
 
 private struct WatchPreferences: View {
     @EnvironmentObject private var store: WatchWorkoutStore
-    @AppStorage("hcDesignPreset") private var preset = "techno"
-    @AppStorage("hcDesignCustomGeometry") private var customGeometry = false
-    @AppStorage("hcDesignShape") private var cardShape = "rounded"
-    @AppStorage("hcDesignFont") private var font = "standard"
-    @AppStorage("hcDesignDensity") private var density = "balanced"
-    @AppStorage("hcDesignAcceptPhoneAppearance") private var acceptPhoneLook = true
     @AppStorage("hcMotivationSource") private var motivationSource = "off"
     @AppStorage("hcMotivationTranslation") private var translation = "ESV"
     @AppStorage("hcWeightIncrement") private var increment = 5.0
@@ -1548,68 +1527,6 @@ private struct WatchPreferences: View {
 
     var body: some View {
         List {
-            Section("YOUR VISUAL IDENTITY") {
-                HStack {
-                    Image(systemName: IMUNStyle.preset.symbol)
-                        .font(.system(size: 21))
-                        .foregroundStyle(WTheme.lime)
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(IMUNStyle.preset.title)
-                            .font(WTheme.metric(17))
-                        Text(IMUNStyle.preset.tagline)
-                            .font(.system(size: 10))
-                            .foregroundStyle(WTheme.muted)
-                    }
-                }
-                Picker("Design preset", selection: $preset) {
-                    ForEach(IMUNPreset.allCases) { option in
-                        Text(option.title).tag(option.rawValue)
-                    }
-                }
-                Toggle("Use iPhone design from cloud", isOn: $acceptPhoneLook)
-                    .tint(WTheme.lime)
-                    .onChange(of: acceptPhoneLook) { _, enabled in
-                        if enabled { store.refreshCloudAppearance(force: true) }
-                    }
-                if acceptPhoneLook {
-                    Button {
-                        store.refreshCloudAppearance(force: true)
-                    } label: {
-                        Label("FETCH IPHONE DESIGN", systemImage: "icloud.and.arrow.down")
-                    }
-                    .disabled(!store.cloudSignedIn)
-                    Text(store.designCloudStatus)
-                        .font(.system(size: 10))
-                        .foregroundStyle(WTheme.muted)
-                        .fixedSize(horizontal: false, vertical: true)
-                } else {
-                    Text("Watch colors and layout stay independent.")
-                        .font(.system(size: 10))
-                        .foregroundStyle(WTheme.muted)
-                }
-                Toggle("Custom layout", isOn: $customGeometry)
-                    .tint(WTheme.lime)
-                if customGeometry {
-                    Picker("Card shape", selection: $cardShape) {
-                        Text("Rounded").tag("rounded")
-                        Text("Square").tag("square")
-                        Text("Chamfered").tag("chamfered")
-                        Text("Pill").tag("pill")
-                        Text("Asymmetric").tag("asymmetric")
-                    }
-                    Picker("Headings", selection: $font) {
-                        Text("Classic serif").tag("serif")
-                        Text("Clean sans").tag("standard")
-                        Text("Rounded").tag("rounded")
-                        Text("Technical mono").tag("monospaced")
-                    }
-                    Picker("Spacing", selection: $density) {
-                        Text("Compact").tag("compact")
-                        Text("Balanced").tag("balanced")
-                        Text("Airy").tag("airy")
-                    }
-                }
-            }
             Section("MOTIVATION (OPTIONAL)") {
                 Picker("Content", selection: $motivationSource) {
                     Text("Off").tag("off")

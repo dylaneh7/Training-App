@@ -5,6 +5,76 @@
 	};
 	objectVersion = 56;
 	objects = {
+		0000000000000000000000F0 = {
+			isa = PBXFileReference;
+			lastKnownFileType = "sourcecode.swift";
+			path = "IMUNCoachLibrary.swift";
+			sourceTree = "<group>";
+		};
+		0000000000000000000000F1 = {
+			isa = PBXBuildFile;
+			fileRef = 0000000000000000000000F0;
+		};
+		0000000000000000000000E0 = {
+			isa = PBXFileReference;
+			lastKnownFileType = "sourcecode.swift";
+			path = "IMUNRunAdvancedAnalytics.swift";
+			sourceTree = "<group>";
+		};
+		0000000000000000000000E1 = {
+			isa = PBXBuildFile;
+			fileRef = 0000000000000000000000E0;
+		};
+		0000000000000000000000E2 = {
+			isa = PBXFileReference;
+			lastKnownFileType = "sourcecode.swift";
+			path = "IMUNRunningLogbook.swift";
+			sourceTree = "<group>";
+		};
+		0000000000000000000000E3 = {
+			isa = PBXBuildFile;
+			fileRef = 0000000000000000000000E2;
+		};
+		0000000000000000000000E4 = {
+			isa = PBXFileReference;
+			lastKnownFileType = "sourcecode.swift";
+			path = "IMUNRunningAdvancedViews.swift";
+			sourceTree = "<group>";
+		};
+		0000000000000000000000E5 = {
+			isa = PBXBuildFile;
+			fileRef = 0000000000000000000000E4;
+		};
+		0000000000000000000000E6 = {
+			isa = PBXFileReference;
+			lastKnownFileType = "sourcecode.swift";
+			path = "IMUNRunningTrainingViews.swift";
+			sourceTree = "<group>";
+		};
+		0000000000000000000000E7 = {
+			isa = PBXBuildFile;
+			fileRef = 0000000000000000000000E6;
+		};
+		0000000000000000000000D0 = {
+			isa = PBXFileReference;
+			lastKnownFileType = "sourcecode.swift";
+			path = "IMUNRunningIntelligence.swift";
+			sourceTree = "<group>";
+		};
+		0000000000000000000000D1 = {
+			isa = PBXBuildFile;
+			fileRef = 0000000000000000000000D0;
+		};
+		0000000000000000000000D2 = {
+			isa = PBXFileReference;
+			lastKnownFileType = "sourcecode.swift";
+			path = "IMUNRunningLab.swift";
+			sourceTree = "<group>";
+		};
+		0000000000000000000000D3 = {
+			isa = PBXBuildFile;
+			fileRef = 0000000000000000000000D2;
+		};
 		000000000000000000000094 = {
 			isa = PBXFileReference;
 			lastKnownFileType = "sourcecode.swift";
@@ -257,6 +327,13 @@
 				000000000000000000000090,
 				000000000000000000000092,
 				000000000000000000000094,
+				0000000000000000000000D0,
+				0000000000000000000000D2,
+				0000000000000000000000E0,
+				0000000000000000000000E2,
+				0000000000000000000000E4,
+				0000000000000000000000E6,
+				0000000000000000000000F0,
 			);
 			path = iPhone;
 			sourceTree = "<group>";
@@ -431,6 +508,13 @@
 				000000000000000000000091,
 				000000000000000000000093,
 				000000000000000000000095,
+				0000000000000000000000D1,
+				0000000000000000000000D3,
+				0000000000000000000000E1,
+				0000000000000000000000E3,
+				0000000000000000000000E5,
+				0000000000000000000000E7,
+				0000000000000000000000F1,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

@@ -4,13 +4,13 @@ import SwiftUI
 /// elapsed and remaining seconds come from the existing persisted clocks.
 /// Every preset gets its own visual treatment, never a copied Rally car.
 struct IMUNThemeTimerFace: View {
-    @AppStorage("hcDesignPreset") private var selectedName = "techno"
+    private let selectedName = "heritage"
     var seconds: TimeInterval
     var countsDown: Bool = true
     var compact: Bool = false
 
     private var theme: IMUNPreset {
-        IMUNPreset(rawValue: selectedName) ?? .techno
+        .heritage
     }
     private var accent: Color { IMUNStyle.palette.accent }
     private var ink: Color { IMUNStyle.palette.ink }

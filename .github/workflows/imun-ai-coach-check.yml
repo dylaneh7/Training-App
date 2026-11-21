@@ -1,0 +1,36 @@
+name: iMun IsAIah Edge Function preflight
+
+on:
+  pull_request:
+    paths:
+      - 'supabase/functions/imun-ai-coach/**'
+      - 'AppleWatch/Backend/imun-ai-coach/**'
+      - '.github/workflows/imun-ai-coach-check.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'supabase/functions/imun-ai-coach/**'
+      - 'AppleWatch/Backend/imun-ai-coach/**'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: imun-isaiah-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+      - name: Ensure checked-in Edge Function mirrors are identical
+        run: |
+          cmp supabase/functions/imun-ai-coach/index.ts \
+              AppleWatch/Backend/imun-ai-coach/index.ts
+      - name: Type-check IsAIah Edge Function
+        run: deno check supabase/functions/imun-ai-coach/index.ts

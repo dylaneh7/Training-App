@@ -381,7 +381,7 @@ struct HCProgressRun: Codable, Identifiable {
     let distanceMeters: Double?
     let durationSeconds: Double?
     var averageBPM: Double?
-    let splits: [HCRunSplit]
+    var splits: [HCRunSplit]
     var startedAt: Date? = nil
     var endedAt: Date? = nil
     var maxBPM: Double? = nil
@@ -395,6 +395,24 @@ struct HCProgressRun: Codable, Identifiable {
     // These are not uploaded to a remote server.
     var heartRateTrace: [HCRunHeartPoint] = []
     var routePoints: [HCRunRoutePoint] = []
+    // Optional for backward compatibility with cached runs and Garmin/Tredict
+    // summaries that do not contain native per-sample running dynamics.
+    var sensorSeries: [HCRunSensorReading]? = nil
+    var averageStrideLengthMeters: Double? = nil
+    var averageGroundContactTimeMS: Double? = nil
+    var averageVerticalOscillationCM: Double? = nil
+    var averageRunningSpeedMPS: Double? = nil
+    var routeMileSplits: [HCRunSplit]? = nil
+    var postRunHeartRateTrace: [HCRunHeartPoint]? = nil
+}
+
+struct HCRunSensorReading: Codable, Hashable, Identifiable {
+    /// runningPower, runningSpeed, runningStrideLength,
+    /// runningVerticalOscillation, runningGroundContactTime or stepCount.
+    let kind: String
+    let at: Date
+    let value: Double
+    var id: String { kind + ":" + String(at.timeIntervalSince1970) }
 }
 
 struct HCRunHeartPoint: Codable, Hashable, Identifiable {
@@ -407,6 +425,9 @@ struct HCRunRoutePoint: Codable, Hashable {
     let latitude: Double
     let longitude: Double
     let altitudeMeters: Double?
+    // Optional so legacy cached routes remain decodable; source GPS samples
+    // carry timestamps but not every imported provider exports them.
+    var recordedAt: Date? = nil
 }
 
 struct HCRecoveryDatum: Codable, Identifiable {
@@ -428,6 +449,7 @@ enum IMUNDataProvenance {
     static func provider(_ source: String) -> String {
         let name = source.lowercased()
         if name.contains("whoop") { return "WHOOP" }
+        if name.contains("chargerless") { return "Chargerless" }
         if name.contains("garmin") { return "Garmin" }
         if name.contains("tredict") { return "Tredict" }
         if name.contains("apple watch") || name.contains("watch ultra") ||
@@ -447,7 +469,7 @@ enum IMUNDataProvenance {
 /// primary wearable for physiological scoring. Never silently substitute
 /// Apple Watch HRV when WHOOP is selected and WHOOP HRV is unavailable.
 enum HCEitanWearableSource {
-    static let choices = ["Auto", "WHOOP", "Apple Watch", "Garmin"]
+    static let choices = ["Auto", "WHOOP", "Apple Watch", "Garmin", "Chargerless"]
 
     static func accepts(_ source: String, preferred: String) -> Bool {
         let name = source.lowercased()
@@ -460,7 +482,12 @@ enum HCEitanWearableSource {
                 (name.contains("watch") && !name.contains("whoop") &&
                  !name.contains("garmin"))
         case "Garmin": return name.contains("garmin")
-        default: return true
+        case "Auto": return true
+        default:
+            // Support newly connected, user-selected HealthKit publishers.
+            return name.contains(preferred.lowercased()) ||
+                IMUNDataProvenance.provider(source)
+                    .localizedCaseInsensitiveCompare(preferred) == .orderedSame
         }
     }
 }

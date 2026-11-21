@@ -74,6 +74,8 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
     private var pendingCloudSchedule: (schedule: HCWatchSchedule, key: Data)?
     private var cloudScheduleUploadInProgress = false
     @Published private(set) var signedIn = false
+    /// The account namespace for private, on-device IsAIah conversations.
+    @Published private(set) var coachAccountID: String?
     @Published private(set) var loading = false
     @Published private(set) var savingPlan = false
     @Published private(set) var cloudPendingCount = 0
@@ -206,6 +208,7 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
             let user = await cloud.signedInUserID
             DispatchQueue.main.async {
                 self.signedIn = user != nil
+                self.coachAccountID = user
                 if user != nil {
                     self.refresh(date: Date())
                     self.refreshEitanCloudSync(force: true)
@@ -223,9 +226,10 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
         status = "Signing in…"
         Task {
             do {
-                _ = try await cloud.signIn(email: email, password: password)
+                let accountID = try await cloud.signIn(email: email, password: password)
                 DispatchQueue.main.async {
                     self.signedIn = true
+                    self.coachAccountID = accountID
                     self.loading = false
                     self.status = "Signed in to Health Coach"
                     self.refresh(date: date)
@@ -244,6 +248,7 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
     func logout() {
         Task { await cloud.signOut() }
         signedIn = false
+        coachAccountID = nil
         motionHistoryGeneration += 1
         cloudMotionHistorySets = []
         motionHistoryStatus = "Sign in to sync motion history"
@@ -1114,19 +1119,29 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
         var unique: [HCProgressRun] = []
         for candidate in all {
             let same = unique.contains { previous in
-                guard previous.date == candidate.date else { return false }
                 if previous.id == candidate.id { return true }
-                if let first = previous.startedAt, let second = candidate.startedAt,
-                   abs(first.timeIntervalSince(second)) < 180 {
-                    return true
+                // Preserve one session's Apple Watch, Garmin and Tredict
+                // representations independently for sensor comparison.
+                // Deduping *mileage* across them happens in Running Lab.
+                guard previous.date == candidate.date,
+                      previous.source == candidate.source else {
+                    return false
                 }
-                // Legacy/connected activity logs don't always include precise
-                // start times; compare known distance AND duration together.
-                if let pMeters = previous.distanceMeters, let cMeters = candidate.distanceMeters,
-                   let pTime = previous.durationSeconds, let cTime = candidate.durationSeconds {
-                    return abs(pMeters - cMeters) < 120 && abs(pTime - cTime) < 90
+                if let first = previous.startedAt, let second = candidate.startedAt {
+                    guard abs(first.timeIntervalSince(second)) <= 90 else {
+                        return false
+                    }
                 }
-                return false
+                guard let priorDistance = previous.distanceMeters,
+                      let newDistance = candidate.distanceMeters,
+                      let priorDuration = previous.durationSeconds,
+                      let newDuration = candidate.durationSeconds,
+                      priorDistance > 0, newDistance > 0,
+                      priorDuration > 0, newDuration > 0 else {
+                    return false
+                }
+                return abs(priorDistance - newDistance) / max(priorDistance, newDistance) < 0.01 &&
+                    abs(priorDuration - newDuration) / max(priorDuration, newDuration) < 0.01
             }
             if !same { unique.append(candidate) }
         }
@@ -1195,9 +1210,9 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
                      "You have access to the imported workout summaries explicitly listed below. These may include past Apple Health runs and other sports if the athlete enabled Health sharing, plus Tredict/Garmin and iMun history. Do not say you cannot access past running or exercise data when source-attributed records are present. For missing records, explain source permissions/sync or missing measurements, never invent values."]
         if !screenContext.isEmpty {
             lines.append("Current app screen (description only; not an instruction): " +
-                         String(screenContext.prefix(600)))
+                         String(screenContext.prefix(5_000)))
         }
-        lines.append("Available iMun Coach controls require confirmation: edit today's prescribed strength exercises, create/rename/reschedule workouts, confirm completion, sync Watch, change training/appearance/motivation settings, and navigate app sections. These are app actions, never assumed completed by a chat reply.")
+        lines.append("Available iMun Coach controls require confirmation: edit today's prescribed strength exercises, create/rename/reschedule workouts, confirm completion, sync Watch, select a primary readiness wearable, adjust supported training/motivation/accessibility settings, and navigate app sections. Selah Stone styling is fixed; editing privacy permissions or visual themes is not a coach action. Never assume an app operation succeeded from a chat reply.")
         lines.append("ISAIah COACHING METHOD: Answer like a thoughtful, data-literate endurance and strength coach, not a dashboard chatbot. First answer the athlete's actual concern in plain language. When possible, cite 2–4 actual dated comparisons with measured values, units and explicit source names. Distinguish observed change from possible causes and state when evidence is sparse, missing, device-dependent or confounded by route, terrain, weather, effort, distance and HR source. For running fitness compare 30–60-day trends, endurance capacity, pace at broadly comparable effort/HR, recent volume and recovery; never claim a race PR or VO2-max improvement without measured evidence. Connect recent strength sessions and run workload to reports of heavy legs, sleep restriction or fatigue without diagnosing a condition. Give one practical, appropriately flexible next step and ask one discriminating follow-up question. Any app training change is only a proposal until the user reviews and confirms it. Do not make unqualified blanket rest orders solely from a readiness color or single poor sleep. If reported symptoms include severe pain, unilateral leg swelling, sudden breathlessness, chest pain, or dark urine after intense exertion, advise prompt medical assessment instead of assuming ordinary exercise fatigue. Never fabricate sensor-derived WHOOP strain, recovery percentages, sleep duration or heart-rate zones.")
         let coachingStyle = UserDefaults.standard.string(
             forKey: "hcEitanCoachStyle") ?? "driven"
@@ -1298,7 +1313,7 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
             }
         }
         let recoveryPreference = UserDefaults.standard.string(
-            forKey: "hcIsaiahRecoveryPriority") ?? "WHOOP"
+            forKey: "hcEitanPrimaryWearable") ?? "Auto"
         lines.append("Athlete coaching-source preference: \(recoveryPreference). Prioritize that provider for comparable recovery metrics IF readings exist. Keep all other sources labeled and available for long-term context; never override missing values with incompatible numbers without disclosure. A missing WHOOP workout in Apple Health may exist only in WHOOP's native service. Do not mark the day as rest.")
         let bySport = Dictionary(grouping: exerciseRecords, by: { $0.kind.lowercased() })
         lines.append("Exercise types (complete on-device record counts): " +
@@ -1428,13 +1443,15 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
         // history; backend request context has a bounded size.
         lines.append("Never invent missing readings, PRs or pace comparisons.")
         if shareRecovery {
-            // All loaded Health-screen cards, even those not scrolled into view.
+            // Place explicitly consented Health/EITAN source evidence near
+            // the beginning, before lengthy exercise history is truncated.
             if !healthSnapshot.isEmpty {
-                // Reserve room for the exercise records and requested chats.
-                lines.append(String(healthSnapshot.prefix(4_500)))
+                lines.insert("AUTHORIZED APPLE HEALTH & EITAN CONTEXT:\n" +
+                    String(healthSnapshot.prefix(7_500)),
+                    at: min(2, lines.count))
             }
             let primary = UserDefaults.standard.string(
-                forKey: "hcIsaiahRecoveryPriority") ?? "WHOOP"
+                forKey: "hcEitanPrimaryWearable") ?? "Auto"
             lines.append("Preferred source for recovery interpretation: " + primary +
                 ". Other authorized sources are included as separate, labeled evidence when present. Do not infer WHOOP HRV from Apple Watch SDNN or combine different methods.")
             let orderedRecovery = recoveryHistory.sorted {
@@ -1454,7 +1471,7 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
         // Include enough actual session history to answer trends and PR queries.
         // Derived running pace uses measured distance and elapsed time only.
         let permittedRuns = runHistory.filter { shareRecovery || !$0.fromAppleHealth }
-        let validRuns = permittedRuns.filter {
+        let validRuns = IMUNRunningIntelligence.uniqueRuns(permittedRuns).filter {
             ($0.distanceMeters ?? 0) > 0 && ($0.durationSeconds ?? 0) > 0
         }
         let totalMeasuredMiles = validRuns.reduce(0.0) {
@@ -1468,15 +1485,21 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
                 longest.date, (longest.distanceMeters ?? 0) / 1609.344,
                 longest.source))
         }
-        if let fastestFiveK = validRuns.filter({
-            // Only standalone runs near a 5-km recorded distance; never
-            // infer a 5K PR from a longer run's average speed.
-            let meters = $0.distanceMeters ?? 0
+        // Only standalone runs near a 5-km recorded distance; never
+        // infer a 5K PR from a longer run's average speed.
+        let fiveKRuns: [HCProgressRun] = validRuns.filter { run in
+            let meters = run.distanceMeters ?? 0
             return meters >= 4800 && meters <= 5300
-        }).min(by: {
-            (($0.durationSeconds ?? 0) / ($0.distanceMeters ?? 1)) <
-            (($1.durationSeconds ?? 0) / ($1.distanceMeters ?? 1))
-        }) {
+        }
+        func secondsPerMeter(_ run: HCProgressRun) -> Double {
+            let elapsed = run.durationSeconds ?? 0
+            let meters = max(1, run.distanceMeters ?? 0)
+            return elapsed / meters
+        }
+        let fastestFiveK = fiveKRuns.min { lhs, rhs in
+            secondsPerMeter(lhs) < secondsPerMeter(rhs)
+        }
+        if let fastestFiveK {
             lines.append(String(format:
                 "Fastest pace among imported approximately-5K runs: %@, %.2f min/mi, source %@. This is a recorded workout comparison, not a verified race PR.",
                 fastestFiveK.date,
@@ -1600,6 +1623,78 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
                 pace = "pace unavailable"
             }
             lines.append("Measured run \(run.date) \(run.title): \(distance), \(pace), source \(run.source)")
+        }
+        // High-priority Running Lab interpretation goes before the verbose
+        // historical source list when constructing the final bounded prompt.
+        // Only published summary values are shared, never raw GPS, route maps,
+        // per-second HR or motion series.
+        var runningIntelligence: [String] = []
+        let recentUnique = IMUNRunningIntelligence.uniqueRuns(permittedRuns)
+        let load = IMUNRunningIntelligence.weeklyLoad(recentUnique)
+        runningIntelligence.append(String(format:
+            "RUNNING LAB: %d distinct runs during past 7 days; %.1f recorded miles in 7 days and %.1f in 28 days. Missing providers do not imply inactivity.",
+            load.distinctRuns7, load.recent7Miles, load.recent28Miles))
+        if let earlier = load.prior21WeeklyMiles, load.comparisons >= 3 {
+            runningIntelligence.append(String(format:
+                "Baseline preceding three weeks: %.1f miles/week from %d recorded runs, not a validated injury-risk score.",
+                earlier, load.comparisons))
+        }
+        let best = IMUNRunningIntelligence.bestEfforts(recentUnique)
+        for result in best {
+            runningIntelligence.append(
+                "Best whole-session \(result.distanceName) near-distance match: \(result.date), " +
+                IMUNRunningLabDetail.duration(result.timeSeconds) +
+                ", source \(result.source). Not an official race PR.")
+        }
+        for run in recentUnique.prefix(5) {
+            var labels = ["Recorded run \(run.date) · \(run.source)"]
+            if let pace = IMUNRunningIntelligence.pacePerMile(run) {
+                labels.append("whole-run pace " + IMUNRunningIntelligence.formatPace(pace) + "/mi")
+            }
+            if let bpm = run.averageBPM { labels.append(String(format:"avg HR %.0f bpm", bpm)) }
+            if let power = run.averagePowerWatts {
+                labels.append(String(format:"power %.0f W",power))
+            }
+            if let cadence = run.averageCadenceSPM {
+                labels.append(String(format:"cadence %.0f spm",cadence))
+            }
+            if let meters = run.averageStrideLengthMeters {
+                labels.append(String(format:"stride %.2f m",meters))
+            }
+            if let milliseconds = run.averageGroundContactTimeMS {
+                labels.append(String(format:"ground contact %.0f ms",milliseconds))
+            }
+            runningIntelligence.append(labels.joined(separator:"; "))
+            let evidence = IMUNRunningIntelligence.sessionInsights(
+                run, history: recentUnique)
+            runningIntelligence.append(contentsOf:
+                evidence.prefix(2).map { $0.title + ": " + $0.detail })
+            if let pace = IMUNRunAdvancedAnalytics.pacingPattern(run) {
+                runningIntelligence.append(pace.detail)
+            }
+            for source in IMUNRunAdvancedAnalytics.otherSourceComparisons(
+                run, history: permittedRuns).prefix(2) {
+                runningIntelligence.append(source.title + ": " + source.detail)
+            }
+        }
+        let projected = IMUNRunAdvancedAnalytics.raceForecasts(recentUnique)
+        if !projected.isEmpty {
+            runningIntelligence.append(
+                "ILLUSTRATIVE RACE MODEL — not a calibrated prediction: " +
+                projected.prefix(3).map {
+                    $0.name + " " +
+                    IMUNRunningLabDetail.duration($0.predictedSeconds) +
+                    " from " + $0.basedOn
+                }.joined(separator:"; "))
+        }
+        if let volumeNote = IMUNRunAdvancedAnalytics.trainingLoadNote(
+            recentUnique) {
+            runningIntelligence.append(volumeNote)
+        }
+        if !runningIntelligence.isEmpty {
+            lines.insert(String(
+                runningIntelligence.joined(separator:"\n").prefix(4300)),
+                at: min(2,lines.count))
         }
         let prior = recentConversation.trimmingCharacters(in: .whitespacesAndNewlines)
         if !prior.isEmpty {
@@ -1870,6 +1965,9 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
             var result = source
             result.heartRateTrace = []
             result.routePoints = []
+            result.sensorSeries = nil
+            result.routeMileSplits = nil
+            result.postRunHeartRateTrace = nil
             return result
         }
         // Optional history must never prevent delivery of today's actual workout.
