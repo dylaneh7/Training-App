@@ -6617,7 +6617,7 @@ struct PremiumCoachConversation: View {
                 await MainActor.run { thinkingPhase = "Reviewing your request" }
                 if let classification = try? await coach.classifyIMUNCoachAction(
                     request: questionText, screenContext: launchContext,
-                    recentConversation: currentHistory, shareHealth: shareRecovery),
+                    recentConversation: history, shareHealth: shareRecovery),
                    let proposal = IMUNCoachActionInterpreter.proposalFromModel(
                     classification, sessions: coach.plannedSessions,
                     workout: coach.workout, run: coach.runPlan) {
