@@ -226,6 +226,9 @@ final class HCTredictImporter: ObservableObject {
             ("groundContactTime", "runningGroundContactTime", 90, 600),
             ("stepLength", "runningStrideLength", 0.3, 3.5),
             ("verticalOscillation", "providerVerticalOscillation", 0.01, 500),
+            ("verticalOscillationOEM", "providerWatchVerticalOscillation", 0.01, 500),
+            ("flightTime", "providerFlightTime", 0.01, 500),
+            ("formPower", "providerFormPower", 0.01, 1500),
             ("grade", "runningSourceGrade", -40, 40),
             ("temperature", "runningSourceTemperature", -40, 80),
             ("altitude", "runningAltitude", -500, 9000)
