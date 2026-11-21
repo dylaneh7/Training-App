@@ -74,6 +74,8 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
     private var pendingCloudSchedule: (schedule: HCWatchSchedule, key: Data)?
     private var cloudScheduleUploadInProgress = false
     @Published private(set) var signedIn = false
+    /// The account namespace for private, on-device IsAIah conversations.
+    @Published private(set) var coachAccountID: String?
     @Published private(set) var loading = false
     @Published private(set) var savingPlan = false
     @Published private(set) var cloudPendingCount = 0
@@ -206,6 +208,7 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
             let user = await cloud.signedInUserID
             DispatchQueue.main.async {
                 self.signedIn = user != nil
+                self.coachAccountID = user
                 if user != nil {
                     self.refresh(date: Date())
                     self.refreshEitanCloudSync(force: true)
@@ -223,9 +226,10 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
         status = "Signing in…"
         Task {
             do {
-                _ = try await cloud.signIn(email: email, password: password)
+                let accountID = try await cloud.signIn(email: email, password: password)
                 DispatchQueue.main.async {
                     self.signedIn = true
+                    self.coachAccountID = accountID
                     self.loading = false
                     self.status = "Signed in to Health Coach"
                     self.refresh(date: date)
@@ -244,6 +248,7 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
     func logout() {
         Task { await cloud.signOut() }
         signedIn = false
+        coachAccountID = nil
         motionHistoryGeneration += 1
         cloudMotionHistorySets = []
         motionHistoryStatus = "Sign in to sync motion history"
