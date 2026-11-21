@@ -5862,8 +5862,8 @@ struct PremiumCoachConversation: View {
                     HStack(spacing: 5) {
                         Image(systemName: shareRecovery ?
                               "heart.text.square.fill" : "lock.shield")
-                        Text(shareRecovery ? "Health sharing on" :
-                             "Health sharing off")
+                        Text(shareRecovery ? "Apple Health on" :
+                             "Apple Health off")
                         Image(systemName: "chevron.down")
                             .font(.system(size: 8, weight: .semibold))
                     }
@@ -5877,7 +5877,7 @@ struct PremiumCoachConversation: View {
                         .foregroundStyle(HCDesign.caution)
                         .lineLimit(1)
                 } else {
-                    Text("Your message sends only when tapped")
+                    Text("Your message is sent when submitted")
                         .foregroundStyle(HCDesign.secondary)
                         .lineLimit(1)
                 }
@@ -5903,7 +5903,7 @@ struct PremiumCoachConversation: View {
                     Toggle("Include Apple Health and recovery context",
                            isOn: $shareRecovery)
                         .tint(HCDesign.electric)
-                    Text("Off by default. When enabled, relevant Apple Health workouts, metrics and EITAN context are included in your next message to the online coach. The primary wearable setting remains separate.")
+                    Text("iMun training and connected Garmin/Tredict summaries are shared only when you send a message. This optional switch additionally includes authorized Apple Health workouts, metrics, and EITAN context. The primary wearable setting remains separate.")
                         .font(.footnote)
                         .foregroundStyle(HCDesign.secondary)
                     if shareRecovery && runImporter.workouts.isEmpty &&
