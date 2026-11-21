@@ -5676,57 +5676,80 @@ struct PremiumCoachConversation: View {
     // and the extra iOS navigation bar, maximizing the conversation viewport.
     private var isaiahBanner: some View {
         HStack(spacing: 10) {
-            IMUNIsaiahArtwork(layout: .full)
-                .frame(width: 121, height: 26)
-                .accessibilityLabel("IsAIah")
-            Spacer(minLength: 2)
-            HStack(spacing: 4) {
-                Circle()
-                    .fill(HCDesign.electric)
-                    .frame(width: 4, height: 4)
-                Text((launchContext.components(separatedBy: "\n").first ??
-                      "iMun").replacingOccurrences(of: "Screen: ", with: ""))
+            IMUNIsaiahMark(size: 31)
+                .clipShape(RoundedRectangle(cornerRadius: 9))
+            VStack(alignment: .leading, spacing: 3) {
+                Text("IsAIah")
+                    .font(HCDesign.display(20))
+                    .foregroundStyle(HCDesign.ink)
+                Text(coach.signedIn ? "Personal training intelligence" :
+                     "Sign in to begin coaching")
+                    .font(.system(size: 10))
+                    .foregroundStyle(HCDesign.secondary)
                     .lineLimit(1)
-                    .truncationMode(.tail)
             }
-            .font(.system(size: 10, weight: .medium))
-            .foregroundStyle(HCDesign.secondary)
-            .accessibilityLabel("Current screen: " +
-                (launchContext.components(separatedBy: "\n").first ?? "iMun"))
-            if !turns.isEmpty {
-                Button {
-                    turns.removeAll()
-                    storedConversation = Data()
-                    pendingAction = nil
-                    errorMessage = nil
-                    composerFocused = true
-                } label: {
-                    Image(systemName: "square.and.pencil")
-                        .frame(width: 25, height: 28)
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("New IsAIah conversation")
-            }
+            Spacer(minLength: 0)
             Button {
-                dismiss()
+                composerFocused = false
+                showThreadHistory = true
             } label: {
-                Image(systemName: "xmark")
-                    .font(.system(size: 12, weight: .semibold))
-                    .frame(width: 27, height: 28)
+                Image(systemName: "clock.arrow.circlepath")
+                    .font(.system(size: 17, weight: .regular))
+                    .frame(width: 30, height: 35)
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("Close IsAIah")
+            .accessibilityLabel("View previous IsAIah conversations")
+            Button {
+                newConversation()
+            } label: {
+                Image(systemName: "square.and.pencil")
+                    .font(.system(size: 17, weight: .regular))
+                    .frame(width: 30, height: 35)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Start a new IsAIah conversation")
+            Menu {
+                Button {
+                    showPrivacyPanel = true
+                    composerFocused = false
+                } label: {
+                    Label("Privacy and data sharing", systemImage: "lock.shield")
+                }
+                Button {
+                    showCoachSettings = true
+                    composerFocused = false
+                } label: {
+                    Label("App settings", systemImage: "gearshape")
+                }
+            } label: {
+                Image(systemName: "ellipsis")
+                    .font(.system(size: 18, weight: .medium))
+                    .frame(width: 29, height: 35)
+                    .contentShape(Rectangle())
+            }
+            .accessibilityLabel("IsAIah settings and privacy")
+            if selectedTab != "coach" {
+                Button {
+                    dismiss()
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 12, weight: .semibold))
+                        .frame(width: 27, height: 35)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Close IsAIah")
+            }
         }
-        .frame(maxWidth: .infinity)
-        .padding(.horizontal, 15)
-        .padding(.vertical, 8)
         .foregroundStyle(HCDesign.secondary)
-        .background(IMUNIsaiahBrand.graphite)
+        .padding(.horizontal, 17)
+        .padding(.vertical, 9)
+        .background(HCDesign.canvas)
         .overlay(alignment: .bottom) {
-            Rectangle()
-                .fill(HCDesign.electric.opacity(0.2))
-                .frame(height: 0.5)
+            Rectangle().fill(HCDesign.outline.opacity(0.70))
+                .frame(height: 0.7)
         }
     }
 
