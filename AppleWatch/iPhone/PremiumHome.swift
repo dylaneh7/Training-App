@@ -5616,6 +5616,17 @@ struct PremiumCoachConversation: View {
                 question = ""
             }
         }
+        .onReceive(threadLibrary.$threads) { _ in
+            // Coach tab and the floating coach share one private archive.
+            // An inactive chat viewport must refresh when its counterpart
+            // receives an answer, without disrupting a pending request.
+            guard !isSending, let selected = threadLibrary.selected else {
+                return
+            }
+            if selected.messages.map(\.id) != turns.map(\.id) {
+                turns = selected.messages
+            }
+        }
         .sheet(isPresented: $showThreadHistory) {
             IMUNCoachHistorySheet(
                 library: threadLibrary,
