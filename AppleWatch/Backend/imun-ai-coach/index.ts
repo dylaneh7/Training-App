@@ -20,7 +20,7 @@ function textFromResponse(data: any): string {
 
 export default {
   fetch: withSupabase({ auth: "user" }, async (req, ctx) => {
-    const userID = String(ctx.userClaims?.id ?? ctx.userClaims?.sub ?? "");
+    const userID = String(ctx.userClaims?.id ?? "");
     if (!userID) {
       return Response.json({ error: "Sign in required" }, { status: 401, headers });
     }
