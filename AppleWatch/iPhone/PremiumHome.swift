@@ -5754,10 +5754,10 @@ struct PremiumCoachConversation: View {
     }
 
     private var composer: some View {
-        VStack(spacing: 9) {
+        VStack(spacing: 8) {
             if !pendingAttachments.isEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 7) {
+                    HStack(spacing: 8) {
                         ForEach(pendingAttachments) { item in
                             HStack(spacing: 6) {
                                 Image(systemName: item.kind == "image" ?
@@ -5774,9 +5774,8 @@ struct PremiumCoachConversation: View {
                             .font(.system(size: 11, weight: .medium))
                             .foregroundStyle(HCDesign.ink)
                             .padding(.horizontal, 10)
-                            .padding(.vertical, 8)
-                            .background(HCDesign.raised,
-                                        in: Capsule())
+                            .padding(.vertical, 7)
+                            .background(HCDesign.raised, in: Capsule())
                         }
                     }
                 }
@@ -5787,101 +5786,158 @@ struct PremiumCoachConversation: View {
                     .foregroundStyle(HCDesign.caution)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
-            HStack(alignment: .bottom, spacing: 6) {
+            HStack(alignment: .bottom, spacing: 4) {
                 Button {
                     showFileImporter = true
                 } label: {
                     Image(systemName: "paperclip")
-                        .font(.system(size: 17, weight: .medium))
-                        .frame(width: 31, height: 43)
+                        .font(.system(size: 16, weight: .regular))
+                        .frame(width: 31, height: 42)
                 }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Attach a workout file")
+                .accessibilityLabel("Attach a training file")
                 PhotosPicker(selection: $selectedPhoto, matching: .images) {
-                    Image(systemName: "photo.on.rectangle")
-                        .font(.system(size: 17, weight: .medium))
-                        .frame(width: 31, height: 43)
+                    Image(systemName: "photo")
+                        .font(.system(size: 16, weight: .regular))
+                        .frame(width: 29, height: 42)
                 }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Attach a training photo")
-                TextField("Message IsAIah…", text: $question, axis: .vertical)
+                .accessibilityLabel("Attach a photo")
+                TextField("Ask IsAIah anything…",
+                          text: $question, axis: .vertical)
                     .lineLimit(1...5)
                     .focused($composerFocused)
                     .submitLabel(.send)
                     .font(.system(size: 15))
                     .tint(HCDesign.electric)
                     .foregroundStyle(HCDesign.ink)
-                    .padding(.leading, 14)
-                    .padding(.vertical, 11)
+                    .padding(.leading, 8)
+                    .padding(.vertical, 10)
                     .onSubmit { if canSend { send() } }
                     .accessibilityLabel("Message IsAIah")
                 Button(action: send) {
                     Image(systemName: "arrow.up")
-                        .font(.system(size: 17, weight: .bold))
-                        .foregroundStyle(canSend ? Color.white : HCDesign.secondary)
-                        .frame(width: 43, height: 43)
-                        .background(canSend ?
-                                    Color(red: 0.13, green: 0.47, blue: 0.97) :
-                                    HCDesign.raised,
-                                    in: Circle())
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(canSend ? IMUNStyle.onAccent :
+                                         HCDesign.secondary)
+                        .frame(width: 38, height: 38)
+                        .background(canSend ? HCDesign.electric :
+                                    HCDesign.raised, in: Circle())
                 }
                 .disabled(!canSend)
                 .buttonStyle(.plain)
-                .accessibilityLabel("Send message to IsAIah")
-                .padding(5)
+                .accessibilityLabel("Send message")
+                .padding(4)
             }
+            .foregroundStyle(HCDesign.secondary)
             .background(HCDesign.card,
-                        in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+                        in: RoundedRectangle(cornerRadius: 20, style: .continuous))
             .overlay {
-                RoundedRectangle(cornerRadius: 22)
-                    .strokeBorder(HCDesign.outline, lineWidth: 1)
+                RoundedRectangle(cornerRadius: 20)
+                    .strokeBorder(HCDesign.outline.opacity(0.72), lineWidth: 1)
             }
-            Toggle(isOn: $shareRecovery) {
-                HStack(spacing: 6) {
-                    Image(systemName: "heart.text.square")
-                    Text("Share Apple Health workouts & recovery")
-                    Spacer(minLength: 0)
-                    if shareRecovery {
-                        Text("\(runImporter.workouts.count) workouts")
-                            .foregroundStyle(HCDesign.electric)
+            HStack(spacing: 6) {
+                Button {
+                    showPrivacyPanel = true
+                    composerFocused = false
+                } label: {
+                    HStack(spacing: 5) {
+                        Image(systemName: shareRecovery ?
+                              "heart.text.square.fill" : "lock.shield")
+                        Text(shareRecovery ? "Health sharing on" :
+                             "Health sharing off")
+                        Image(systemName: "chevron.down")
+                            .font(.system(size: 8, weight: .semibold))
                     }
+                    .font(.system(size: 10, weight: .medium))
                 }
-                .font(.system(size: 11))
-                .foregroundStyle(HCDesign.secondary)
-            }
-            .tint(HCDesign.electric)
-            if shareRecovery && runImporter.workouts.isEmpty &&
-                !runImporter.refreshing {
-                HStack(spacing: 9) {
-                    Text("No Apple Health workout history loaded yet.")
-                        .font(.system(size: 11))
+                .buttonStyle(.plain)
+                .accessibilityLabel("Review IsAIah health-sharing preferences")
+                Spacer(minLength: 4)
+                if let failure = threadLibrary.storageMessage {
+                    Text(failure)
+                        .foregroundStyle(HCDesign.caution)
+                        .lineLimit(1)
+                } else {
+                    Text("Your message sends only when tapped")
                         .foregroundStyle(HCDesign.secondary)
-                    Spacer(minLength: 4)
-                    Button("Connect") {
-                        appleHealth.connect(onRequestCompleted: {
-                            runImporter.startIfAuthorized()
-                        })
-                    }
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(HCDesign.aqua)
+                        .lineLimit(1)
                 }
             }
-            Toggle("Use relevant previous IsAIah chats", isOn: $rememberChats)
-                .font(.system(size: 11))
-                .tint(HCDesign.electric)
-                .foregroundStyle(HCDesign.secondary)
-                .onChange(of: rememberChats) { _, enabled in
-                    if enabled { IMUNCoachLocalMemory.save(turns) }
-                }
-
+            .foregroundStyle(HCDesign.secondary)
+            .font(.system(size: 10))
         }
         .padding(.horizontal, 14)
-        .padding(.top, 12)
+        .padding(.top, 10)
         .padding(.bottom, 8)
         .background(HCDesign.canvas)
         .overlay(alignment: .top) {
-            Rectangle().fill(HCDesign.outline).frame(height: 1)
+            Rectangle()
+                .fill(HCDesign.outline.opacity(0.65))
+                .frame(height: 0.7)
         }
+    }
+
+    private var privacyPanel: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    Toggle("Include Apple Health and recovery context",
+                           isOn: $shareRecovery)
+                        .tint(HCDesign.electric)
+                    Text("Off by default. When enabled, relevant Apple Health workouts, metrics and EITAN context are included in your next message to the online coach. The primary wearable setting remains separate.")
+                        .font(.footnote)
+                        .foregroundStyle(HCDesign.secondary)
+                    if shareRecovery && runImporter.workouts.isEmpty &&
+                       !runImporter.refreshing {
+                        Button("Connect Apple Health") {
+                            appleHealth.connect(onRequestCompleted: {
+                                runImporter.startIfAuthorized()
+                            })
+                        }
+                    }
+                } header: { Text("Data sharing") }
+                Section {
+                    Toggle("Use earlier IsAIah chats for continuity",
+                           isOn: $rememberChats)
+                        .tint(HCDesign.electric)
+                    Text("Conversations are saved privately on this iPhone under your iMun account. This setting controls whether relevant earlier messages are included with future AI requests.")
+                        .font(.footnote)
+                        .foregroundStyle(HCDesign.secondary)
+                    Button("Delete my saved conversations",
+                           role: .destructive) {
+                        confirmEraseHistory = true
+                    }
+                } header: { Text("Conversation history") }
+                Section {
+                    Text("IsAIah analyzes source-labeled evidence and suggests actions. Changes to workouts or app settings still require your review and confirmation.")
+                        .font(.footnote)
+                        .foregroundStyle(HCDesign.secondary)
+                } header: { Text("Your control") }
+            }
+            .scrollContentBackground(.hidden)
+            .background(HCDesign.canvas)
+            .navigationTitle("Privacy & memory")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") { showPrivacyPanel = false }
+                }
+            }
+            .confirmationDialog("Delete all IsAIah conversations?",
+                isPresented: $confirmEraseHistory,
+                titleVisibility: .visible) {
+                Button("Delete saved conversations", role: .destructive) {
+                    threadLibrary.clear()
+                    IMUNCoachLocalMemory.clear()
+                    storedConversation = Data()
+                    turns = []
+                    pendingAction = nil
+                    question = ""
+                }
+            } message: {
+                Text("This clears the saved chat archive for this iMun account on this iPhone. It does not delete your workouts or Health measurements.")
+            }
+        }
+        .presentationDetents([.medium, .large])
     }
 
     private func followUp(_ text: String) -> some View {
