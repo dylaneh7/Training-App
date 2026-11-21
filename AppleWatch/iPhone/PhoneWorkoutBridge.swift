@@ -550,13 +550,15 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
         let day = HCPlanBuilder.dateString(Date())
         let cleanTitle = String(title.trimmingCharacters(
             in: .whitespacesAndNewlines).prefix(80))
+        let replaceable = workout.map { existing in
+            existing.date == day && !existing.isPreview &&
+                phoneSessionStartedAt == nil &&
+                completedSets(for: existing).isEmpty
+        } ?? true
         guard signedIn, !cleanTitle.isEmpty,
-              (1...18).contains(exercises.count),
-              workout == nil || (workout?.date == day &&
-                                   workout?.exercises.isEmpty == true &&
-                                   workout?.isPreview == false)
+              (1...18).contains(exercises.count), replaceable
         else {
-            status = "This session already has exercises. Review edits instead of replacing completed work."
+            status = "Today's workout has recorded sets or is active; changes are blocked to preserve training history."
             return false
         }
         let baseID = day + "-isaiah-" + UUID().uuidString
