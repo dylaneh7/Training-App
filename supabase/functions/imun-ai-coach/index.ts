@@ -63,6 +63,12 @@ export default {
     const context = typeof body?.context === "string" ? body.context.slice(0, 24000) : "";
     const includesRecovery = body?.shareRecovery === true;
     const actionMode = body?.mode === "proposeAction";
+    // A multi-exercise or interval workout is substantive planning, not just
+    // intent classification. Use the full coach model for those requests.
+    const planningRequest = actionMode &&
+      (/\b(build|create|plan|make|design|write|program)\b.{0,110}\b(workout|routine|strength|lifting|run|intervals?)\b/i.test(question) ||
+       /\b(add|put|fill).{0,40}exercises?\b/i.test(question) ||
+       /\b\d+\s*[x×]\s*\d+\b.{0,40}\b(tempo|intervals?|run)\b/i.test(question));
     const files = Array.isArray(body?.attachments) ? body.attachments : [];
     if (files.length > 4 || (actionMode && files.length > 0)) {
       return Response.json({ error: "Too many or unsupported attachments for this request" },
@@ -175,7 +181,7 @@ export default {
           method: "POST",
           headers: { "Authorization": "Bearer " + key, "Content-Type": "application/json" },
           body: JSON.stringify({
-            model: actionMode ? classifierModel : model,
+            model: actionMode && !planningRequest ? classifierModel : model,
             instructions, input: multimodalInput, store: false,
             max_output_tokens: actionMode ? 2300 : 3200
           }),
