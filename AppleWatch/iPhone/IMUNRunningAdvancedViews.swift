@@ -262,7 +262,8 @@ struct IMUNRunningAdvancedSession: View {
                                 .foregroundStyle(HCDesign.secondary)
                         }
                     }
-                }                let pacing = IMUNRunAdvancedAnalytics.pacingPattern(run)
+                }
+                let pacing = IMUNRunAdvancedAnalytics.pacingPattern(run)
                 let economy = IMUNRunAdvancedAnalytics.aerobicEfficiency(
                     run, history: history)
                 let climate = logbook.conditionsComparison(run, history: history)
