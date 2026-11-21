@@ -381,7 +381,7 @@ struct HCProgressRun: Codable, Identifiable {
     let distanceMeters: Double?
     let durationSeconds: Double?
     var averageBPM: Double?
-    let splits: [HCRunSplit]
+    var splits: [HCRunSplit]
     var startedAt: Date? = nil
     var endedAt: Date? = nil
     var maxBPM: Double? = nil
