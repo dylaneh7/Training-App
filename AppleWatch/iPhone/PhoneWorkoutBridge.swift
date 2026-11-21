@@ -1313,7 +1313,7 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
             }
         }
         let recoveryPreference = UserDefaults.standard.string(
-            forKey: "hcIsaiahRecoveryPriority") ?? "WHOOP"
+            forKey: "hcEitanPrimaryWearable") ?? "Auto"
         lines.append("Athlete coaching-source preference: \(recoveryPreference). Prioritize that provider for comparable recovery metrics IF readings exist. Keep all other sources labeled and available for long-term context; never override missing values with incompatible numbers without disclosure. A missing WHOOP workout in Apple Health may exist only in WHOOP's native service. Do not mark the day as rest.")
         let bySport = Dictionary(grouping: exerciseRecords, by: { $0.kind.lowercased() })
         lines.append("Exercise types (complete on-device record counts): " +
@@ -1449,7 +1449,7 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
                 lines.append(String(healthSnapshot.prefix(4_500)))
             }
             let primary = UserDefaults.standard.string(
-                forKey: "hcIsaiahRecoveryPriority") ?? "WHOOP"
+                forKey: "hcEitanPrimaryWearable") ?? "Auto"
             lines.append("Preferred source for recovery interpretation: " + primary +
                 ". Other authorized sources are included as separate, labeled evidence when present. Do not infer WHOOP HRV from Apple Watch SDNN or combine different methods.")
             let orderedRecovery = recoveryHistory.sorted {
@@ -1469,7 +1469,7 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
         // Include enough actual session history to answer trends and PR queries.
         // Derived running pace uses measured distance and elapsed time only.
         let permittedRuns = runHistory.filter { shareRecovery || !$0.fromAppleHealth }
-        let validRuns = permittedRuns.filter {
+        let validRuns = IMUNRunningIntelligence.uniqueRuns(permittedRuns).filter {
             ($0.distanceMeters ?? 0) > 0 && ($0.durationSeconds ?? 0) > 0
         }
         let totalMeasuredMiles = validRuns.reduce(0.0) {
@@ -1621,6 +1621,78 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
                 pace = "pace unavailable"
             }
             lines.append("Measured run \(run.date) \(run.title): \(distance), \(pace), source \(run.source)")
+        }
+        // High-priority Running Lab interpretation goes before the verbose
+        // historical source list when constructing the final bounded prompt.
+        // Only published summary values are shared, never raw GPS, route maps,
+        // per-second HR or motion series.
+        var runningIntelligence: [String] = []
+        let recentUnique = IMUNRunningIntelligence.uniqueRuns(permittedRuns)
+        let load = IMUNRunningIntelligence.weeklyLoad(recentUnique)
+        runningIntelligence.append(String(format:
+            "RUNNING LAB: %d distinct runs during past 7 days; %.1f recorded miles in 7 days and %.1f in 28 days. Missing providers do not imply inactivity.",
+            load.distinctRuns7, load.recent7Miles, load.recent28Miles))
+        if let earlier = load.prior21WeeklyMiles, load.comparisons >= 3 {
+            runningIntelligence.append(String(format:
+                "Baseline preceding three weeks: %.1f miles/week from %d recorded runs, not a validated injury-risk score.",
+                earlier, load.comparisons))
+        }
+        let best = IMUNRunningIntelligence.bestEfforts(recentUnique)
+        for result in best {
+            runningIntelligence.append(
+                "Best whole-session \(result.distanceName) near-distance match: \(result.date), " +
+                IMUNRunningLabDetail.duration(result.timeSeconds) +
+                ", source \(result.source). Not an official race PR.")
+        }
+        for run in recentUnique.prefix(5) {
+            var labels = ["Recorded run \(run.date) · \(run.source)"]
+            if let pace = IMUNRunningIntelligence.pacePerMile(run) {
+                labels.append("whole-run pace " + IMUNRunningIntelligence.formatPace(pace) + "/mi")
+            }
+            if let bpm = run.averageBPM { labels.append(String(format:"avg HR %.0f bpm", bpm)) }
+            if let power = run.averagePowerWatts {
+                labels.append(String(format:"power %.0f W",power))
+            }
+            if let cadence = run.averageCadenceSPM {
+                labels.append(String(format:"cadence %.0f spm",cadence))
+            }
+            if let meters = run.averageStrideLengthMeters {
+                labels.append(String(format:"stride %.2f m",meters))
+            }
+            if let milliseconds = run.averageGroundContactTimeMS {
+                labels.append(String(format:"ground contact %.0f ms",milliseconds))
+            }
+            runningIntelligence.append(labels.joined(separator:"; "))
+            let evidence = IMUNRunningIntelligence.sessionInsights(
+                run, history: recentUnique)
+            runningIntelligence.append(contentsOf:
+                evidence.prefix(2).map { $0.title + ": " + $0.detail })
+            if let pace = IMUNRunAdvancedAnalytics.pacingPattern(run) {
+                runningIntelligence.append(pace.detail)
+            }
+            for source in IMUNRunAdvancedAnalytics.otherSourceComparisons(
+                run, history: permittedRuns).prefix(2) {
+                runningIntelligence.append(source.title + ": " + source.detail)
+            }
+        }
+        let projected = IMUNRunAdvancedAnalytics.raceForecasts(recentUnique)
+        if !projected.isEmpty {
+            runningIntelligence.append(
+                "ILLUSTRATIVE RACE MODEL — not a calibrated prediction: " +
+                projected.prefix(3).map {
+                    $0.name + " " +
+                    IMUNRunningLabDetail.duration($0.predictedSeconds) +
+                    " from " + $0.basedOn
+                }.joined(separator:"; "))
+        }
+        if let volumeNote = IMUNRunAdvancedAnalytics.trainingLoadNote(
+            recentUnique) {
+            runningIntelligence.append(volumeNote)
+        }
+        if !runningIntelligence.isEmpty {
+            lines.insert(String(
+                runningIntelligence.joined(separator:"\n").prefix(4300)),
+                at: min(2,lines.count))
         }
         let prior = recentConversation.trimmingCharacters(in: .whitespacesAndNewlines)
         if !prior.isEmpty {
