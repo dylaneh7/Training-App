@@ -5116,7 +5116,7 @@ private struct PremiumCoachPage: View {
 // All original settings, exports and integrations are preserved here.
 // Real on-screen AI conversation. The model is called only on explicit Send.
 // The server uses the signed-in user's JWT; provider credentials stay server-side.
-private struct IMUNCoachTurn: Identifiable, Codable {
+struct IMUNCoachTurn: Identifiable, Codable {
     var id: UUID = UUID()
     let role: String
     let text: String
@@ -5124,14 +5124,14 @@ private struct IMUNCoachTurn: Identifiable, Codable {
 
 /// Private, locally stored conversation memory. This is retrieval, not
 /// on-device model training. Nothing is uploaded until the athlete taps Send.
-private enum IMUNCoachLocalMemory {
+enum IMUNCoachLocalMemory {
     private static var archiveURL: URL? {
         FileManager.default.urls(for: .applicationSupportDirectory,
                                  in: .userDomainMask).first?
             .appendingPathComponent("imun-isaiah-conversation-memory.json")
     }
 
-    private static func read() -> [IMUNCoachTurn] {
+    static func read() -> [IMUNCoachTurn] {
         guard let archiveURL,
               let data = try? Data(contentsOf: archiveURL),
               let value = try? JSONDecoder().decode([IMUNCoachTurn].self, from: data)
