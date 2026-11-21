@@ -2209,6 +2209,32 @@ private struct PremiumRunPage: View {
                     }
                 }
                 IMUNTredictWorkoutCard()
+                NavigationLink {
+                    IMUNRunningLabPage()
+                } label: {
+                    HCCard {
+                        HStack(spacing: 14) {
+                            Image(systemName: "figure.run.circle")
+                                .font(.system(size: 24, weight: .ultraLight))
+                                .foregroundStyle(HCDesign.aqua)
+                                .frame(width: 38)
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("RUNNING LAB")
+                                    .font(HCDesign.label(11))
+                                    .tracking(1.1)
+                                    .foregroundStyle(HCDesign.aqua)
+                                Text("Dynamics · zones · pacing · progression")
+                                    .font(.system(size: 12, weight: .medium))
+                                    .foregroundStyle(HCDesign.ink)
+                            }
+                            Spacer(minLength: 5)
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 12))
+                                .foregroundStyle(HCDesign.secondary)
+                        }
+                    }
+                }
+                .buttonStyle(.plain)
                 if let actual {
                     if let distance = actual.distanceMeters,
                        let target = coach.runPlan?.targetDistanceMiles,
@@ -2408,6 +2434,7 @@ private struct IMUNCreateRunSheet: View {
 }
 
 private struct PremiumRunDetails: View {
+    @EnvironmentObject private var coach: PhoneWorkoutBridge
     let run: HCProgressRun
 
     private func number(_ v: Double?, unit: String = "", digits: Int = 0) -> String {
@@ -2421,6 +2448,30 @@ private struct PremiumRunDetails: View {
                 PremiumHeader(eyebrow: "RUN / RECORDED", title: run.title,
                               subtitle: run.date + " · " + run.source,
                               badge: run.fromAppleHealth ? "APPLE HEALTH" : "CONNECTED")
+                NavigationLink {
+                    IMUNRunningLabDetail(run: run, history: coach.runHistory)
+                } label: {
+                    HStack(spacing: 12) {
+                        Image(systemName: "waveform.path.ecg")
+                            .foregroundStyle(HCDesign.electric)
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("EXPLORE IN RUNNING LAB")
+                                .font(HCDesign.label(11))
+                                .tracking(1.1)
+                                .foregroundStyle(HCDesign.electric)
+                            Text("Recorded dynamics, pacing and training interpretation")
+                                .font(.system(size: 11))
+                                .foregroundStyle(HCDesign.secondary)
+                        }
+                        Spacer(minLength: 4)
+                        Image(systemName: "chevron.right")
+                            .foregroundStyle(HCDesign.secondary)
+                    }
+                    .padding(15)
+                    .background(HCDesign.card,
+                                in: RoundedRectangle(cornerRadius: 13))
+                }
+                .buttonStyle(.plain)
                 HCCard(accent: HCDesign.aqua) {
                     VStack(spacing: 17) {
                         HStack {
@@ -5326,7 +5377,7 @@ private struct IMUNCoachVO2Evidence: View {
 
 // A real conversation surface, not a backend diagnostics panel. Chats remain
 // on the phone. Nothing is transmitted until the athlete chooses Send.
-private struct PremiumCoachConversation: View {
+struct PremiumCoachConversation: View {
     let launchContext: String
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var coach: PhoneWorkoutBridge
