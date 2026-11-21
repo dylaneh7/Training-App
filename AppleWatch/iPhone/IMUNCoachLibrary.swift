@@ -70,7 +70,7 @@ final class IMUNCoachThreadLibrary: ObservableObject {
             let migrated = IMUNCoachSavedThread(id: UUID(),
                 title: "Previous IsAIah conversation",
                 createdAt: Date(), updatedAt: Date(),
-                screen: "Legacy iMun", messages: Array(legacy.suffix(250)))
+                screen: "Legacy iMun", messages: Array(legacy.suffix(1000)))
             threads = [migrated]
             save()
         }
@@ -106,7 +106,7 @@ final class IMUNCoachThreadLibrary: ObservableObject {
               let position = threads.firstIndex(where: { $0.id == selectedID })
         else { return }
         var item = threads[position]
-        item.messages = Array(messages.suffix(160))
+        item.messages = Array(messages.suffix(1000))
         item.updatedAt = Date()
         item.screen = String(screen.prefix(160))
         if item.title == "New conversation",
