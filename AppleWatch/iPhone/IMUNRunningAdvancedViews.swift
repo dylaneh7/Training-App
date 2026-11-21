@@ -131,6 +131,10 @@ struct IMUNRunningAdvancedSession: View {
     private var heartRecovery: [IMUNRunningObservation] {
         IMUNRunAdvancedAnalytics.heartRateRecovery(run)
     }
+    private var sourcePeers: [IMUNRunningObservation] {
+        IMUNRunAdvancedAnalytics.otherSourceComparisons(
+            run, history: history)
+    }
 
     var body: some View {
         ScrollView {
@@ -292,6 +296,23 @@ struct IMUNRunningAdvancedSession: View {
                                 Text(climate)
                                     .font(.system(size: 11))
                                     .foregroundStyle(HCDesign.secondary)
+                            }
+                        }
+                    }
+                }
+                if !sourcePeers.isEmpty {
+                    HCSectionTitle(title: "Wearable source comparison",
+                                   detail: "Same run · different publishers")
+                    HCCard {
+                        VStack(alignment: .leading, spacing: 12) {
+                            ForEach(sourcePeers) { match in
+                                VStack(alignment: .leading, spacing: 5) {
+                                    Text(match.title)
+                                        .font(.system(size: 13, weight: .semibold))
+                                    Text(match.detail)
+                                        .font(.system(size: 11))
+                                        .foregroundStyle(HCDesign.secondary)
+                                }
                             }
                         }
                     }
