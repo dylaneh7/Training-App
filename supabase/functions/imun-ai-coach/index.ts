@@ -24,14 +24,21 @@ export default {
     if (!userID) {
       return Response.json({ error: "Sign in required" }, { status: 401, headers });
     }
-    const model = Deno.env.get("IMUN_AI_MODEL") ||
-      Deno.env.get("OPENAI_MODEL") || "gpt-6-luna";
+    // Keep inexpensive action classification separate from the substantive
+    // endurance/strength coach. Account administrators may override either
+    // supported model through the existing deployment secrets.
+    const model = Deno.env.get("IMUN_AI_CHAT_MODEL") ||
+      Deno.env.get("IMUN_AI_MODEL") ||
+      Deno.env.get("OPENAI_MODEL") || "gpt-6.1-sol";
+    const classifierModel = Deno.env.get("IMUN_AI_ACTION_MODEL") ||
+      "gpt-6-luna";
     const apiKey = Deno.env.get("OPENAI_API_KEY");
     if (req.method === "GET") {
       // Authenticated diagnostics; never expose credentials to the client.
       return Response.json({
         ready: Boolean(apiKey),
         model,
+        actionModel: classifierModel,
         message: apiKey ? "AI coach backend configured" :
           "The server's OPENAI_API_KEY secret is missing"
       }, { headers });
@@ -162,7 +169,8 @@ export default {
           method: "POST",
           headers: { "Authorization": "Bearer " + key, "Content-Type": "application/json" },
           body: JSON.stringify({
-            model, instructions, input: multimodalInput, store: false,
+            model: actionMode ? classifierModel : model,
+            instructions, input: multimodalInput, store: false,
             max_output_tokens: actionMode ? 1000 : 3200
           }),
           signal: controller.signal,
