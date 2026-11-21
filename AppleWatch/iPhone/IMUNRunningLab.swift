@@ -330,9 +330,11 @@ struct IMUNRunningLabDetail: View {
                                     maximumBPM: maximumHeartRate) +
                                 "\nADVANCED RUNNING EVIDENCE:\n" +
                                 IMUNRunAdvancedAnalytics.insightSummary(
-                                    run, history: history,
-                                    power: criticalPowerWatts,
-                                    pace: thresholdPace))
+                                    run, history: history,                                    power: criticalPowerWatts,
+                                    pace: thresholdPace) +
+                                "\nUSER-SELECTED RUNNING GOALS & RECORDED CONDITIONS:\n" +
+                                IMUNRunningLogbook.shared.coachingContext(
+                                    for: run, history: history))
                         } label: {
                             HStack(spacing: 8) {
                                 Image(systemName: "sparkles")
