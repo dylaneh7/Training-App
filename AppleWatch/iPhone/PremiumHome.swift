@@ -6012,7 +6012,8 @@ struct PremiumCoachConversation: View {
         pendingAction = nil
         errorMessage = nil
         question = ""
-        if threadLibrary.owner != nil && !legacy.isEmpty {
+        if threadLibrary.owner != nil &&
+           threadLibrary.storageMessage == nil && !legacy.isEmpty {
             // The historical unscoped file is migrated to an account-bound
             // archive and then removed to avoid cross-account leakage.
             storedConversation = Data()
