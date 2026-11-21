@@ -361,11 +361,11 @@ enum IMUNMotivation {
 
 // MARK: - IsAIah identity
 // Deliberately fixed, like the IMUN app icon. Surrounding UI follows the
-// active design preset; the mark itself is always cream, crimson and graphite.
+// permanent Selah Stone identity; the logo geometry stays intact.
 enum IMUNIsaiahBrand {
-    static let cream = Color(red: 0.97, green: 0.965, blue: 0.95)
-    static let crimson = Color(red: 0.77, green: 0.035, blue: 0.22)
-    static let graphite = Color(red: 0.045, green: 0.05, blue: 0.075)
+    static let cream = IMUNStyle.resolvedColor("F0EEE9")
+    static let crimson = IMUNStyle.resolvedColor("B9B7B0") // legacy name, now silver
+    static let graphite = IMUNStyle.resolvedColor("131516")
 }
 
 // Exact shape-traced rendition of the original approved Option C artwork.
