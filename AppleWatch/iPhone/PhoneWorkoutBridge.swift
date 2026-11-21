@@ -1876,6 +1876,8 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
             var result = source
             result.heartRateTrace = []
             result.routePoints = []
+            result.sensorSeries = nil
+            result.routeMileSplits = nil
             return result
         }
         // Optional history must never prevent delivery of today's actual workout.
