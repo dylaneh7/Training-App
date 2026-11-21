@@ -5388,6 +5388,10 @@ struct PremiumCoachConversation: View {
     @AppStorage("hcAIShareRecovery") private var shareRecovery = false
     @AppStorage("hcIsaiahRememberChats") private var rememberChats = true
     @AppStorage("hcCoachConversationLocalV1") private var storedConversation = Data()
+    @ObservedObject private var threadLibrary = IMUNCoachThreadLibrary.shared
+    @State private var showThreadHistory = false
+    @State private var showPrivacyPanel = false
+    @State private var showCoachSettings = false
     @FocusState private var composerFocused: Bool
     @State private var question = ""
     @State private var pendingAttachments: [IMUNCoachAttachment] = []
@@ -5401,7 +5405,6 @@ struct PremiumCoachConversation: View {
     @State private var pendingAction: IMUNCoachActionProposal?
     @State private var selectedActionWorkoutID = ""
     @State private var actionMoveDate = Date()
-    @AppStorage("hcDesignPreset") private var designPreset = "techno"
     @AppStorage("hcSelectedTab") private var selectedTab = "training"
     @AppStorage("hcTrainingActivity") private var selectedActivity = "weightlifting"
     @AppStorage("hcMotivationSource") private var motivationSource = "off"
@@ -5424,8 +5427,8 @@ struct PremiumCoachConversation: View {
     @State private var actionEditRestSeconds = 120
     @State private var actionEditWeightText = ""
     @State private var actionWorkoutSignature = ""
-    @State private var actionPreferenceKey = "hcDesignMode"
-    @State private var actionPreferenceValue = "system"
+    @State private var actionPreferenceKey = "hcRunCueMinutes"
+    @State private var actionPreferenceValue = "5"
 
     private var context: String {
         turns.suffix(6).map { turn in
@@ -5874,10 +5877,7 @@ struct PremiumCoachConversation: View {
     }
 
     private func persist() {
-        if let saved = try? JSONEncoder().encode(Array(turns.suffix(24))) {
-            storedConversation = saved
-        }
-        if rememberChats { IMUNCoachLocalMemory.save(turns) }
+        threadLibrary.update(turns, screen: launchContext)
     }
 
     private func populateEditFields(for exerciseID: String,
@@ -6182,13 +6182,13 @@ struct PremiumCoachConversation: View {
             (proposed.parameter ?? "Custom Strength Workout")
         actionRunMinutes = Int(proposed.parameter ?? "") ?? 40
         actionRunHasHR = false
-        actionPreferenceKey = proposed.settingKey ?? "hcDesignMode"
+        actionPreferenceKey = proposed.settingKey ?? "hcRunCueMinutes"
         actionPreferenceValue = IMUNCoachPreference.byID(actionPreferenceKey)
             .flatMap { setting in
                 proposed.parameter.flatMap { requested in
                     setting.choices.contains(requested) ? requested : nil
                 } ?? setting.choices.first
-            } ?? "system"
+            } ?? "5"
         prepareEditFields(proposed)
         isSending = false
         errorMessage = nil
@@ -6261,7 +6261,7 @@ struct PremiumCoachConversation: View {
             return
         }
         let currentHistory = context
-        let past = rememberChats ? IMUNCoachLocalMemory.relevantUserNotes(
+        let past = rememberChats ? threadLibrary.relevantNotes(
             for: questionText, excluding: Set(turns.map(\.id))) : ""
         let history = [currentHistory, past].filter { !$0.isEmpty }
             .joined(separator: "\n")
