@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// IsAIah conversations belong to the signed-in account and remain on this
 /// iPhone unless the athlete explicitly sends an excerpt to the AI service.
