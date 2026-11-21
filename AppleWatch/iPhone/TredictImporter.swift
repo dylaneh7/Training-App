@@ -229,7 +229,7 @@ final class HCTredictImporter: ObservableObject {
                 continue
             }
             let stride = max(1, Int(ceil(Double(values.count) / 480)))
-            for index in stride(from: 0, to: values.count, by: stride) {
+            for index in Swift.stride(from: 0, to: values.count, by: stride) {
                 guard let value = number(values[index]), value.isFinite,
                       (item.low...item.high).contains(value) else { continue }
                 chart.append(HCRunSensorReading(kind: item.destination,
