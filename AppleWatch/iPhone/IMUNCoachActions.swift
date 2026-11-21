@@ -264,9 +264,10 @@ enum IMUNCoachActionInterpreter {
         let workout = ["workout", "session", "routine", "lifting",
                        "strength", "tempo run", "interval run", "run"]
             .contains(where: { value.contains($0) })
-        return (planning && workout) ||
-            value.contains("put the exercises in") ||
-            value.contains("add the exercises") ||
+        let fillExercises = ["put", "add", "fill", "populate", "include", "finish"]
+            .contains(where: { value.contains($0) }) &&
+            ["exercis", "movement", "lifts"].contains(where: { value.contains($0) })
+        return (planning && workout) || fillExercises ||
             ((value.contains("tempo") || value.contains("interval")) &&
              value.range(of: #"\d+\s*[x×]\s*\d+"#, options: .regularExpression) != nil)
     }
