@@ -5,6 +5,26 @@
 	};
 	objectVersion = 56;
 	objects = {
+		0000000000000000000000B0 = {
+			isa = PBXFileReference;
+			lastKnownFileType = "sourcecode.swift";
+			path = "IMUNRunningIntelligence.swift";
+			sourceTree = "<group>";
+		};
+		0000000000000000000000B1 = {
+			isa = PBXBuildFile;
+			fileRef = 0000000000000000000000B0;
+		};
+		0000000000000000000000B2 = {
+			isa = PBXFileReference;
+			lastKnownFileType = "sourcecode.swift";
+			path = "IMUNRunningLab.swift";
+			sourceTree = "<group>";
+		};
+		0000000000000000000000B3 = {
+			isa = PBXBuildFile;
+			fileRef = 0000000000000000000000B2;
+		};
 		000000000000000000000094 = {
 			isa = PBXFileReference;
 			lastKnownFileType = "sourcecode.swift";
@@ -257,6 +277,8 @@
 				000000000000000000000090,
 				000000000000000000000092,
 				000000000000000000000094,
+				0000000000000000000000B0,
+				0000000000000000000000B2,
 			);
 			path = iPhone;
 			sourceTree = "<group>";
@@ -431,6 +453,8 @@
 				000000000000000000000091,
 				000000000000000000000093,
 				000000000000000000000095,
+				0000000000000000000000B1,
+				0000000000000000000000B3,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
