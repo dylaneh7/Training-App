@@ -36,6 +36,7 @@ struct IMUNRunningLabPage: View {
                         .foregroundStyle(HCDesign.secondary)
                 }
                 IMUNRunLoadCard(load: load)
+                IMUNRunningAdvancedOverview(runs: runs, planned: coach.plannedSessions)
                 HStack(spacing: 10) {
                     HCCard {
                         VStack(alignment: .leading, spacing: 5) {
@@ -219,6 +220,8 @@ struct IMUNRunningLabDetail: View {
     let run: HCProgressRun
     let history: [HCProgressRun]
     @AppStorage("hcRunMaximumHeartRate") private var maximumHeartRate = 0
+    @AppStorage("hcRunCriticalPowerWatts") private var criticalPowerWatts = 0
+    @AppStorage("hcRunThresholdPaceSecondsPerMile") private var thresholdPace = 0
     @State private var showMaxEditor = false
     @State private var maxDraft = ""
     @State private var maxError = false
@@ -265,6 +268,33 @@ struct IMUNRunningLabDetail: View {
                         .foregroundStyle(HCDesign.secondary)
                 }
                 IMUNRunSessionNumbers(run: run)
+                NavigationLink {
+                    IMUNRunningAdvancedSession(run: run, history: history)
+                } label: {
+                    HStack(spacing: 12) {
+                        Image(systemName: "chart.xyaxis.line")
+                            .font(.system(size: 22, weight: .ultraLight))
+                            .foregroundStyle(HCDesign.electric)
+                            .frame(width: 34)
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("DEEP RUN ANALYSIS")
+                                .font(HCDesign.label(11))
+                                .tracking(1.0)
+                                .foregroundStyle(HCDesign.electric)
+                            Text("Rolling efforts · intervals · terrain · pacing zones · journal")
+                                .font(.system(size: 11))
+                                .foregroundStyle(HCDesign.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        Spacer(minLength: 5)
+                        Image(systemName: "chevron.right")
+                            .foregroundStyle(HCDesign.secondary)
+                    }
+                    .padding(15)
+                    .background(HCDesign.card,
+                                in: RoundedRectangle(cornerRadius: 14))
+                }
+                .buttonStyle(.plain)
                 HCCard {
                     VStack(alignment: .leading, spacing: 11) {
                         Text("RUN ASSESSMENT")
@@ -287,7 +317,12 @@ struct IMUNRunningLabDetail: View {
                             PremiumCoachConversation(
                                 launchContext: IMUNRunningIntelligence.coachContext(
                                     for: run, history: history,
-                                    maximumBPM: maximumHeartRate))
+                                    maximumBPM: maximumHeartRate) +
+                                "\nADVANCED RUNNING EVIDENCE:\n" +
+                                IMUNRunAdvancedAnalytics.insightSummary(
+                                    run, history: history,
+                                    power: criticalPowerWatts,
+                                    pace: thresholdPace))
                         } label: {
                             HStack(spacing: 8) {
                                 Image(systemName: "sparkles")
