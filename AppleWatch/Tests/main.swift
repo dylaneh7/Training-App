@@ -459,3 +459,89 @@ check(zones.count == 5 &&
       abs(zones.reduce(0.0) { $0 + $1.seconds } - 120) < 0.01,
       "Heart-rate zones use actual sample intervals, not invented minutes")
 print("Running Lab provenance, old-cache, duplicate, best effort and zone tests passed.")
+
+
+// Running Lab phase 2: route-derived rolling efforts, interval candidates,
+// user-entered physiology thresholds, recovery, and race projection constraints.
+let runStart = Date(timeIntervalSince1970: 1_795_147_200)
+var routeRun = HCProgressRun(
+    id: "test-validated-route", date: "2026-11-20",
+    title: "Measured outdoor 5K", source: "Apple Watch",
+    distanceMeters: 5500, durationSeconds: 1800,
+    averageBPM: 144, splits: [])
+routeRun.startedAt = runStart
+routeRun.endedAt = runStart.addingTimeInterval(1800)
+// Valid equatorial straight-line GPS geometry; approximately 50 meters
+// every 16 seconds. All distances are from actual synthetic coordinates.
+var route: [HCRunRoutePoint] = []
+for index in 0...110 {
+    let seconds = Double(index) * (1800.0 / 110.0)
+    let longitude = Double(index) * (50.0 / 111_195.0)
+    route.append(HCRunRoutePoint(
+        latitude: 0, longitude: longitude, altitudeMeters: 30,
+        recordedAt: runStart.addingTimeInterval(seconds)))
+}
+routeRun.routePoints = route
+let rolling = IMUNRunAdvancedAnalytics.bestRouteSegments(routeRun)
+check(rolling.contains { $0.distanceMeters == 400 } &&
+      rolling.contains { $0.distanceMeters == 1000 },
+      "Measured timestamped route must provide 400m and 1K rolling efforts")
+check(rolling.allSatisfy { $0.elapsedSeconds > 0 &&
+      $0.elapsedSeconds <= routeRun.durationSeconds! },
+      "Route-derived efforts must have plausible measured elapsed times")
+let terrainResult = IMUNRunAdvancedAnalytics.routeAssessment(routeRun)
+check(terrainResult != nil && terrainResult!.reliableSegments >= 100,
+      "GPS quality assessment should accept synthetic stable route geometry")
+var gapRun = routeRun
+gapRun.routePoints = route.enumerated().compactMap { index, point in
+    index % 15 == 0 ? point : nil
+}
+check(IMUNRunAdvancedAnalytics.bestRouteSegments(gapRun).isEmpty,
+      "Insufficiently continuous route cannot produce invented best splits")
+
+var speedRun = routeRun
+var readings: [HCRunSensorReading] = []
+for index in 0..<60 {
+    let fast = index >= 20 && index <= 28
+    readings.append(HCRunSensorReading(
+        kind:"runningSpeed",
+        at:runStart.addingTimeInterval(Double(index * 10)),
+        value:fast ? 4.3 : 2.8))
+    readings.append(HCRunSensorReading(
+        kind:"runningPower",
+        at:runStart.addingTimeInterval(Double(index * 10)),
+        value:fast ? 340 : 240))
+}
+speedRun.sensorSeries = readings
+check(IMUNRunAdvancedAnalytics.candidateSurges(speedRun).count == 1,
+      "Elevated recorded speed for a sustained period creates a candidate interval")
+check(IMUNRunAdvancedAnalytics.powerZones(speedRun,criticalPower:0) == nil &&
+      IMUNRunAdvancedAnalytics.paceZones(speedRun,
+          thresholdSecondsPerMile:0) == nil,
+      "Unconfigured thresholds cannot create synthetic power or pace zones")
+let powers = IMUNRunAdvancedAnalytics.powerZones(speedRun,criticalPower:275)
+check(powers != nil && powers!.recordedSeconds > 500,
+      "Measured running watts use user-entered critical power")
+let paces = IMUNRunAdvancedAnalytics.paceZones(speedRun,
+    thresholdSecondsPerMile:530)
+check(paces != nil && paces!.recordedSeconds > 500,
+      "Pace zones require a user-entered threshold and source speed series")
+
+var recoveredRun = routeRun
+recoveredRun.heartRateTrace = [
+    HCRunHeartPoint(at:runStart.addingTimeInterval(1780),bpm:174)
+]
+recoveredRun.postRunHeartRateTrace = [
+    HCRunHeartPoint(at:runStart.addingTimeInterval(1860),bpm:142),
+    HCRunHeartPoint(at:runStart.addingTimeInterval(1920),bpm:128)
+]
+check(IMUNRunAdvancedAnalytics.heartRateRecovery(recoveredRun).count == 2,
+      "Measured same-source HR at 1 and 2 minutes can inform post-run change")
+recoveredRun.postRunHeartRateTrace = nil
+check(IMUNRunAdvancedAnalytics.heartRateRecovery(recoveredRun).isEmpty,
+      "No post-run HR data must yield no recovery metrics")
+let raceModel = IMUNRunAdvancedAnalytics.raceForecasts([testRun])
+check(raceModel.contains { $0.name == "10K" } &&
+      !raceModel.contains { $0.name == "Marathon" },
+      "Conservative race extrapolation must not project a marathon from a 5K")
+print("Running Lab phase 2 GPS, interval, zones, recovery and race projection checks passed.")
