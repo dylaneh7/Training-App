@@ -537,7 +537,6 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
                 if available {
                     self.refreshCloudWorkout()
                     self.refreshCloudRunHistory(force: true)
-                    self.refreshCloudAppearance(force: true)
                     self.refreshCloudEitan(force: true)
                     self.uploadPendingCloudSets()
                 }
@@ -563,7 +562,6 @@ final class WatchWorkoutStore: NSObject, ObservableObject, WCSessionDelegate {
                     self.cloudStatus = "Signed in · loading today's workout"
                     self.refreshCloudWorkout()
                     self.refreshCloudRunHistory(force: true)
-                    self.refreshCloudAppearance(force: true)
                     self.refreshCloudEitan(force: true)
                     self.uploadPendingCloudSets()
                 }
