@@ -101,18 +101,7 @@ struct IMUNCoachPreference: Identifiable {
     let category: String
 
     static let all: [IMUNCoachPreference] = [
-        .init(id: "hcDesignMode", title: "Appearance mode",
-              choices: ["light", "dark", "system"], type: .string,
-              category: "Appearance"),
-        .init(id: "hcDesignDensity", title: "Layout spacing",
-              choices: ["compact", "balanced", "airy"], type: .string,
-              category: "Appearance"),
-        .init(id: "hcDesignFont", title: "Typography",
-              choices: ["standard", "rounded", "serif", "monospaced"],
-              type: .string, category: "Appearance"),
         .init(id: "hcDesignReduceMotion", title: "Reduce animation",
-              choices: ["on", "off"], type: .bool, category: "Appearance"),
-        .init(id: "hcDesignWatchSyncEnabled", title: "Sync design to Watch",
               choices: ["on", "off"], type: .bool, category: "Appearance"),
         .init(id: "hcMotivationTone", title: "Motivation tone",
               choices: ["quiet", "direct", "rigorous"], type: .string,
@@ -156,11 +145,6 @@ struct IMUNCoachPreference: Identifiable {
             guard let number = Double(value), number.isFinite else { return nil }
             prefs.set(number, forKey: id)
         }
-        if id == "hcDesignDensity" || id == "hcDesignFont" {
-            // These override per-theme defaults only when custom geometry
-            // is enabled; activate it so the selected setting actually works.
-            prefs.set(true, forKey: "hcDesignCustomGeometry")
-        }
         return setting.title + " changed to " + value + "."
     }
 }
@@ -202,8 +186,6 @@ enum IMUNCoachActionCatalog {
               summary: "Confirm today's run without inserting sensor values.", access: "Review and confirm"),
         .init(kind: .syncWatch, domain: "Watch", title: "Sync the Watch",
               summary: "Refresh the existing signed-in cloud and Watch workout schedule.", access: "Review and confirm"),
-        .init(kind: .setTheme, domain: "Appearance", title: "Change theme",
-              summary: "Switch any available visual preset.", access: "Review and confirm"),
         .init(kind: .setMotivation, domain: "Motivation", title: "Change motivation",
               summary: "Select Scripture, original, performance, custom or off.", access: "Review and confirm"),
         .init(kind: .setRestDuration, domain: "Training", title: "Change rest timer",
@@ -215,7 +197,7 @@ enum IMUNCoachActionCatalog {
         .init(kind: .setRunAutoLaps, domain: "Running", title: "Automatic laps",
               summary: "Enable or disable automatic lap cues.", access: "Review and confirm"),
         .init(kind: .setAppPreference, domain: "Settings", title: "Adjust app preferences",
-              summary: "Set supported appearance, motivation, progression and running preferences.",
+              summary: "Set supported accessibility, motivation, progression and running preferences.",
               access: "Review and confirm"),
         .init(kind: .selectTraining, domain: "Navigation", title: "Change sport",
               summary: "Switch between Strength and Running.", access: "Review and confirm"),
@@ -417,19 +399,6 @@ enum IMUNCoachActionInterpreter {
                 "Refresh the authenticated calendar and use the existing Build 30 phone/cloud delivery.")
         }
 
-        if containsAny(value, ["theme", "appearance", "design", "look"]) &&
-           containsAny(value, ["switch", "change", "use", "set", "make"]) {
-            let matches = IMUNPreset.allCases.filter { preset in
-                value.contains(preset.title.lowercased()) ||
-                value.contains(preset.rawValue.lowercased())
-            }
-            if matches.count == 1, let preset = matches.first {
-                return proposal(.setTheme, "Use \(preset.title) theme",
-                    "Change only visual styling. No workout records, journal, or motivation content is changed.",
-                    theme: preset.rawValue)
-            }
-        }
-
         if containsAny(value, ["motivation", "scripture", "bible verse", "motivational"]) &&
            containsAny(value, ["set", "use", "show", "switch", "turn", "change", "enable", "disable"]) {
             let target: String?
@@ -449,13 +418,7 @@ enum IMUNCoachActionInterpreter {
         if containsAny(value, ["set ", "switch ", "change ", "make ", "turn ",
                                "use ", "adjust ", "enable ", "disable "]) {
             let aliases: [(String, [String])] = [
-                ("hcDesignMode", ["light mode", "dark mode", "appearance mode",
-                                  "color mode", "app appearance"]),
-                ("hcDesignDensity", ["spacing", "layout density", "layout spacing",
-                                     "compact layout", "airy layout"]),
-                ("hcDesignFont", ["typography", "app font", "font style"]),
                 ("hcDesignReduceMotion", ["reduce motion", "animation"]),
-                ("hcDesignWatchSyncEnabled", ["design to watch", "theme to watch"]),
                 ("hcMotivationTone", ["motivation tone", "motivational tone"]),
                 ("hcMotivationTranslation", ["bible translation",
                                               "scripture translation"]),
@@ -588,7 +551,7 @@ enum IMUNCoachActionInterpreter {
         "repMin"/"repMax" integers, "restSeconds" integer, "weightLb" number.
         Never invent an exercise ID. The user chooses the actual workout item.
         For setting values, use only valid app choices:
-        - themes: heritage,retro,techno,coast,fieldNotes,discipline,atelier,rally
+        - visual identity: fixed Selah Stone; theme customization is unsupported
         - tabs: training,progress,health,coach,settings
         - activity: run,weightlifting
         - motivation: off,original,performance,scripture,custom
@@ -701,9 +664,7 @@ enum IMUNCoachActionInterpreter {
                 "Review this whitelisted setting. No health-sharing or account permissions are modified.",
                 parameter: selected, settingKey: key)
         case "setTheme":
-            guard let value, let preset = IMUNPreset(rawValue: value) else { return nil }
-            return proposal(.setTheme, "Use \(preset.title) theme",
-                "Only visual design changes.", theme: preset.rawValue)
+            return nil
         case "setMotivation":
             guard let value, ["off", "original", "performance",
                               "scripture", "custom"].contains(value) else { return nil }
