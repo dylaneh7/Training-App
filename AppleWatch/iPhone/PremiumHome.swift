@@ -833,7 +833,7 @@ struct PremiumHomeView: View {
                 .padding(.trailing, 18)
                 .padding(.bottom, coach.isWorkoutActive ? 153 : 78)
         }
-        .sheet(isPresented: $isIsaiahPresented) {
+        .fullScreenCover(isPresented: $isIsaiahPresented) {
             NavigationStack {
                 PremiumCoachConversation(launchContext: isaiahLaunchContext)
                     .toolbar(.hidden, for: .navigationBar)
@@ -843,8 +843,6 @@ struct PremiumHomeView: View {
             .environmentObject(runImporter)
             .environmentObject(tredictImporter)
             .environmentObject(tredictPlans)
-            .presentationDetents([.large])
-            .presentationDragIndicator(.visible)
         }
         .onOpenURL { url in
             guard url.scheme == "imun" else { return }
@@ -6444,10 +6442,11 @@ struct PremiumCoachConversation: View {
             if destination == "settings" {
                 showCoachSettings = true
                 reply = "Opened iMun Settings."
+            } else if destination == "coach" {
+                reply = "You're already in IsAIah."
             } else {
                 selectedTab = destination
-                reply = destination == "coach" ?
-                    "Opened IsAIah." : "Opened the \(destination.capitalized) tab."
+                reply = "Opened the \(destination.capitalized) tab."
             }
         case .setMotivation:
             guard let source = action.parameter else { return }
