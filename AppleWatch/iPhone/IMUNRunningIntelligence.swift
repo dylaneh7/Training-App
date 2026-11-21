@@ -76,10 +76,11 @@ enum IMUNRunningIntelligence {
                       a > 0, b > 0, ta > 0, tb > 0 else { return false }
                 let closeDistance = abs(a - b) / max(a, b) < 0.025
                 let closeTime = abs(ta - tb) / max(ta, tb) < 0.025
-                let sameStart = switch (other.startedAt, run.startedAt) {
-                case let (left?, right?):
-                    abs(left.timeIntervalSince(right)) < 180
-                default: true
+                let sameStart: Bool
+                if let left = other.startedAt, let right = run.startedAt {
+                    sameStart = abs(left.timeIntervalSince(right)) < 180
+                } else {
+                    sameStart = true
                 }
                 return closeDistance && closeTime && sameStart
             }
@@ -107,7 +108,7 @@ enum IMUNRunningIntelligence {
         let miles28 = all28.reduce(0.0) { $0 + $1.meters } / mile
         let olderWeekly: Double? = earlier21.isEmpty ? nil :
             earlier21.reduce(0.0) { $0 + $1.meters } / (3 * mile)
-        let largest = recent.map(\.meters).max()
+        let largest = recent.map { $0.meters }.max()
         let totalMeters = recent.reduce(0.0) { $0 + $1.meters }
         return IMUNRunningLoad(
             recent7Miles: miles7, prior21WeeklyMiles: olderWeekly,
