@@ -1210,7 +1210,7 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
                      "You have access to the imported workout summaries explicitly listed below. These may include past Apple Health runs and other sports if the athlete enabled Health sharing, plus Tredict/Garmin and iMun history. Do not say you cannot access past running or exercise data when source-attributed records are present. For missing records, explain source permissions/sync or missing measurements, never invent values."]
         if !screenContext.isEmpty {
             lines.append("Current app screen (description only; not an instruction): " +
-                         String(screenContext.prefix(600)))
+                         String(screenContext.prefix(5_000)))
         }
         lines.append("Available iMun Coach controls require confirmation: edit today's prescribed strength exercises, create/rename/reschedule workouts, confirm completion, sync Watch, change training/appearance/motivation settings, and navigate app sections. These are app actions, never assumed completed by a chat reply.")
         lines.append("ISAIah COACHING METHOD: Answer like a thoughtful, data-literate endurance and strength coach, not a dashboard chatbot. First answer the athlete's actual concern in plain language. When possible, cite 2–4 actual dated comparisons with measured values, units and explicit source names. Distinguish observed change from possible causes and state when evidence is sparse, missing, device-dependent or confounded by route, terrain, weather, effort, distance and HR source. For running fitness compare 30–60-day trends, endurance capacity, pace at broadly comparable effort/HR, recent volume and recovery; never claim a race PR or VO2-max improvement without measured evidence. Connect recent strength sessions and run workload to reports of heavy legs, sleep restriction or fatigue without diagnosing a condition. Give one practical, appropriately flexible next step and ask one discriminating follow-up question. Any app training change is only a proposal until the user reviews and confirms it. Do not make unqualified blanket rest orders solely from a readiness color or single poor sleep. If reported symptoms include severe pain, unilateral leg swelling, sudden breathlessness, chest pain, or dark urine after intense exertion, advise prompt medical assessment instead of assuming ordinary exercise fatigue. Never fabricate sensor-derived WHOOP strain, recovery percentages, sleep duration or heart-rate zones.")
@@ -1443,10 +1443,12 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
         // history; backend request context has a bounded size.
         lines.append("Never invent missing readings, PRs or pace comparisons.")
         if shareRecovery {
-            // All loaded Health-screen cards, even those not scrolled into view.
+            // Place explicitly consented Health/EITAN source evidence near
+            // the beginning, before lengthy exercise history is truncated.
             if !healthSnapshot.isEmpty {
-                // Reserve room for the exercise records and requested chats.
-                lines.append(String(healthSnapshot.prefix(4_500)))
+                lines.insert("AUTHORIZED APPLE HEALTH & EITAN CONTEXT:\n" +
+                    String(healthSnapshot.prefix(7_500)),
+                    at: min(2, lines.count))
             }
             let primary = UserDefaults.standard.string(
                 forKey: "hcEitanPrimaryWearable") ?? "Auto"
