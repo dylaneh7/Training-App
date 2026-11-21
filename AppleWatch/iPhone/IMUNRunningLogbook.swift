@@ -112,7 +112,7 @@ final class IMUNRunningLogbook: ObservableObject {
         // Annotations are historical records; deleting a shoe removes its
         // assignments instead of retaining dangling IDs.
         data.shoes.removeAll { $0.id == id }
-        for key in data.notes.keys {
+        for key in Array(data.notes.keys) {
             if data.notes[key]?.shoeID == id {
                 data.notes[key]?.shoeID = nil
             }
@@ -179,6 +179,69 @@ final class IMUNRunningLogbook: ObservableObject {
             return sum + meters / IMUNRunningIntelligence.mile
         }
         return shoe.startingMiles + logged
+    }
+
+    /// Manual temperature notes contextualize measured pace; do not treat
+    /// observational comparisons as validated environmental corrections.
+    func conditionsComparison(_ run: HCProgressRun,
+                              history: [HCProgressRun]) -> String? {
+        guard let temperature = data.notes[run.id]?.temperatureF,
+              let distance = run.distanceMeters,
+              distance >= 1000,
+              let thisPace = IMUNRunningIntelligence.pacePerMile(run)
+        else { return nil }
+        let peers = IMUNRunningIntelligence.uniqueRuns(history).filter {
+            guard $0.id != run.id,
+                  let meters = $0.distanceMeters,
+                  abs(meters - distance) / distance <= 0.12,
+                  data.notes[$0.id]?.temperatureF != nil else { return false }
+            return IMUNRunningIntelligence.pacePerMile($0) != nil
+        }
+        guard peers.count >= 2 else { return nil }
+        let sample = Array(peers.prefix(10))
+        let temperatures = sample.compactMap {
+            data.notes[$0.id]?.temperatureF
+        }
+        let paces = sample.compactMap {
+            IMUNRunningIntelligence.pacePerMile($0)
+        }
+        guard temperatures.count >= 2 && paces.count >= 2 else {
+            return nil
+        }
+        let pastTemperature = temperatures.reduce(0,+) /
+            Double(temperatures.count)
+        let pastPace = paces.reduce(0,+) / Double(paces.count)
+        let tempDifference = temperature - pastTemperature
+        let paceDifference = thisPace - pastPace
+        return String(format:
+            "Your manually logged temperature was %.0f °F versus %.0f °F across %d similarly long runs (%+.0f °F). Recorded pace differed by %+.0f sec/mile. Workout effort, wind, humidity, hills, fueling and sensors may confound this comparison; temperature is not proven to have caused the change.",
+            temperature, pastTemperature, sample.count,
+            tempDifference, paceDifference)
+    }
+
+    /// Only compact goal/race metadata, not notes or journal text, is eligible
+    /// for an opt-in IsAIah message. The user must still tap Send.
+    func coachingContext(for run: HCProgressRun,
+                         history: [HCProgressRun]) -> String {
+        var result: [String] = []
+        if let target = data.goalMilesPerWeek {
+            result.append(String(format:
+                "User-selected weekly running goal: %.1f mi.", target))
+        }
+        if let target = data.goalRunsPerWeek {
+            result.append("User-selected run frequency goal: \(target) runs/week.")
+        }
+        if let race = data.races.filter({ $0.on >= Date() })
+            .sorted(by: { $0.on < $1.on }).first {
+            result.append(String(format:
+                "Upcoming recorded race: %@ on %@, %.1f km.",
+                race.name, race.on.formatted(date: .abbreviated, time: .omitted),
+                race.distanceMeters / 1000))
+        }
+        if let temp = conditionsComparison(run, history: history) {
+            result.append(temp)
+        }
+        return result.joined(separator: "\n")
     }
 
     func goalStatus(in runs: [HCProgressRun],
