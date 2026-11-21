@@ -798,10 +798,7 @@ struct PremiumHomeView: View {
             if tab == "progress" && coach.signedIn {
                 coach.refreshCloudProgress()
             }
-            if tab == "coach" {
-                selectedTab = "training"
-                presentIsaiah()
-            }
+            // Coach is now a real tab rather than an old pop-up shortcut.
         }
         )
     }
@@ -865,7 +862,9 @@ struct PremiumHomeView: View {
         .onAppear {
             migratePreviousHealthSourceChoice()
             runImporter.startIfAuthorized()
-            if selectedTab == "coach" { selectedTab = "training" }
+            // The former Settings tab moves to Coach > App settings.
+            // Migrate persisted tab selection before showing TabView.
+            if selectedTab == "settings" { selectedTab = "coach" }
             if coach.signedIn && coach.workout == nil { coach.refresh(date: Date()) }
             if coach.signedIn {
                 coach.refreshCloudProgress()
@@ -6298,9 +6297,14 @@ struct PremiumCoachConversation: View {
             reply = "Opened the \(activity == "run" ? "Running" : "Strength") training view."
         case .openTab:
             guard let destination = action.parameter else { return }
-            selectedTab = destination
-            reply = destination == "coach" ?
-                "Opened IsAIah." : "Opened the \(destination.capitalized) tab."
+            if destination == "settings" {
+                showCoachSettings = true
+                reply = "Opened iMun Settings."
+            } else {
+                selectedTab = destination
+                reply = destination == "coach" ?
+                    "Opened IsAIah." : "Opened the \(destination.capitalized) tab."
+            }
         case .setMotivation:
             guard let source = action.parameter else { return }
             motivationSource = source
