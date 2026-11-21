@@ -1129,6 +1129,11 @@ struct IMUNCoachActionReviewCard: View {
                         .textInputAutocapitalization(.words)
                 }
                 if action.kind == .createStrength {
+                    if let current = coach.workout, !current.exercises.isEmpty {
+                        Text("This replaces the current unstarted exercise prescription for today. Recorded sets cannot be overwritten.")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundStyle(HCDesign.caution)
+                    }
                     HStack {
                         Text("EXERCISE PRESCRIPTION")
                             .font(HCDesign.label(10)).tracking(1.1)
