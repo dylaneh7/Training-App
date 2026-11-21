@@ -39,8 +39,13 @@ enum IMUNRunningIntelligence {
     static let mile = 1609.344
 
     static func metric(_ run: HCProgressRun, kind: String) -> [HCRunSensorReading] {
-        (run.sensorSeries ?? []).filter {
-            $0.kind == kind && $0.value.isFinite && $0.value > 0
+        (run.sensorSeries ?? []).filter { point in
+            guard point.kind == kind, point.value.isFinite else { return false }
+            // Grade, environmental temperature and altitude may legitimately
+            // be zero or negative; do not drop descents or cold-weather data.
+            if ["runningSourceGrade", "runningSourceTemperature",
+                "runningAltitude"].contains(kind) { return true }
+            return point.value > 0
         }.sorted { $0.at < $1.at }
     }
 
