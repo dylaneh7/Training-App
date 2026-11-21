@@ -5587,14 +5587,35 @@ struct PremiumCoachConversation: View {
         .toolbarBackground(.visible, for: .navigationBar)
         .safeAreaInset(edge: .bottom, spacing: 0) { composer }
         .onAppear {
-            if let decoded = try? JSONDecoder().decode([IMUNCoachTurn].self,
-                                                       from: storedConversation) {
-                turns = Array(decoded.suffix(24))
-                if rememberChats { IMUNCoachLocalMemory.save(turns) }
-            }
+            restoreConversationHistory()
             // Refresh all authorized Apple Health workout types, including
             // older records, before answering history questions.
             runImporter.startIfAuthorized()
+        }
+        .onChange(of: coach.coachAccountID) { _, _ in
+            restoreConversationHistory()
+        }
+        .sheet(isPresented: $showThreadHistory) {
+            IMUNCoachHistorySheet(
+                library: threadLibrary,
+                onSelect: { switchConversation(to: $0) },
+                onCreate: { newConversation() },
+                onDelete: { deleteConversation($0) })
+        }
+        .sheet(isPresented: $showPrivacyPanel) {
+            privacyPanel
+        }
+        .sheet(isPresented: $showCoachSettings) {
+            NavigationStack {
+                PremiumSettingsPage(appleHealth: appleHealth)
+                    .toolbar {
+                        ToolbarItem(placement: .topBarTrailing) {
+                            Button("Done") { showCoachSettings = false }
+                        }
+                    }
+            }
+            .environmentObject(coach)
+            .environmentObject(appleHealth)
         }
         .task {
             try? await Task.sleep(nanoseconds: 350_000_000)
@@ -5878,6 +5899,55 @@ struct PremiumCoachConversation: View {
 
     private func persist() {
         threadLibrary.update(turns, screen: launchContext)
+    }
+
+    private func restoreConversationHistory() {
+        let stored = (try? JSONDecoder().decode([IMUNCoachTurn].self,
+                                               from: storedConversation)) ?? []
+        let archived = IMUNCoachLocalMemory.read()
+        let legacy = archived.count > stored.count ? archived : stored
+        threadLibrary.open(accountID: coach.coachAccountID, legacy: legacy)
+        turns = threadLibrary.selected?.messages ?? []
+        pendingAction = nil
+        errorMessage = nil
+        question = ""
+        if threadLibrary.owner != nil && !legacy.isEmpty {
+            // The historical unscoped file is migrated to an account-bound
+            // archive and then removed to avoid cross-account leakage.
+            storedConversation = Data()
+            IMUNCoachLocalMemory.clear()
+        }
+    }
+
+    private func newConversation() {
+        persist()
+        threadLibrary.create(screen: launchContext)
+        turns = []
+        question = ""
+        pendingAction = nil
+        pendingAttachments = []
+        errorMessage = nil
+        composerFocused = true
+    }
+
+    private func switchConversation(to id: UUID) {
+        persist()
+        threadLibrary.select(id)
+        turns = threadLibrary.selected?.messages ?? []
+        question = ""
+        pendingAction = nil
+        pendingAttachments = []
+        errorMessage = nil
+        composerFocused = true
+    }
+
+    private func deleteConversation(_ id: UUID) {
+        threadLibrary.delete(id)
+        turns = threadLibrary.selected?.messages ?? []
+        question = ""
+        pendingAction = nil
+        pendingAttachments = []
+        errorMessage = nil
     }
 
     private func populateEditFields(for exerciseID: String,
