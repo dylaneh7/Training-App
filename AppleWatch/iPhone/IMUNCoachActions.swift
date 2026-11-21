@@ -1050,178 +1050,243 @@ struct IMUNCoachActionReviewCard: View {
     let onCancel: () -> Void
     let onConfirm: () -> Void
 
+    private var reviewHeading: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            Label("REVIEW APP CHANGE", systemImage: "checkmark.shield")
+                .font(HCDesign.label(11))
+                .foregroundStyle(HCDesign.electric)
+            Text(action.title)
+                .font(HCDesign.display(20))
+                .foregroundStyle(HCDesign.ink)
+            Text(action.explanation)
+                .font(.caption)
+                .foregroundStyle(HCDesign.secondary)
+        }
+    }
+
+    @ViewBuilder
+    private var scheduleOptions: some View {
+        if action.kind == .moveWorkout {
+            Picker("Workout to move", selection: $selectedWorkoutID) {
+                Text("Choose a workout").tag("")
+                ForEach(coach.plannedSessions) { entry in
+                    Text("\(entry.date) · \(entry.title)").tag(entry.id)
+                }
+            }
+            .tint(HCDesign.aqua)
+            DatePicker("Move to", selection: $moveDate,
+                       displayedComponents: .date)
+                .tint(HCDesign.aqua)
+        }
+        if action.kind == .completeScheduledWorkout {
+            Picker("Calendar workout", selection: $selectedWorkoutID) {
+                Text("Choose an unfinished workout").tag("")
+                ForEach(coach.plannedSessions.filter {
+                    !$0.completed && UUID(uuidString: $0.id) != nil
+                }) { entry in
+                    Text("\(entry.date) · \(entry.title)").tag(entry.id)
+                }
+            }
+            .tint(HCDesign.aqua)
+        }
+    }
+
+    @ViewBuilder
+    private var preferenceControls: some View {
+        if action.kind == .setAppPreference {
+            Picker("App setting", selection: $preferenceKey) {
+                ForEach(IMUNCoachPreference.all) { setting in
+                    Text(setting.title).tag(setting.id)
+                }
+            }
+            .tint(HCDesign.electric)
+            .onChange(of: preferenceKey) { _, newKey in
+                preferenceValue = IMUNCoachPreference.byID(newKey)?
+                    .choices.first ?? ""
+            }
+            if let setting = IMUNCoachPreference.byID(preferenceKey) {
+                Picker("New value", selection: $preferenceValue) {
+                    ForEach(setting.choices, id: \.self) { option in
+                        Text(option.capitalized).tag(option)
+                    }
+                }
+                .tint(HCDesign.electric)
+            }
+            Text("Only supported training and accessibility settings are editable here. Account permissions and Health sharing remain private.")
+                .font(.caption2)
+                .foregroundStyle(HCDesign.secondary)
+        }
+    }
+
+    @ViewBuilder
+    private var exerciseEditor: some View {
+        if action.kind == .editStrength {
+            IMUNCoachWorkoutEditForm(
+                operation: $editOperation,
+                selectedExerciseID: $selectedEditExerciseID,
+                exerciseName: $editExerciseName,
+                instructions: $editInstructions,
+                sets: $editSets,
+                repMin: $editRepMin,
+                repMax: $editRepMax,
+                restSeconds: $editRestSeconds,
+                weightText: $editWeightText,
+                onSelectExercise: onSelectEditExercise)
+        }
+    }
+
+    private func strengthDetail(_ item: IMUNCoachStrengthDraft) -> String {
+        var result = "\(item.sets) × \(item.repMin)–\(item.repMax) reps · \(item.restSeconds)s rest"
+        if let weight = item.weightLb {
+            result += " · \(String(format: "%.1f", weight)) lb suggested"
+        }
+        return result
+    }
+
+    private func strengthRow(_ index: Int) -> some View {
+        let item = action.strengthExercises[index]
+        return VStack(alignment: .leading, spacing: 4) {
+            Text("\(index + 1). " + item.name)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(HCDesign.ink)
+            Text(strengthDetail(item))
+                .font(.system(size: 11))
+                .foregroundStyle(HCDesign.secondary)
+            if index < action.strengthExercises.count - 1 {
+                Divider().overlay(HCDesign.outline)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.vertical, 5)
+    }
+
+    @ViewBuilder
+    private var strengthPrescription: some View {
+        if action.kind == .createStrength {
+            TextField("Workout name", text: $workoutTitle)
+                .textInputAutocapitalization(.words)
+            if let current = coach.workout, !current.exercises.isEmpty {
+                Text("This replaces the current unstarted exercise prescription for today. Recorded sets cannot be overwritten.")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(HCDesign.caution)
+            }
+            HStack {
+                Text("EXERCISE PRESCRIPTION")
+                    .font(HCDesign.label(10)).tracking(1.1)
+                Spacer()
+                Text("\(action.strengthExercises.count) movements")
+                    .font(.system(size: 11))
+            }
+            .foregroundStyle(HCDesign.secondary)
+            ForEach(action.strengthExercises.indices, id: \.self) { index in
+                strengthRow(index)
+            }
+        } else if action.kind == .renameStrength {
+            TextField("Workout name", text: $workoutTitle)
+                .textInputAutocapitalization(.words)
+        }
+    }
+
+    private func runDetail(_ step: IMUNCoachRunDraftStep) -> String {
+        var result = step.phase.capitalized + " · " +
+            String(step.seconds / 60) + " min"
+        if step.seconds % 60 != 0 {
+            result += " \(step.seconds % 60) sec"
+        }
+        if let low = step.minBPM, let high = step.maxBPM {
+            result += " · \(low)–\(high) BPM"
+        }
+        return result
+    }
+
+    private func runRow(_ index: Int) -> some View {
+        let step = action.runSteps[index]
+        return VStack(alignment: .leading, spacing: 5) {
+            HStack(alignment: .top, spacing: 12) {
+                Text(String(format: "%02d", index + 1))
+                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(HCDesign.secondary)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(step.title)
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(HCDesign.ink)
+                    Text(runDetail(step))
+                        .font(.system(size: 11))
+                        .foregroundStyle(HCDesign.secondary)
+                }
+                Spacer(minLength: 0)
+            }
+            if index < action.runSteps.count - 1 {
+                Divider().overlay(HCDesign.outline)
+            }
+        }
+        .padding(.vertical, 4)
+    }
+
+    @ViewBuilder
+    private var runningPrescription: some View {
+        if action.kind == .createRun {
+            TextField("Run name", text: $workoutTitle)
+                .textInputAutocapitalization(.words)
+            Text("\(action.runSteps.reduce(0) { $0 + $1.seconds } / 60) minutes · \(action.runSteps.count) steps")
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(HCDesign.secondary)
+            ForEach(action.runSteps.indices, id: \.self) { index in
+                runRow(index)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var selectedParameter: some View {
+        if let parameter = action.parameter,
+           ![IMUNCoachActionKind.createRun, .createStrength, .renameStrength,
+             .editStrength, .setAppPreference].contains(action.kind) {
+            Text("Selected value: \(parameter)")
+                .font(.caption2)
+                .foregroundStyle(HCDesign.secondary)
+        }
+    }
+
+    private var confirmLabel: String {
+        switch action.kind {
+        case .undoWorkout: return "Undo Workout"
+        case .undoSet: return "Undo Set"
+        case .createStrength: return "Save full workout"
+        case .createRun: return "Save structured run"
+        default: return "Confirm action"
+        }
+    }
+
+    private var confirmationControls: some View {
+        VStack(alignment: .leading, spacing: 9) {
+            HStack(spacing: 10) {
+                Button("Cancel", action: onCancel)
+                    .buttonStyle(.bordered)
+                    .tint(HCDesign.secondary)
+                Button(confirmLabel, action: onConfirm)
+                    .buttonStyle(.borderedProminent)
+                    .tint(action.kind == .undoWorkout ?
+                          HCDesign.caution : HCDesign.electric)
+                    .disabled(!canConfirm)
+            }
+            Text("IsAIah never makes app changes without your confirmation.")
+                .font(.caption2)
+                .foregroundStyle(HCDesign.secondary)
+        }
+    }
+
     var body: some View {
         HCCard(accent: HCDesign.electric) {
             VStack(alignment: .leading, spacing: 12) {
-                Label("REVIEW APP CHANGE", systemImage: "checkmark.shield")
-                    .font(HCDesign.label(11))
-                    .foregroundStyle(HCDesign.electric)
-                Text(action.title)
-                    .font(HCDesign.display(20))
-                    .foregroundStyle(HCDesign.ink)
-                Text(action.explanation)
-                    .font(.caption)
-                    .foregroundStyle(HCDesign.secondary)
-
-                if action.kind == .moveWorkout {
-                    Picker("Workout to move", selection: $selectedWorkoutID) {
-                        Text("Choose a workout").tag("")
-                        ForEach(coach.plannedSessions) { entry in
-                            Text("\(entry.date) · \(entry.title)")
-                                .tag(entry.id)
-                        }
-                    }
-                    .tint(HCDesign.aqua)
-                    DatePicker("Move to", selection: $moveDate,
-                               displayedComponents: .date)
-                        .tint(HCDesign.aqua)
-                }
-                if action.kind == .completeScheduledWorkout {
-                    Picker("Calendar workout", selection: $selectedWorkoutID) {
-                        Text("Choose an unfinished workout").tag("")
-                        ForEach(coach.plannedSessions.filter {
-                            !$0.completed && UUID(uuidString: $0.id) != nil
-                        }) { entry in
-                            Text("\(entry.date) · \(entry.title)")
-                                .tag(entry.id)
-                        }
-                    }
-                    .tint(HCDesign.aqua)
-                }
-                if action.kind == .setAppPreference {
-                    Picker("App setting", selection: $preferenceKey) {
-                        ForEach(IMUNCoachPreference.all) { setting in
-                            Text(setting.title).tag(setting.id)
-                        }
-                    }
-                    .tint(HCDesign.electric)
-                    .onChange(of: preferenceKey) { _, newKey in
-                        preferenceValue = IMUNCoachPreference.byID(newKey)?
-                            .choices.first ?? ""
-                    }
-                    if let setting = IMUNCoachPreference.byID(preferenceKey) {
-                        Picker("New value", selection: $preferenceValue) {
-                            ForEach(setting.choices, id: \.self) { option in
-                                Text(option.capitalized).tag(option)
-                            }
-                        }
-                        .tint(HCDesign.electric)
-                    }
-                    Text("Only supported appearance, motivation and training preferences are editable here. Health permissions and account data aren't exposed.")
-                        .font(.caption2)
-                        .foregroundStyle(HCDesign.secondary)
-                }
-                if action.kind == .editStrength {
-                    IMUNCoachWorkoutEditForm(
-                        operation: $editOperation,
-                        selectedExerciseID: $selectedEditExerciseID,
-                        exerciseName: $editExerciseName,
-                        instructions: $editInstructions,
-                        sets: $editSets,
-                        repMin: $editRepMin,
-                        repMax: $editRepMax,
-                        restSeconds: $editRestSeconds,
-                        weightText: $editWeightText,
-                        onSelectExercise: onSelectEditExercise)
-                }
-                if action.kind == .createStrength ||
-                   action.kind == .renameStrength {
-                    TextField("Workout name", text: $workoutTitle)
-                        .textInputAutocapitalization(.words)
-                }
-                if action.kind == .createStrength {
-                    if let current = coach.workout, !current.exercises.isEmpty {
-                        Text("This replaces the current unstarted exercise prescription for today. Recorded sets cannot be overwritten.")
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundStyle(HCDesign.caution)
-                    }
-                    HStack {
-                        Text("EXERCISE PRESCRIPTION")
-                            .font(HCDesign.label(10)).tracking(1.1)
-                        Spacer()
-                        Text("\(action.strengthExercises.count) movements")
-                            .font(.system(size: 11))
-                    }
-                    .foregroundStyle(HCDesign.secondary)
-                    ForEach(action.strengthExercises.indices, id: \.self) { index in
-                        let item = action.strengthExercises[index]
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("\(index + 1). " + item.name)
-                                .font(.system(size: 13, weight: .semibold))
-                                .foregroundStyle(HCDesign.ink)
-                            Text("\(item.sets) × \(item.repMin)–\(item.repMax) reps  ·  \(item.restSeconds)s rest" +
-                                 (item.weightLb.map { "  ·  \(String(format: "%.1f", $0)) lb suggested" } ?? ""))
-                                .font(.system(size: 11))
-                                .foregroundStyle(HCDesign.secondary)
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.vertical, 5)
-                        if index < action.strengthExercises.count - 1 {
-                            Divider().overlay(HCDesign.outline)
-                        }
-                    }
-                }
-                if action.kind == .createRun {
-                    TextField("Run name", text: $workoutTitle)
-                        .textInputAutocapitalization(.words)
-                    Text("\(action.runSteps.reduce(0) { $0 + $1.seconds } / 60) minutes · \(action.runSteps.count) steps")
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(HCDesign.secondary)
-                    ForEach(action.runSteps.indices, id: \.self) { index in
-                        let step = action.runSteps[index]
-                        HStack(alignment: .top, spacing: 12) {
-                            Text(String(format: "%02d", index + 1))
-                                .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                                .foregroundStyle(HCDesign.secondary)
-                            VStack(alignment: .leading, spacing: 3) {
-                                Text(step.title)
-                                    .font(.system(size: 13, weight: .semibold))
-                                    .foregroundStyle(HCDesign.ink)
-                                Text(step.phase.capitalized + "  ·  " +
-                                     String(step.seconds / 60) + " min" +
-                                     (step.seconds % 60 == 0 ? "" : " \(step.seconds % 60) sec") +
-                                     (step.minBPM.flatMap { low in step.maxBPM.map {
-                                         " · \(low)–\($0) BPM"
-                                     } } ?? ""))
-                                    .font(.system(size: 11))
-                                    .foregroundStyle(HCDesign.secondary)
-                            }
-                            Spacer(minLength: 0)
-                        }
-                        .padding(.vertical, 4)
-                        if index < action.runSteps.count - 1 {
-                            Divider().overlay(HCDesign.outline)
-                        }
-                    }
-                }
-                if let parameter = action.parameter,
-                   action.kind != .createRun &&
-                   action.kind != .createStrength &&
-                   action.kind != .renameStrength &&
-                   action.kind != .editStrength &&
-                   action.kind != .setAppPreference {
-                    Text("Selected value: \(parameter)")
-                        .font(.caption2)
-                        .foregroundStyle(HCDesign.secondary)
-                }
-                HStack(spacing: 10) {
-                    Button("Cancel", action: onCancel)
-                        .buttonStyle(.bordered)
-                        .tint(HCDesign.secondary)
-                    Button(action.kind == .undoWorkout ? "Undo Workout" :
-                           action.kind == .undoSet ? "Undo Set" :
-                           action.kind == .createStrength ? "Save full workout" :
-                           action.kind == .createRun ? "Save structured run" :
-                           "Confirm action",
-                           action: onConfirm)
-                        .buttonStyle(.borderedProminent)
-                        .tint(action.kind == .undoWorkout ?
-                              HCDesign.caution : HCDesign.electric)
-                        .disabled(!canConfirm)
-                }
-                Text("IsAIah never makes app changes without your confirmation.")
-                    .font(.caption2)
-                    .foregroundStyle(HCDesign.secondary)
+                reviewHeading
+                scheduleOptions
+                preferenceControls
+                exerciseEditor
+                strengthPrescription
+                runningPrescription
+                selectedParameter
+                confirmationControls
             }
         }
     }
