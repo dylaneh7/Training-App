@@ -159,6 +159,104 @@ final class HCTredictImporter: ObservableObject {
         return String(value.prefix(10))
     }
 
+
+    private static func isoDate(_ value: String) -> Date? {
+        let precise = ISO8601DateFormatter()
+        precise.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return precise.date(from: value) ?? ISO8601DateFormatter().date(from: value)
+    }
+
+    /// The Personal API can expose real Garmin/Tredict running dynamics and
+    /// device laps. Only explicitly labeled measurements are normalized.
+    private static func enrichRun(_ run: inout HCProgressRun,
+                                  detail: [String: Any]) {
+        let summary = detail["summary"] as? [String: Any] ?? [:]
+        let gct = number(summary["groundContactTime"])
+        if let gct, (90...600).contains(gct) {
+            run.averageGroundContactTimeMS = gct
+        }
+        let step = number(summary["stepLength"])
+        if let step, (0.3...3.5).contains(step) {
+            run.averageStrideLengthMeters = step
+        }
+        let speed = number(summary["speed"])
+        if let speed, (0.5...15).contains(speed) {
+            run.averageRunningSpeedMPS = speed
+        }
+        // Tredict may return vertical oscillation in different provider
+        // representations; do not guess a centimetre conversion from a
+        // semantically undocumented numeric field.
+        if run.averagePowerWatts == nil {
+            run.averagePowerWatts = number(summary["power"])
+        }
+        if run.averageCadenceSPM == nil {
+            run.averageCadenceSPM = number(summary["cadence"])
+        }
+        if let laps = detail["laps"] as? [[String: Any]] {
+            var converted: [HCRunSplit] = []
+            for lap in laps.prefix(300) {
+                guard let duration = number(lap["duration"]),
+                      duration >= 1 && duration <= 14400 else { continue }
+                converted.append(HCRunSplit(index: converted.count + 1,
+                    elapsedSeconds: duration,
+                    distanceMeters: number(lap["distance"])))
+            }
+            if !converted.isEmpty {
+                // Explicit laps (recorded or Tredict-constructed) are labeled
+                // as Tredict laps in the Run Details provenance.
+                run.splits = converted
+            }
+        }
+        guard let series = detail["seriesSampled"] as? [String: Any],
+              let raw = series["data"] as? [String: Any],
+              let strideSeconds = number(series["sampleSize"]),
+              strideSeconds >= 1 && strideSeconds <= 120,
+              let timestamp = detail["date"] as? String,
+              let started = isoDate(timestamp) else { return }
+        run.startedAt = started
+        if let duration = run.durationSeconds {
+            run.endedAt = started.addingTimeInterval(duration)
+        }
+        let kinds: [(source: String, destination: String, low: Double, high: Double)] = [
+            ("speed", "runningSpeed", 0.5, 15),
+            ("power", "runningPower", 1, 1500),
+            ("groundContactTime", "runningGroundContactTime", 90, 600),
+            ("stepLength", "runningStrideLength", 0.3, 3.5)
+        ]
+        var chart: [HCRunSensorReading] = []
+        for item in kinds {
+            guard let values = raw[item.source] as? [Any], !values.isEmpty else {
+                continue
+            }
+            let stride = max(1, Int(ceil(Double(values.count) / 480)))
+            for index in stride(from: 0, to: values.count, by: stride) {
+                guard let value = number(values[index]), value.isFinite,
+                      (item.low...item.high).contains(value) else { continue }
+                chart.append(HCRunSensorReading(kind: item.destination,
+                    at: started.addingTimeInterval(
+                        Double(index) * strideSeconds),
+                    value: value))
+            }
+        }
+        if !chart.isEmpty {
+            run.sensorSeries = chart.sorted { $0.at < $1.at }
+        }
+        // Heart-rate time series are retained separately so the running
+        // analytics engine can inspect same-session HR/speed trends.
+        if let rates = raw["heartrate"] as? [Any], !rates.isEmpty {
+            let step = max(1, Int(ceil(Double(rates.count) / 450)))
+            var recorded: [HCRunHeartPoint] = []
+            for index in Swift.stride(from: 0, to: rates.count, by: step) {
+                guard let bpm = number(rates[index]),
+                      (35...240).contains(bpm) else { continue }
+                recorded.append(HCRunHeartPoint(
+                    at: started.addingTimeInterval(
+                        Double(index) * strideSeconds), bpm: bpm))
+            }
+            if !recorded.isEmpty { run.heartRateTrace = recorded }
+        }
+    }
+
     /// Reject cross-domain 'next' links so a bearer token can never be sent
     /// to an untrusted host.
     private static func getJSON(_ url: URL, token: String) async throws -> [String: Any] {
@@ -241,6 +339,28 @@ final class HCTredictImporter: ObservableObject {
         let capacity = await optionalJSON("capacity", token: token)
         let equipment = await optionalJSON("equipmentList", token: token)
 
+        // Read-only detailed downloads are bounded to six recent runs per
+        // user-triggered refresh. A missing detailed response must never
+        // prevent the rest of the history from importing.
+        var details: [String: [String: Any]] = [:]
+        let newestRuns = rows.filter {
+            ($0["sportType"] as? String)?.lowercased() == "running"
+        }.sorted {
+            ($0["date"] as? String ?? "") >
+                ($1["date"] as? String ?? "")
+        }
+        for row in newestRuns.prefix(6) {
+            guard let id = row["id"] as? String,
+                  let encoded = id.addingPercentEncoding(
+                    withAllowedCharacters: .urlPathAllowed) else { continue }
+            details[id] = await optionalJSON("activity/" + encoded,
+                token: token, query: [
+                    URLQueryItem(name: "extraValues", value: "1"),
+                    URLQueryItem(name: "allSeries", value: "1"),
+                    URLQueryItem(name: "withLaps", value: "1")
+                ])
+        }
+
         var activities: [HCTrainingActivity] = []
         var runs: [HCProgressRun] = []
         var used = Set<String>()
@@ -305,6 +425,9 @@ final class HCTredictImporter: ObservableObject {
                 r.averagePowerWatts = number(summary["power"])
                 r.averageCadenceSPM = number(summary["cadence"])
                 r.elevationGainMeters = number((summary["altitude"] as? [String: Any])?["ascent"])
+                if let detail = details[sourceID] {
+                    enrichRun(&r, detail: detail)
+                }
                 runs.append(r)
             }
         }
