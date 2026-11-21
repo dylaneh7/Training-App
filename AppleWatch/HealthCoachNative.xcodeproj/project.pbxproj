@@ -5,14 +5,46 @@
 	};
 	objectVersion = 56;
 	objects = {
-		0000000000000000000000E0 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IMUNRunAdvancedAnalytics.swift; sourceTree = "<group>"; };
-		0000000000000000000000E1 = { isa = PBXBuildFile; fileRef = 0000000000000000000000E0; };
-		0000000000000000000000E2 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IMUNRunningLogbook.swift; sourceTree = "<group>"; };
-		0000000000000000000000E3 = { isa = PBXBuildFile; fileRef = 0000000000000000000000E2; };
-		0000000000000000000000E4 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IMUNRunningAdvancedViews.swift; sourceTree = "<group>"; };
-		0000000000000000000000E5 = { isa = PBXBuildFile; fileRef = 0000000000000000000000E4; };
-		0000000000000000000000E6 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IMUNRunningTrainingViews.swift; sourceTree = "<group>"; };
-		0000000000000000000000E7 = { isa = PBXBuildFile; fileRef = 0000000000000000000000E6; };
+		0000000000000000000000E0 = {
+			isa = PBXFileReference;
+			lastKnownFileType = "sourcecode.swift";
+			path = "IMUNRunAdvancedAnalytics.swift";
+			sourceTree = "<group>";
+		};
+		0000000000000000000000E1 = {
+			isa = PBXBuildFile;
+			fileRef = 0000000000000000000000E0;
+		};
+		0000000000000000000000E2 = {
+			isa = PBXFileReference;
+			lastKnownFileType = "sourcecode.swift";
+			path = "IMUNRunningLogbook.swift";
+			sourceTree = "<group>";
+		};
+		0000000000000000000000E3 = {
+			isa = PBXBuildFile;
+			fileRef = 0000000000000000000000E2;
+		};
+		0000000000000000000000E4 = {
+			isa = PBXFileReference;
+			lastKnownFileType = "sourcecode.swift";
+			path = "IMUNRunningAdvancedViews.swift";
+			sourceTree = "<group>";
+		};
+		0000000000000000000000E5 = {
+			isa = PBXBuildFile;
+			fileRef = 0000000000000000000000E4;
+		};
+		0000000000000000000000E6 = {
+			isa = PBXFileReference;
+			lastKnownFileType = "sourcecode.swift";
+			path = "IMUNRunningTrainingViews.swift";
+			sourceTree = "<group>";
+		};
+		0000000000000000000000E7 = {
+			isa = PBXBuildFile;
+			fileRef = 0000000000000000000000E6;
+		};
 		0000000000000000000000D0 = {
 			isa = PBXFileReference;
 			lastKnownFileType = "sourcecode.swift";
