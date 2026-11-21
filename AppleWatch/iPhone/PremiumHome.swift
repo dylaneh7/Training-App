@@ -5392,6 +5392,7 @@ struct PremiumCoachConversation: View {
     @State private var showThreadHistory = false
     @State private var showPrivacyPanel = false
     @State private var showCoachSettings = false
+    @State private var confirmEraseHistory = false
     @FocusState private var composerFocused: Bool
     @State private var question = ""
     @State private var pendingAttachments: [IMUNCoachAttachment] = []
@@ -5431,8 +5432,9 @@ struct PremiumCoachConversation: View {
     @State private var actionPreferenceValue = "5"
 
     private var context: String {
-        turns.suffix(6).map { turn in
-            (turn.role == "user" ? "Athlete: " : "IsAIah: ") + turn.text
+        turns.suffix(14).map { turn in
+            (turn.role == "user" ? "Athlete: " : "IsAIah: ") +
+                String(turn.text.prefix(850))
         }.joined(separator: "\n")
     }
     private var canSend: Bool {
@@ -5460,40 +5462,41 @@ struct PremiumCoachConversation: View {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 14) {
                         if turns.isEmpty {
-                            VStack(alignment: .leading, spacing: 12) {
-                                Text("What can I help with?")
-                                    .font(.system(size: 21, weight: .semibold))
-                                    .foregroundStyle(HCDesign.ink)
-                                Text("Ask naturally about this screen, your training or your health.")
+                            VStack(alignment: .leading, spacing: 19) {
+                                HStack(spacing: 13) {
+                                    IMUNIsaiahMark(size: 42)
+                                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                                    VStack(alignment: .leading, spacing: 5) {
+                                        Text("YOUR COACHING SPACE")
+                                            .font(HCDesign.label(10))
+                                            .tracking(1.4)
+                                            .foregroundStyle(HCDesign.aqua)
+                                        Text("What are we working on?")
+                                            .font(HCDesign.display(24))
+                                            .foregroundStyle(HCDesign.ink)
+                                    }
+                                }
+                                Text("Talk through a workout, interpret a running trend, or ask IsAIah to prepare a change in your training. Your records are never edited without review.")
                                     .font(.system(size: 13))
                                     .foregroundStyle(HCDesign.secondary)
-                                suggestion("Is my running fitness improving since September?")
-                                suggestion("Are my legs tired from recent training?")
-                                suggestion("Compare my training load and recovery this week")
-                                suggestion("Review today's workout")
+                                    .fixedSize(horizontal: false, vertical: true)
+                                VStack(alignment: .leading, spacing: 8) {
+                                    Text("SUGGESTED STARTS")
+                                        .font(HCDesign.label(10))
+                                        .tracking(1.2)
+                                        .foregroundStyle(HCDesign.secondary)
+                                    suggestion("Assess this week's running and strength load")
+                                    suggestion("What is changing in my running performance?")
+                                    suggestion("Review today's training and suggest adjustments")
+                                    suggestion("Compare my wearable heart-rate readings")
+                                }
                             }
-                            .padding(.vertical, 14)
+                            .padding(.top, 23)
+                            .padding(.bottom, 18)
                         }
 
                         ForEach(turns) { turn in
-                            HStack(alignment: .bottom, spacing: 9) {
-                                if turn.role == "user" {
-                                    Spacer(minLength: 35)
-                                } else {
-                                    IMUNIsaiahMark(size: 29)
-                                }
-                                Text(turn.text)
-                                    .font(.system(size: 14))
-                                    .foregroundStyle(HCDesign.ink)
-                                    .textSelection(.enabled)
-                                    .padding(.horizontal, 14)
-                                    .padding(.vertical, 12)
-                                    .background(turn.role == "user" ?
-                                                HCDesign.electric.opacity(0.14) :
-                                                HCDesign.card,
-                                                in: RoundedRectangle(cornerRadius: 16))
-                                if turn.role != "user" { Spacer(minLength: 35) }
-                            }
+                            IMUNCoachBubble(turn: turn)
                         }
                         if !isSending && turns.last?.role == "assistant" {
                             if shouldShowRunEvidence {
