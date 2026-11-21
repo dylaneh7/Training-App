@@ -5718,6 +5718,7 @@ struct PremiumCoachConversation: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .disabled(isSending)
             .accessibilityLabel("View previous IsAIah conversations")
             Button {
                 newConversation()
@@ -5728,6 +5729,7 @@ struct PremiumCoachConversation: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .disabled(isSending)
             .accessibilityLabel("Start a new IsAIah conversation")
             Menu {
                 Button {
@@ -5925,6 +5927,7 @@ struct PremiumCoachConversation: View {
                            role: .destructive) {
                         confirmEraseHistory = true
                     }
+                    .disabled(isSending)
                 } header: { Text("Conversation history") }
                 Section {
                     Text("IsAIah analyzes source-labeled evidence and suggests actions. Changes to workouts or app settings still require your review and confirmation.")
@@ -6022,6 +6025,7 @@ struct PremiumCoachConversation: View {
     }
 
     private func newConversation() {
+        guard !isSending else { return }
         persist()
         threadLibrary.create(screen: launchContext)
         turns = []
@@ -6033,6 +6037,7 @@ struct PremiumCoachConversation: View {
     }
 
     private func switchConversation(to id: UUID) {
+        guard !isSending else { return }
         persist()
         threadLibrary.select(id)
         turns = threadLibrary.selected?.messages ?? []
@@ -6044,6 +6049,7 @@ struct PremiumCoachConversation: View {
     }
 
     private func deleteConversation(_ id: UUID) {
+        guard !isSending else { return }
         threadLibrary.delete(id)
         turns = threadLibrary.selected?.messages ?? []
         question = ""
@@ -6407,6 +6413,8 @@ struct PremiumCoachConversation: View {
         let originalDraft = question.trimmingCharacters(in: .whitespacesAndNewlines)
         guard canSend else { return }
         let uploads = pendingAttachments
+        let requestAccountID = coach.coachAccountID
+        let requestThreadID = threadLibrary.selectedID
         let questionText = originalDraft.isEmpty ?
             "Please analyze the attached exercise data. Explain what you can verify and what is missing." :
             originalDraft
@@ -6456,6 +6464,11 @@ struct PremiumCoachConversation: View {
                     classification, sessions: coach.plannedSessions,
                     workout: coach.workout, run: coach.runPlan) {
                     await MainActor.run {
+                        guard coach.coachAccountID == requestAccountID,
+                              threadLibrary.selectedID == requestThreadID else {
+                            isSending = false
+                            return
+                        }
                         presentAction(proposal, for: questionText, appendUser: false)
                     }
                     return
@@ -6478,6 +6491,11 @@ struct PremiumCoachConversation: View {
                          eitanSharedCoachContext) : "",
                     attachments: uploads)
                 await MainActor.run {
+                    guard coach.coachAccountID == requestAccountID,
+                          threadLibrary.selectedID == requestThreadID else {
+                        isSending = false
+                        return
+                    }
                     pendingAttachments.removeAll()
                     turns.append(IMUNCoachTurn(role: "assistant", text: reply))
                     isSending = false
@@ -6485,6 +6503,11 @@ struct PremiumCoachConversation: View {
                 }
             } catch {
                 await MainActor.run {
+                    guard coach.coachAccountID == requestAccountID,
+                          threadLibrary.selectedID == requestThreadID else {
+                        isSending = false
+                        return
+                    }
                     // Restore the draft without keeping a duplicate failed turn.
                     if turns.last?.role == "user" {
                         turns.removeLast()
