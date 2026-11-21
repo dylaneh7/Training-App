@@ -1290,6 +1290,23 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
         if let run = runPlan, run.date == today {
             available.append("Running plan: " + run.title)
         }
+        // Historical iMun strength sets are already authorized workout data.
+        // Keep source/date/load attribution and avoid duplicate cloud/local sets.
+        var seenSetIDs = Set<UUID>()
+        let previousSets = (loggedSets + cloudRecordedSets)
+            .sorted { $0.completedAt > $1.completedAt }
+            .filter { seenSetIDs.insert($0.id).inserted }
+            .prefix(16)
+        for set in previousSets {
+            available.append("Recorded lifting: " + set.workoutDate +
+                " • " + set.exerciseName +
+                " • " + String(set.reps) + " reps" +
+                (set.weightLb.map { " at " +
+                    String(format: "%.1f", $0) + " lb" } ?? "") +
+                (set.rir.map { " • RIR " +
+                    String(format: "%.1f", $0) } ?? "") +
+                ". Source: iMun logged set. Reference only, not a new prescription.")
+        }
         // Provide source-attributed running evidence only on explicit Send.
         // Apple Health rows require the separate athlete-controlled consent.
         let priorRuns = runHistory.filter { shareHealth || !$0.fromAppleHealth }
