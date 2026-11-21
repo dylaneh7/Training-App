@@ -102,7 +102,10 @@ struct IMUNCoachPreference: Identifiable {
 
     static let all: [IMUNCoachPreference] = [
         .init(id: "hcDesignReduceMotion", title: "Reduce animation",
-              choices: ["on", "off"], type: .bool, category: "Appearance"),
+              choices: ["on", "off"], type: .bool, category: "Accessibility"),
+        .init(id: "hcEitanPrimaryWearable", title: "Primary readiness wearable",
+              choices: ["Auto", "WHOOP", "Apple Watch", "Garmin", "Chargerless"],
+              type: .string, category: "Wearables"),
         .init(id: "hcMotivationTone", title: "Motivation tone",
               choices: ["quiet", "direct", "rigorous"], type: .string,
               category: "Motivation"),
@@ -419,6 +422,10 @@ enum IMUNCoachActionInterpreter {
                                "use ", "adjust ", "enable ", "disable "]) {
             let aliases: [(String, [String])] = [
                 ("hcDesignReduceMotion", ["reduce motion", "animation"]),
+                ("hcEitanPrimaryWearable", [
+                    "primary wearable", "main wearable", "readiness device",
+                    "wearable for eitan", "recovery source", "recovery wearable"
+                ]),
                 ("hcMotivationTone", ["motivation tone", "motivational tone"]),
                 ("hcMotivationTranslation", ["bible translation",
                                               "scripture translation"]),
@@ -448,6 +455,9 @@ enum IMUNCoachActionInterpreter {
                         "\\b" + NSRegularExpression.escapedPattern(for: lower) + "\\b",
                         options: .regularExpression) != nil
                 })
+                if key == "hcEitanPrimaryWearable" && foundValue == nil {
+                    return nil  // Never silently switch to Auto on ambiguity.
+                }
                 return proposal(.setAppPreference, "Change " + preference.title,
                     "Apply a typed iMun preference without changing recorded workouts or health permissions.",
                     parameter: foundValue ?? preference.choices.first,
