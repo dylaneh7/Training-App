@@ -549,6 +549,125 @@ private struct IMUNTodaysHealthStat: View {
 
 // MARK: - Health Coach 2.0 navigation
 
+// iMun's four original navigational marks. Drawn as vectors rather than
+// relying on Apple's SF Symbol icon set, with Selah Stone stroke treatment.
+private struct IMUNNavigationGlyph: View {
+    let kind: String
+
+    var body: some View {
+        GeometryReader { geometry in
+            Path { path in
+                let width = geometry.size.width
+                let height = geometry.size.height
+                func point(_ x: CGFloat, _ y: CGFloat) -> CGPoint {
+                    CGPoint(x: x * width, y: y * height)
+                }
+                switch kind {
+                case "today":
+                    // Dawn over the horizon: beginning, clarity, direction.
+                    path.move(to: point(0.12, 0.69))
+                    path.addLine(to: point(0.88, 0.69))
+                    path.move(to: point(0.25, 0.53))
+                    path.addQuadCurve(to: point(0.75, 0.53),
+                                      control: point(0.50, 0.05))
+                    path.move(to: point(0.18, 0.84))
+                    path.addLine(to: point(0.82, 0.84))
+                    path.move(to: point(0.5, 0.11))
+                    path.addLine(to: point(0.5, 0.03))
+                case "training":
+                    // Two linked load-bearing beams, not a stock dumbbell.
+                    path.move(to: point(0.12, 0.76))
+                    path.addLine(to: point(0.40, 0.24))
+                    path.addLine(to: point(0.60, 0.76))
+                    path.addLine(to: point(0.88, 0.24))
+                    path.move(to: point(0.27, 0.49))
+                    path.addLine(to: point(0.73, 0.49))
+                    path.move(to: point(0.10, 0.87))
+                    path.addLine(to: point(0.90, 0.87))
+                case "progress":
+                    // Ascending trajectory with measured milestones.
+                    path.move(to: point(0.12, 0.85))
+                    path.addLine(to: point(0.12, 0.18))
+                    path.move(to: point(0.12, 0.85))
+                    path.addLine(to: point(0.90, 0.85))
+                    path.move(to: point(0.24, 0.69))
+                    path.addLine(to: point(0.46, 0.52))
+                    path.addLine(to: point(0.61, 0.60))
+                    path.addLine(to: point(0.86, 0.24))
+                    path.addEllipse(in: CGRect(x: width * 0.82, y: height * 0.20,
+                                               width: width * 0.09, height: height * 0.09))
+                default:
+                    // Rhombus enclosing a pulse: whole-body health.
+                    path.move(to: point(0.50, 0.07))
+                    path.addLine(to: point(0.92, 0.50))
+                    path.addLine(to: point(0.50, 0.93))
+                    path.addLine(to: point(0.08, 0.50))
+                    path.closeSubpath()
+                    path.move(to: point(0.19, 0.52))
+                    path.addLine(to: point(0.36, 0.52))
+                    path.addLine(to: point(0.45, 0.32))
+                    path.addLine(to: point(0.55, 0.70))
+                    path.addLine(to: point(0.65, 0.52))
+                    path.addLine(to: point(0.82, 0.52))
+                }
+            }
+            .stroke(style: StrokeStyle(lineWidth: 1.8,
+                                       lineCap: .round, lineJoin: .round))
+        }
+    }
+}
+
+private struct IMUNPrimaryNavigation: View {
+    @Binding var selectedTab: String
+    private let destinations: [(key: String, name: String)] = [
+        ("today", "Today"), ("training", "Training"),
+        ("progress", "Progress"), ("health", "Health")
+    ]
+
+    var body: some View {
+        HStack(spacing: 0) {
+            ForEach(destinations, id: \.key) { destination in
+                let selected = selectedTab == destination.key
+                Button {
+                    selectedTab = destination.key
+                } label: {
+                    VStack(spacing: 6) {
+                        IMUNNavigationGlyph(kind: destination.key)
+                            .frame(width: 23, height: 23)
+                        Text(destination.name)
+                            .font(.system(size: 10, weight: selected ? .semibold : .medium,
+                                          design: .rounded))
+                            .lineLimit(1)
+                    }
+                    .foregroundStyle(selected ? HCDesign.ink : HCDesign.secondary)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 55)
+                    .overlay(alignment: .top) {
+                        Capsule().fill(selected ? HCDesign.ink : Color.clear)
+                            .frame(width: 26, height: 2)
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(destination.name)
+                .accessibilityAddTraits(selected ? [.isSelected] : [])
+            }
+        }
+        .padding(.horizontal, 9)
+        .padding(.top, 9)
+        .padding(.bottom, 5)
+        .background {
+            HCDesign.canvas
+                .overlay(alignment: .top) {
+                    Rectangle().fill(HCDesign.outline.opacity(0.55))
+                        .frame(height: 0.6)
+                }
+                .ignoresSafeArea(edges: .bottom)
+        }
+    }
+}
+
+
 struct PremiumHomeView: View {
     @EnvironmentObject private var coach: PhoneWorkoutBridge
     // The app entry point owns this instance, so it survives tab changes.
@@ -672,26 +791,27 @@ struct PremiumHomeView: View {
     private var navigationShell: AnyView {
         AnyView(TabView(selection: $selectedTab) {
             NavigationStack { IMUNTodayPage(appleHealth: appleHealth, openCoach: presentIsaiah) }
-                .tabItem { Label("Today", systemImage: "sun.max.fill") }
+                .toolbar(.hidden, for: .tabBar)
+                .tabItem { Text("Today") }
                 .tag("today")
             NavigationStack { PremiumTrainingPage() }
-                .tabItem { Label("Training", systemImage: "figure.run.circle.fill") }
+                .toolbar(.hidden, for: .tabBar)
+                .tabItem { Text("Training") }
                 .tag("training")
             NavigationStack { PremiumProgressPage() }
-                .tabItem { Label("Progress", systemImage: "chart.xyaxis.line") }
+                .toolbar(.hidden, for: .tabBar)
+                .tabItem { Text("Progress") }
                 .tag("progress")
             NavigationStack { PremiumRecoveryPage(appleHealth: appleHealth,
                                                   openCoach: presentIsaiah) }
-                .tabItem { Label("Health", systemImage: "heart.text.square.fill") }
+                .toolbar(.hidden, for: .tabBar)
+                .tabItem { Text("Health") }
                 .tag("health")
-            NavigationStack {
-                PremiumCoachConversation(launchContext: "Screen: Coach")
-                    .toolbar(.hidden, for: .navigationBar)
-            }
-                .tabItem { Label("Coach", systemImage: "bubble.left.and.bubble.right.fill") }
-                .tag("coach")
         }
         .tint(HCDesign.electric)
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            IMUNPrimaryNavigation(selectedTab: $selectedTab)
+        }
         .preferredColorScheme(IMUNStyle.preferredScheme)
         .environmentObject(runImporter)
         .environmentObject(tredictImporter)
@@ -708,11 +828,9 @@ struct PremiumHomeView: View {
             }
         }
         .overlay(alignment: .bottomTrailing) {
-            if selectedTab != "coach" {
-                IMUNIsaiahLauncherButton(glow: HCDesign.electric, action: presentIsaiah)
-                    .padding(.trailing, 18)
-                    .padding(.bottom, coach.isWorkoutActive ? 147 : 70)
-            }
+            IMUNIsaiahLauncherButton(glow: HCDesign.electric, action: presentIsaiah)
+                .padding(.trailing, 18)
+                .padding(.bottom, coach.isWorkoutActive ? 153 : 78)
         }
         .sheet(isPresented: $isIsaiahPresented) {
             NavigationStack {
@@ -730,9 +848,9 @@ struct PremiumHomeView: View {
         .onOpenURL { url in
             guard url.scheme == "imun" else { return }
             let destination = url.host ?? ""
-            if destination == "today" || destination == "training" ||
-               destination == "health" || destination == "progress" ||
-               destination == "coach" {
+            if destination == "coach" {
+                presentIsaiah()
+            } else if ["today", "training", "health", "progress"].contains(destination) {
                 selectedTab = destination
             }
         }
@@ -798,7 +916,7 @@ struct PremiumHomeView: View {
             if tab == "progress" && coach.signedIn {
                 coach.refreshCloudProgress()
             }
-            // Coach is now a real tab rather than an old pop-up shortcut.
+            // IsAIah remains available from every tab through the mark.
         }
         )
     }
@@ -862,9 +980,10 @@ struct PremiumHomeView: View {
         .onAppear {
             migratePreviousHealthSourceChoice()
             runImporter.startIfAuthorized()
-            // The former Settings tab moves to Coach > App settings.
-            // Migrate persisted tab selection before showing TabView.
-            if selectedTab == "settings" { selectedTab = "coach" }
+            // Old Coach/Settings tab values are no longer destinations.
+            if selectedTab == "settings" || selectedTab == "coach" {
+                selectedTab = "today"
+            }
             if coach.signedIn && coach.workout == nil { coach.refresh(date: Date()) }
             if coach.signedIn {
                 coach.refreshCloudProgress()
