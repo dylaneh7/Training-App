@@ -395,6 +395,23 @@ struct HCProgressRun: Codable, Identifiable {
     // These are not uploaded to a remote server.
     var heartRateTrace: [HCRunHeartPoint] = []
     var routePoints: [HCRunRoutePoint] = []
+    // Optional for backward compatibility with cached runs and Garmin/Tredict
+    // summaries that do not contain native per-sample running dynamics.
+    var sensorSeries: [HCRunSensorReading]? = nil
+    var averageStrideLengthMeters: Double? = nil
+    var averageGroundContactTimeMS: Double? = nil
+    var averageVerticalOscillationCM: Double? = nil
+    var averageRunningSpeedMPS: Double? = nil
+    var routeMileSplits: [HCRunSplit]? = nil
+}
+
+struct HCRunSensorReading: Codable, Hashable, Identifiable {
+    /// runningPower, runningSpeed, runningStrideLength,
+    /// runningVerticalOscillation, runningGroundContactTime or stepCount.
+    let kind: String
+    let at: Date
+    let value: Double
+    var id: String { kind + ":" + String(at.timeIntervalSince1970) }
 }
 
 struct HCRunHeartPoint: Codable, Hashable, Identifiable {
