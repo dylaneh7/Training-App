@@ -359,14 +359,65 @@ final class HCRunHealthImporter: ObservableObject {
                         guard index % stride == 0 || index == coordinates.count - 1 else { return nil }
                         return HCRunRoutePoint(latitude: value.coordinate.latitude,
                                                longitude: value.coordinate.longitude,
-                                               altitudeMeters: value.altitude)
+                                               altitudeMeters: value.altitude,
+                                               recordedAt: value.timestamp)
                     }
-                    self?.patchRun(id: id) { $0.routePoints = path }
+                    let derived = self?.gpsMileSplits(
+                        coordinates, workoutDistance: workout.totalDistance?
+                            .doubleValue(for: .meter()))
+                    self?.patchRun(id: id) { run in
+                        run.routePoints = path
+                        run.routeMileSplits = derived
+                    }
                 }
             }
             self?.store.execute(routeQuery)
         }
         store.execute(sampleQuery)
+    }
+
+    /// Derive a distance/time split from valid GPS evidence, never from
+    /// a total-workout average. Reject low-coverage or implausible GPS traces.
+    private func gpsMileSplits(_ points: [CLLocation],
+                               workoutDistance: Double?) -> [HCRunSplit]? {
+        let sorted = points.filter {
+            $0.horizontalAccuracy >= 0 && $0.horizontalAccuracy <= 35
+        }.sorted { $0.timestamp < $1.timestamp }
+        guard sorted.count >= 20, let first = sorted.first else { return nil }
+        var distance = 0.0
+        var previous = first
+        var lastSplitAt = first.timestamp
+        let mile = 1609.344
+        var splits: [HCRunSplit] = []
+        for location in sorted.dropFirst() {
+            let dt = location.timestamp.timeIntervalSince(previous.timestamp)
+            guard dt > 0, dt <= 45 else {
+                previous = location
+                continue
+            }
+            let segment = location.distance(from: previous)
+            if segment > 0.5 && segment / dt <= 12.0 {
+                let before = distance
+                distance += segment
+                let nextMile = Double(splits.count + 1) * mile
+                if before < nextMile && distance >= nextMile {
+                    let fraction = (nextMile - before) / segment
+                    let reachedAt = previous.timestamp.addingTimeInterval(dt * fraction)
+                    let elapsed = reachedAt.timeIntervalSince(lastSplitAt)
+                    if elapsed >= 120 && elapsed <= 5400 {
+                        splits.append(HCRunSplit(index: splits.count + 1,
+                                                 elapsedSeconds: elapsed,
+                                                 distanceMeters: mile))
+                        lastSplitAt = reachedAt
+                    }
+                }
+            }
+            previous = location
+        }
+        guard !splits.isEmpty, distance >= mile,
+              workoutDistance.map({ abs(distance - $0) / max($0, 1) < 0.20 }) ?? true
+        else { return nil }
+        return splits
     }
 
     /// One source-attributed activity for every exercise type HealthKit exposes.
