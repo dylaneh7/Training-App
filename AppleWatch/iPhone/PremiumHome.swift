@@ -549,6 +549,126 @@ private struct IMUNTodaysHealthStat: View {
 
 // MARK: - Health Coach 2.0 navigation
 
+// iMun's four original navigational marks. Drawn as vectors rather than
+// relying on Apple's SF Symbol icon set, with Selah Stone stroke treatment.
+private struct IMUNNavigationGlyph: View {
+    let kind: String
+
+    var body: some View {
+        GeometryReader { geometry in
+            Path { path in
+                let width = geometry.size.width
+                let height = geometry.size.height
+                func point(_ x: CGFloat, _ y: CGFloat) -> CGPoint {
+                    CGPoint(x: x * width, y: y * height)
+                }
+                switch kind {
+                case "today":
+                    // Dawn over the horizon: beginning, clarity, direction.
+                    path.move(to: point(0.12, 0.69))
+                    path.addLine(to: point(0.88, 0.69))
+                    path.move(to: point(0.25, 0.53))
+                    path.addQuadCurve(to: point(0.75, 0.53),
+                                      control: point(0.50, 0.05))
+                    path.move(to: point(0.18, 0.84))
+                    path.addLine(to: point(0.82, 0.84))
+                    path.move(to: point(0.5, 0.11))
+                    path.addLine(to: point(0.5, 0.03))
+                case "training":
+                    // Two linked load-bearing beams, not a stock dumbbell.
+                    path.move(to: point(0.12, 0.76))
+                    path.addLine(to: point(0.40, 0.24))
+                    path.addLine(to: point(0.60, 0.76))
+                    path.addLine(to: point(0.88, 0.24))
+                    path.move(to: point(0.27, 0.49))
+                    path.addLine(to: point(0.73, 0.49))
+                    path.move(to: point(0.10, 0.87))
+                    path.addLine(to: point(0.90, 0.87))
+                case "progress":
+                    // Ascending trajectory with measured milestones.
+                    path.move(to: point(0.12, 0.85))
+                    path.addLine(to: point(0.12, 0.18))
+                    path.move(to: point(0.12, 0.85))
+                    path.addLine(to: point(0.90, 0.85))
+                    path.move(to: point(0.24, 0.69))
+                    path.addLine(to: point(0.46, 0.52))
+                    path.addLine(to: point(0.61, 0.60))
+                    path.addLine(to: point(0.86, 0.24))
+                    path.addEllipse(in: CGRect(x: width * 0.82, y: height * 0.20,
+                                               width: width * 0.09, height: height * 0.09))
+                default:
+                    // Rhombus enclosing a pulse: whole-body health.
+                    path.move(to: point(0.50, 0.07))
+                    path.addLine(to: point(0.92, 0.50))
+                    path.addLine(to: point(0.50, 0.93))
+                    path.addLine(to: point(0.08, 0.50))
+                    path.closeSubpath()
+                    path.move(to: point(0.19, 0.52))
+                    path.addLine(to: point(0.36, 0.52))
+                    path.addLine(to: point(0.45, 0.32))
+                    path.addLine(to: point(0.55, 0.70))
+                    path.addLine(to: point(0.65, 0.52))
+                    path.addLine(to: point(0.82, 0.52))
+                }
+            }
+            .stroke(style: StrokeStyle(lineWidth: 1.8,
+                                       lineCap: .round, lineJoin: .round))
+        }
+    }
+}
+
+private struct IMUNPrimaryNavigation: View {
+    @Binding var selectedTab: String
+    private let destinations: [(key: String, name: String)] = [
+        ("today", "Today"), ("training", "Training"),
+        ("progress", "Progress"), ("health", "Health")
+    ]
+
+    var body: some View {
+        HStack(spacing: 0) {
+            ForEach(destinations.indices, id: \.self) { index in
+                let destination = destinations[index]
+                let selected = selectedTab == destination.key
+                Button {
+                    selectedTab = destination.key
+                } label: {
+                    VStack(spacing: 6) {
+                        IMUNNavigationGlyph(kind: destination.key)
+                            .frame(width: 23, height: 23)
+                        Text(destination.name)
+                            .font(.system(size: 10, weight: selected ? .semibold : .medium,
+                                          design: .rounded))
+                            .lineLimit(1)
+                    }
+                    .foregroundStyle(selected ? HCDesign.ink : HCDesign.secondary)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 55)
+                    .overlay(alignment: .top) {
+                        Capsule().fill(selected ? HCDesign.ink : Color.clear)
+                            .frame(width: 26, height: 2)
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(destination.name)
+                .accessibilityAddTraits(selected ? [.isSelected] : [])
+            }
+        }
+        .padding(.horizontal, 9)
+        .padding(.top, 9)
+        .padding(.bottom, 5)
+        .background {
+            HCDesign.canvas
+                .overlay(alignment: .top) {
+                    Rectangle().fill(HCDesign.outline.opacity(0.55))
+                        .frame(height: 0.6)
+                }
+                .ignoresSafeArea(edges: .bottom)
+        }
+    }
+}
+
+
 struct PremiumHomeView: View {
     @EnvironmentObject private var coach: PhoneWorkoutBridge
     // The app entry point owns this instance, so it survives tab changes.
@@ -672,26 +792,27 @@ struct PremiumHomeView: View {
     private var navigationShell: AnyView {
         AnyView(TabView(selection: $selectedTab) {
             NavigationStack { IMUNTodayPage(appleHealth: appleHealth, openCoach: presentIsaiah) }
-                .tabItem { Label("Today", systemImage: "sun.max.fill") }
+                .toolbar(.hidden, for: .tabBar)
+                .tabItem { Text("Today") }
                 .tag("today")
             NavigationStack { PremiumTrainingPage() }
-                .tabItem { Label("Training", systemImage: "figure.run.circle.fill") }
+                .toolbar(.hidden, for: .tabBar)
+                .tabItem { Text("Training") }
                 .tag("training")
             NavigationStack { PremiumProgressPage() }
-                .tabItem { Label("Progress", systemImage: "chart.xyaxis.line") }
+                .toolbar(.hidden, for: .tabBar)
+                .tabItem { Text("Progress") }
                 .tag("progress")
             NavigationStack { PremiumRecoveryPage(appleHealth: appleHealth,
                                                   openCoach: presentIsaiah) }
-                .tabItem { Label("Health", systemImage: "heart.text.square.fill") }
+                .toolbar(.hidden, for: .tabBar)
+                .tabItem { Text("Health") }
                 .tag("health")
-            NavigationStack {
-                PremiumCoachConversation(launchContext: "Screen: Coach")
-                    .toolbar(.hidden, for: .navigationBar)
-            }
-                .tabItem { Label("Coach", systemImage: "bubble.left.and.bubble.right.fill") }
-                .tag("coach")
         }
         .tint(HCDesign.electric)
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            IMUNPrimaryNavigation(selectedTab: $selectedTab)
+        }
         .preferredColorScheme(IMUNStyle.preferredScheme)
         .environmentObject(runImporter)
         .environmentObject(tredictImporter)
@@ -708,13 +829,11 @@ struct PremiumHomeView: View {
             }
         }
         .overlay(alignment: .bottomTrailing) {
-            if selectedTab != "coach" {
-                IMUNIsaiahLauncherButton(glow: HCDesign.electric, action: presentIsaiah)
-                    .padding(.trailing, 18)
-                    .padding(.bottom, coach.isWorkoutActive ? 147 : 70)
-            }
+            IMUNIsaiahLauncherButton(glow: HCDesign.electric, action: presentIsaiah)
+                .padding(.trailing, 18)
+                .padding(.bottom, coach.isWorkoutActive ? 153 : 78)
         }
-        .sheet(isPresented: $isIsaiahPresented) {
+        .fullScreenCover(isPresented: $isIsaiahPresented) {
             NavigationStack {
                 PremiumCoachConversation(launchContext: isaiahLaunchContext)
                     .toolbar(.hidden, for: .navigationBar)
@@ -724,15 +843,13 @@ struct PremiumHomeView: View {
             .environmentObject(runImporter)
             .environmentObject(tredictImporter)
             .environmentObject(tredictPlans)
-            .presentationDetents([.large])
-            .presentationDragIndicator(.visible)
         }
         .onOpenURL { url in
             guard url.scheme == "imun" else { return }
             let destination = url.host ?? ""
-            if destination == "today" || destination == "training" ||
-               destination == "health" || destination == "progress" ||
-               destination == "coach" {
+            if destination == "coach" {
+                presentIsaiah()
+            } else if ["today", "training", "health", "progress"].contains(destination) {
                 selectedTab = destination
             }
         }
@@ -798,7 +915,7 @@ struct PremiumHomeView: View {
             if tab == "progress" && coach.signedIn {
                 coach.refreshCloudProgress()
             }
-            // Coach is now a real tab rather than an old pop-up shortcut.
+            // IsAIah remains available from every tab through the mark.
         }
         )
     }
@@ -862,9 +979,10 @@ struct PremiumHomeView: View {
         .onAppear {
             migratePreviousHealthSourceChoice()
             runImporter.startIfAuthorized()
-            // The former Settings tab moves to Coach > App settings.
-            // Migrate persisted tab selection before showing TabView.
-            if selectedTab == "settings" { selectedTab = "coach" }
+            // Old Coach/Settings tab values are no longer destinations.
+            if selectedTab == "settings" || selectedTab == "coach" {
+                selectedTab = "today"
+            }
             if coach.signedIn && coach.workout == nil { coach.refresh(date: Date()) }
             if coach.signedIn {
                 coach.refreshCloudProgress()
@@ -5476,27 +5594,27 @@ struct PremiumCoachConversation: View {
                                     IMUNIsaiahMark(size: 42)
                                         .clipShape(RoundedRectangle(cornerRadius: 12))
                                     VStack(alignment: .leading, spacing: 5) {
-                                        Text("YOUR COACHING SPACE")
+                                        Text("PERSONAL TRAINING INTELLIGENCE")
                                             .font(HCDesign.label(10))
                                             .tracking(1.4)
                                             .foregroundStyle(HCDesign.aqua)
-                                        Text("What are we working on?")
+                                        Text("What will we build today?")
                                             .font(HCDesign.display(24))
                                             .foregroundStyle(HCDesign.ink)
                                     }
                                 }
-                                Text("Talk through a workout, interpret a running trend, or ask IsAIah to prepare a change in your training. Your records are never edited without review.")
+                                Text("Build a full workout, design a precise run or understand your training. IsAIah puts the complete plan here for one review.")
                                     .font(.system(size: 13))
                                     .foregroundStyle(HCDesign.secondary)
                                     .fixedSize(horizontal: false, vertical: true)
                                 VStack(alignment: .leading, spacing: 8) {
-                                    Text("SUGGESTED STARTS")
+                                    Text("START A CONVERSATION")
                                         .font(HCDesign.label(10))
                                         .tracking(1.2)
                                         .foregroundStyle(HCDesign.secondary)
-                                    suggestion("Assess this week's running and strength load")
-                                    suggestion("What is changing in my running performance?")
-                                    suggestion("Review today's training and suggest adjustments")
+                                    suggestion("Build today's full-body strength workout with exercises")
+                                    suggestion("Build a 3×8-minute tempo run for today")
+                                    suggestion("Adjust today's training using my recent workouts")
                                     suggestion("Compare my wearable heart-rate readings")
                                 }
                             }
@@ -5712,9 +5830,10 @@ struct PremiumCoachConversation: View {
                 Text("IsAIah")
                     .font(HCDesign.display(20))
                     .foregroundStyle(HCDesign.ink)
-                Text(coach.signedIn ? "Personal training intelligence" :
-                     "Sign in to begin coaching")
-                    .font(.system(size: 10))
+                Text(coach.signedIn ? "TRAINING · RECOVERY · PROGRESS" :
+                     "SIGN IN TO BEGIN")
+                    .font(.system(size: 9, weight: .medium, design: .rounded))
+                    .tracking(1.0)
                     .foregroundStyle(HCDesign.secondary)
                     .lineLimit(1)
             }
@@ -5777,7 +5896,7 @@ struct PremiumCoachConversation: View {
         }
         .foregroundStyle(HCDesign.secondary)
         .padding(.horizontal, 17)
-        .padding(.vertical, 9)
+        .padding(.vertical, 12)
         .background(HCDesign.canvas)
         .overlay(alignment: .bottom) {
             Rectangle().fill(HCDesign.outline.opacity(0.70))
@@ -5833,7 +5952,7 @@ struct PremiumCoachConversation: View {
                         .frame(width: 29, height: 42)
                 }
                 .accessibilityLabel("Attach a photo")
-                TextField("Ask IsAIah anything…",
+                TextField("Ask IsAIah to build or analyze…",
                           text: $question, axis: .vertical)
                     .lineLimit(1...5)
                     .focused($composerFocused)
@@ -5889,7 +6008,7 @@ struct PremiumCoachConversation: View {
                         .foregroundStyle(HCDesign.caution)
                         .lineLimit(1)
                 } else {
-                    Text("Your message is sent when submitted")
+                    Text("PRIVATE · SEND TO ANALYZE")
                         .foregroundStyle(HCDesign.secondary)
                         .lineLimit(1)
                 }
@@ -6006,8 +6125,8 @@ struct PremiumCoachConversation: View {
             .font(.system(size: 13, weight: .medium))
             .padding(.horizontal, 14)
             .padding(.vertical, 13)
-            .background(HCDesign.raised.opacity(0.55),
-                        in: RoundedRectangle(cornerRadius: 10))
+            .background(HCDesign.raised.opacity(0.72),
+                        in: RoundedRectangle(cornerRadius: 13))
         }
         .buttonStyle(.plain)
     }
@@ -6136,16 +6255,20 @@ struct PremiumCoachConversation: View {
             return coach.movingWorkoutID == nil &&
                 selected.date != HCPlanBuilder.dateString(actionMoveDate)
         case .createStrength:
-            return coach.workout == nil &&
+            let plan = coach.workout
+            return (plan == nil || (plan?.date == HCPlanBuilder.dateString(Date()) &&
+                    plan?.isPreview == false &&
+                    coach.phoneSessionStartedAt == nil &&
+                    (plan.map { coach.completedSets(for: $0).isEmpty } ?? true))) &&
+                !action.strengthExercises.isEmpty &&
                 !actionWorkoutTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         case .createRun:
-            return coach.runPlan == nil &&
-                !actionWorkoutTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty &&
-                (1...360).contains(actionRunMinutes) &&
-                (!actionRunHasHR ||
-                 ((35...230).contains(actionRunMinHR) &&
-                  (35...230).contains(actionRunMaxHR) &&
-                  actionRunMinHR <= actionRunMaxHR))
+            let plan = coach.runPlan
+            return (plan == nil || (plan?.id.hasPrefix("imun-local-") == true &&
+                    plan?.date == HCPlanBuilder.dateString(Date()) &&
+                    plan?.isCompleted == false)) &&
+                !action.runSteps.isEmpty &&
+                !actionWorkoutTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         case .renameStrength:
             return coach.workout != nil &&
                 !actionWorkoutTitle.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -6257,22 +6380,29 @@ struct PremiumCoachConversation: View {
         case .setTheme:
             reply = "iMun now uses Selah Stone throughout the app. Custom visual themes have been retired."
         case .createStrength:
-            coach.newWorkout(date: Date(), title: actionWorkoutTitle)
+            guard coach.createStrengthToday(
+                title: actionWorkoutTitle, exercises: action.strengthExercises)
+            else {
+                errorMessage = coach.status
+                return
+            }
             selectedActivity = "weightlifting"
             selectedTab = "training"
-            reply = "Created a custom strength workout with no fabricated sets. Open Training to add your exercises."
+            reply = "Saved today's " + actionWorkoutTitle + " with " +
+                String(action.strengthExercises.count) +
+                " exercises and their prescribed sets, reps and rest. The complete plan is queued for Watch sync."
         case .createRun:
-            guard coach.createRunToday(
-                title: actionWorkoutTitle, minutes: actionRunMinutes,
-                minimumBPM: actionRunHasHR ? actionRunMinHR : nil,
-                maximumBPM: actionRunHasHR ? actionRunMaxHR : nil)
+            guard coach.createStructuredRunToday(
+                title: actionWorkoutTitle, steps: action.runSteps)
             else {
                 errorMessage = coach.status
                 return
             }
             selectedActivity = "run"
             selectedTab = "training"
-            reply = "Created today's \(actionRunMinutes)-minute run with your selected targets and queued it for iMun Watch."
+            reply = "Saved today's structured run with " +
+                String(action.runSteps.count) +
+                " warmup, work, recovery and cooldown phases, queued for Watch sync."
         case .renameStrength:
             guard let workout = coach.workout else { return }
             coach.saveEditedWorkout(HCWorkout(id: workout.id, date: workout.date,
@@ -6312,10 +6442,11 @@ struct PremiumCoachConversation: View {
             if destination == "settings" {
                 showCoachSettings = true
                 reply = "Opened iMun Settings."
+            } else if destination == "coach" {
+                reply = "You're already in IsAIah."
             } else {
                 selectedTab = destination
-                reply = destination == "coach" ?
-                    "Opened IsAIah." : "Opened the \(destination.capitalized) tab."
+                reply = "Opened the \(destination.capitalized) tab."
             }
         case .setMotivation:
             guard let source = action.parameter else { return }
@@ -6368,13 +6499,19 @@ struct PremiumCoachConversation: View {
         }
         turns.append(IMUNCoachTurn(
             role: "assistant",
-            text: "I can prepare that change. Review the exact details below and confirm before iMun applies it."))
+            text: proposed.kind == .createStrength ?
+                "I've built the full strength session. Review the movements and targets below; one confirmation saves all of them." :
+                proposed.kind == .createRun ?
+                "Your structured run is ready. Review each work and recovery interval below; one confirmation saves it to Training and queues Watch sync." :
+                "Review the proposed change below and confirm when it's right."))
         pendingAction = proposed
         selectedActionWorkoutID = proposed.suggestedWorkoutID ?? ""
         actionMoveDate = proposed.suggestedDate ?? Date()
-        actionWorkoutTitle = proposed.kind == .createRun ? "Easy Run" :
-            (proposed.parameter ?? "Custom Strength Workout")
-        actionRunMinutes = Int(proposed.parameter ?? "") ?? 40
+        actionWorkoutTitle = proposed.parameter ??
+            (proposed.kind == .createRun ? "Structured Run" : "Strength Workout")
+        actionRunMinutes = proposed.runSteps.isEmpty ?
+            (Int(proposed.parameter ?? "") ?? 40) :
+            proposed.runSteps.reduce(0) { $0 + $1.seconds } / 60
         actionRunHasHR = false
         actionPreferenceKey = proposed.settingKey ?? "hcRunCueMinutes"
         actionPreferenceValue = IMUNCoachPreference.byID(actionPreferenceKey)
@@ -6447,7 +6584,10 @@ struct PremiumCoachConversation: View {
             persist()
             return
         }
-        if uploads.isEmpty, let proposed = IMUNCoachActionInterpreter.propose(
+        let requiresFullWorkout = IMUNCoachActionInterpreter.needsCompleteWorkoutDraft(
+            questionText)
+        if uploads.isEmpty, !requiresFullWorkout,
+           let proposed = IMUNCoachActionInterpreter.propose(
             questionText, sessions: coach.plannedSessions,
             workout: coach.workout, run: coach.runPlan) {
             question = ""
@@ -6472,10 +6612,12 @@ struct PremiumCoachConversation: View {
             // The service is a language classifier only: it cannot mutate
             // workouts, choose an unvalidated ID, or bypass confirmation.
             if uploads.isEmpty &&
-                IMUNCoachActionInterpreter.mightNeedModelProposal(questionText) {
+                (requiresFullWorkout ||
+                 IMUNCoachActionInterpreter.mightNeedModelProposal(questionText)) {
                 await MainActor.run { thinkingPhase = "Reviewing your request" }
                 if let classification = try? await coach.classifyIMUNCoachAction(
-                    request: questionText, screenContext: launchContext),
+                    request: questionText, screenContext: launchContext,
+                    recentConversation: history, shareHealth: shareRecovery),
                    let proposal = IMUNCoachActionInterpreter.proposalFromModel(
                     classification, sessions: coach.plannedSessions,
                     workout: coach.workout, run: coach.runPlan) {
@@ -6486,6 +6628,21 @@ struct PremiumCoachConversation: View {
                             return
                         }
                         presentAction(proposal, for: questionText, appendUser: false)
+                    }
+                    return
+                }
+                if requiresFullWorkout {
+                    await MainActor.run {
+                        guard coach.coachAccountID == requestAccountID,
+                              threadLibrary.selectedID == requestThreadID else {
+                            isSending = false
+                            return
+                        }
+                        if turns.last?.role == "user" { turns.removeLast() }
+                        question = originalDraft
+                        errorMessage = "IsAIah couldn't prepare a complete, validated workout. Nothing was saved. Try submitting the request again."
+                        isSending = false
+                        persist()
                     }
                     return
                 }
@@ -7392,77 +7549,89 @@ private struct PremiumSettingsPage: View {
                 }
     }
 
-    @ViewBuilder
-    private var settingsConnections: some View {
-                HCSectionTitle(title: "Connections")
-                HCCard {
-                    VStack(alignment: .leading, spacing: 14) {
-                        HCSyncStatus(pending: coach.cloudPendingCount,
-                                     saving: coach.savingPlan, connected: coach.signedIn)
-                        Text(coach.status)
-                            .font(.caption).foregroundStyle(HCDesign.secondary)
-                        HCOutlineButton(title: "Retry all uploads", icon: "arrow.clockwise") {
-                            coach.retryPendingWorkout()
-                            coach.retryPendingCloudSets()
-                        }
-                        HCOutlineButton(title: "Refresh & send workout to Watch",
-                                        icon: "applewatch") {
-                            coach.refreshAndSendToWatch()
-                        }
-                        HCOutlineButton(title: "Check Watch connection",
-                                        icon: "antenna.radiowaves.left.and.right") {
-                            coach.checkWatchConnection()
-                        }
-                        Text(coach.watchConnectionDetails)
-                            .font(.caption2)
-                            .foregroundStyle(HCDesign.aqua)
-                            .fixedSize(horizontal: false, vertical: true)
-                        Text(coach.watchSyncStatus)
-                            .font(.caption2)
-                            .foregroundStyle(HCDesign.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                        Text(coach.cloudWorkoutStatus)
-                            .font(.caption2)
-                            .foregroundStyle(HCDesign.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                        Text("Apple Health · " + appleHealth.status)
-                            .font(.caption2)
-                            .foregroundStyle(HCDesign.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                        Text("Background Watch transfers · " + coach.lastBackgroundTransfer)
-                            .font(.caption2)
-                            .foregroundStyle(HCDesign.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                        if let confirmed = coach.watchLastAcknowledgedAt {
-                            Text("Watch confirmed receipt " +
-                                 confirmed.formatted(date: .omitted, time: .shortened))
-                                .font(.caption2)
-                                .foregroundStyle(HCDesign.good)
-                        }
-                        if !coach.signedIn {
-                            PremiumLogin()
-                        } else {
-                            HCOutlineButton(title: "Sign out", icon: "rectangle.portrait.and.arrow.right") {
-                                coach.logout()
-                            }
-                        }
-                    }
-                }
-                HStack {
-                    Image(systemName: "checkmark.seal")
-                        .foregroundStyle(HCDesign.aqua)
-                    Text("imun " +
-                         (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?") +
-                         " · build " +
-                         (Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "?"))
-                        .font(.caption2)
-                        .foregroundStyle(HCDesign.secondary)
-                    Spacer()
-                }
-                .padding(.top, 7)
-                Spacer(minLength: 30)
+    // Breaking connection diagnostics into small subviews avoids large
+    // expression-checking costs in Xcode's SwiftUI result builder.
+    private var connectionControls: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HCSyncStatus(pending: coach.cloudPendingCount,
+                         saving: coach.savingPlan, connected: coach.signedIn)
+            Text(coach.status)
+                .font(.caption)
+                .foregroundStyle(HCDesign.secondary)
+            HCOutlineButton(title: "Retry all uploads", icon: "arrow.clockwise") {
+                coach.retryPendingWorkout()
+                coach.retryPendingCloudSets()
+            }
+            HCOutlineButton(title: "Refresh & send workout to Watch", icon: "applewatch") {
+                coach.refreshAndSendToWatch()
+            }
+            HCOutlineButton(title: "Check Watch connection",
+                            icon: "antenna.radiowaves.left.and.right") {
+                coach.checkWatchConnection()
+            }
+        }
     }
 
+    private var connectionDiagnostics: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(coach.watchConnectionDetails)
+                .foregroundStyle(HCDesign.aqua)
+            Text(coach.watchSyncStatus)
+            Text(coach.cloudWorkoutStatus)
+            Text("Apple Health · " + appleHealth.status)
+            Text("Background Watch transfers · " + coach.lastBackgroundTransfer)
+            if let confirmed = coach.watchLastAcknowledgedAt {
+                Text("Watch confirmed receipt " +
+                     confirmed.formatted(date: .omitted, time: .shortened))
+                    .foregroundStyle(HCDesign.good)
+            }
+        }
+        .font(.caption2)
+        .foregroundStyle(HCDesign.secondary)
+        .fixedSize(horizontal: false, vertical: true)
+    }
+
+    @ViewBuilder
+    private var connectionAccount: some View {
+        if !coach.signedIn {
+            PremiumLogin()
+        } else {
+            HCOutlineButton(title: "Sign out",
+                            icon: "rectangle.portrait.and.arrow.right") {
+                coach.logout()
+            }
+        }
+    }
+
+    private var connectionVersion: some View {
+        HStack {
+            Image(systemName: "checkmark.seal")
+                .foregroundStyle(HCDesign.aqua)
+            Text("imun " +
+                 (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?") +
+                 " · build " +
+                 (Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "?"))
+                .font(.caption2)
+                .foregroundStyle(HCDesign.secondary)
+            Spacer()
+        }
+        .padding(.top, 7)
+    }
+
+    private var settingsConnections: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HCSectionTitle(title: "Connections")
+            HCCard {
+                VStack(alignment: .leading, spacing: 14) {
+                    connectionControls
+                    connectionDiagnostics
+                    connectionAccount
+                }
+            }
+            connectionVersion
+            Spacer(minLength: 30)
+        }
+    }
 
     var body: some View {
         ScrollView {
