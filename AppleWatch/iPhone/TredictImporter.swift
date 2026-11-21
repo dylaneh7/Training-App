@@ -219,9 +219,16 @@ final class HCTredictImporter: ObservableObject {
         }
         let kinds: [(source: String, destination: String, low: Double, high: Double)] = [
             ("speed", "runningSpeed", 0.5, 15),
+            ("speedGradeAdjusted", "runningGradeAdjustedSpeed", 0.5, 15),
             ("power", "runningPower", 1, 1500),
+            ("powerOEM", "runningPowerWatch", 1, 1500),
+            ("cadence", "runningCadence", 80, 260),
             ("groundContactTime", "runningGroundContactTime", 90, 600),
-            ("stepLength", "runningStrideLength", 0.3, 3.5)
+            ("stepLength", "runningStrideLength", 0.3, 3.5),
+            ("verticalOscillation", "providerVerticalOscillation", 0.01, 500),
+            ("grade", "runningSourceGrade", -40, 40),
+            ("temperature", "runningSourceTemperature", -40, 80),
+            ("altitude", "runningAltitude", -500, 9000)
         ]
         var chart: [HCRunSensorReading] = []
         for item in kinds {
@@ -240,6 +247,32 @@ final class HCTredictImporter: ObservableObject {
         }
         if !chart.isEmpty {
             run.sensorSeries = chart.sorted { $0.at < $1.at }
+        }
+        // The Personal API exposes sampled latitude, longitude and altitude
+        // with a documented sample period. Missing coordinate cells are left
+        // out rather than interpolated; long gaps fail later quality checks.
+        if let lats = raw["positionLat"] as? [Any],
+           let longs = raw["positionLong"] as? [Any],
+           !lats.isEmpty && !longs.isEmpty {
+            let count = min(lats.count, longs.count)
+            let heights = raw["altitude"] as? [Any] ?? []
+            let stride = max(1, Int(ceil(Double(count) / 650)))
+            var route: [HCRunRoutePoint] = []
+            for index in Swift.stride(from: 0, to: count, by: stride) {
+                guard let lat = number(lats[index]),
+                      let lon = number(longs[index]),
+                      (-90...90).contains(lat),
+                      (-180...180).contains(lon),
+                      lat.isFinite, lon.isFinite else { continue }
+                let height: Double? = index < heights.count ?
+                    number(heights[index]) : nil
+                route.append(HCRunRoutePoint(
+                    latitude: lat, longitude: lon,
+                    altitudeMeters: height,
+                    recordedAt: started.addingTimeInterval(
+                        Double(index) * strideSeconds)))
+            }
+            if route.count >= 8 { run.routePoints = route }
         }
         // Heart-rate time series are retained separately so the running
         // analytics engine can inspect same-session HR/speed trends.
