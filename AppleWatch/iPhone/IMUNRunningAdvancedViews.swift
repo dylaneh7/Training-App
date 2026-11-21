@@ -262,6 +262,38 @@ struct IMUNRunningAdvancedSession: View {
                                 .foregroundStyle(HCDesign.secondary)
                         }
                     }
+                }                let pacing = IMUNRunAdvancedAnalytics.pacingPattern(run)
+                let economy = IMUNRunAdvancedAnalytics.aerobicEfficiency(
+                    run, history: history)
+                let climate = logbook.conditionsComparison(run, history: history)
+                if pacing != nil || economy != nil || climate != nil {
+                    HCSectionTitle(title: "Pacing & conditions",
+                                   detail: "Comparable evidence · not causation")
+                    HCCard {
+                        VStack(alignment: .leading, spacing: 11) {
+                            if let pacing {
+                                Text(pacing.title)
+                                    .font(.system(size: 13, weight: .semibold))
+                                Text(pacing.detail)
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(HCDesign.secondary)
+                            }
+                            if let economy {
+                                Text(economy.title)
+                                    .font(.system(size: 13, weight: .semibold))
+                                Text(economy.detail)
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(HCDesign.secondary)
+                            }
+                            if let climate {
+                                Text("Manually recorded conditions")
+                                    .font(.system(size: 13, weight: .semibold))
+                                Text(climate)
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(HCDesign.secondary)
+                            }
+                        }
+                    }
                 }
                 if !mechanics.isEmpty || !heartRecovery.isEmpty {
                     HCSectionTitle(title: "Athlete-specific comparisons",
