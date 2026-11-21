@@ -424,6 +424,9 @@ struct HCRunRoutePoint: Codable, Hashable {
     let latitude: Double
     let longitude: Double
     let altitudeMeters: Double?
+    // Optional so legacy cached routes remain decodable; source GPS samples
+    // carry timestamps but not every imported provider exports them.
+    var recordedAt: Date? = nil
 }
 
 struct HCRecoveryDatum: Codable, Identifiable {
