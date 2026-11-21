@@ -47,10 +47,10 @@ private enum IMUNThemeText {
 /// the home, history, recovery and Watch screens. There is NO car or race icon
 /// outside the Rally case.
 struct IMUNThemeEmblem: View {
-    @AppStorage("hcDesignPreset") private var presetName = "techno"
+    private let presetName = "heritage"
     var area: String = "training"
     var compact: Bool = false
-    private var theme: IMUNPreset { IMUNPreset(rawValue: presetName) ?? .techno }
+    private var theme: IMUNPreset { .heritage }
     private var accent: Color { IMUNStyle.palette.accent }
     private var muted: Color { IMUNStyle.palette.secondary }
     private var ink: Color { IMUNStyle.palette.ink }
@@ -166,11 +166,11 @@ struct IMUNThemeEmblem: View {
 /// These numbers reflect measured signal coverage and flagged comparisons;
 /// there is no invented composite recovery, sleep or readiness score.
 struct IMUNThemeRecoveryBrief: View {
-    @AppStorage("hcDesignPreset") private var presetName = "techno"
+    private let presetName = "heritage"
     let compared: Int
     let flagged: Int
     let sources: Int
-    private var theme: IMUNPreset { IMUNPreset(rawValue: presetName) ?? .techno }
+    private var theme: IMUNPreset { .heritage }
     private var accent: Color { IMUNStyle.palette.accent }
     private var muted: Color { IMUNStyle.palette.secondary }
     private var ink: Color { IMUNStyle.palette.ink }
@@ -377,8 +377,8 @@ struct IMUNThemeRecoveryBrief: View {
 /// Short rest UI for the Watch. Recovery instructions are themed without
 /// modifying rest timestamps or the workout's automatic-advance behavior.
 struct IMUNThemeRestHeader: View {
-    @AppStorage("hcDesignPreset") private var presetName = "techno"
-    private var theme: IMUNPreset { IMUNPreset(rawValue: presetName) ?? .techno }
+    private let presetName = "heritage"
+    private var theme: IMUNPreset { .heritage }
     var body: some View {
         HStack(spacing: 8) {
             Image(systemName: IMUNThemeText.restSymbol(theme))
@@ -400,11 +400,11 @@ struct IMUNThemeRestHeader: View {
 /// identity, instead of showing a racing finish line in unrelated themes.
 /// Draws no new data and never changes the workout's stored completion state.
 struct IMUNThemeCompletionCallout: View {
-    @AppStorage("hcDesignPreset") private var presetName = "techno"
+    private let presetName = "heritage"
     var compact: Bool = false
 
     private var theme: IMUNPreset {
-        IMUNPreset(rawValue: presetName) ?? .techno
+        .heritage
     }
     private var title: String {
         switch theme {
