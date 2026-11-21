@@ -67,7 +67,7 @@ export default {
     // intent classification. Use the full coach model for those requests.
     const planningRequest = actionMode &&
       (/\b(build|create|plan|make|design|write|program)\b.{0,110}\b(workout|routine|strength|lifting|run|intervals?)\b/i.test(question) ||
-       /\b(add|put|fill).{0,40}exercises?\b/i.test(question) ||
+       /\b(add|put|fill|populate|include|finish)\b.{0,40}\b(exercis\w*|movements?|lifts?)\b/i.test(question) ||
        /\b\d+\s*[x×]\s*\d+\b.{0,40}\b(tempo|intervals?|run)\b/i.test(question));
     const files = Array.isArray(body?.attachments) ? body.attachments : [];
     if (files.length > 4 || (actionMode && files.length > 0)) {
