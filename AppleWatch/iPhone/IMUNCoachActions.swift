@@ -1137,7 +1137,8 @@ struct IMUNCoachActionReviewCard: View {
                             .font(.system(size: 11))
                     }
                     .foregroundStyle(HCDesign.secondary)
-                    ForEach(Array(action.strengthExercises.enumerated()), id: \.offset) { index, item in
+                    ForEach(action.strengthExercises.indices, id: \.self) { index in
+                        let item = action.strengthExercises[index]
                         VStack(alignment: .leading, spacing: 4) {
                             Text("\(index + 1). " + item.name)
                                 .font(.system(size: 13, weight: .semibold))
@@ -1160,7 +1161,8 @@ struct IMUNCoachActionReviewCard: View {
                     Text("\(action.runSteps.reduce(0) { $0 + $1.seconds } / 60) minutes · \(action.runSteps.count) steps")
                         .font(.system(size: 12, weight: .medium))
                         .foregroundStyle(HCDesign.secondary)
-                    ForEach(Array(action.runSteps.enumerated()), id: \.offset) { index, step in
+                    ForEach(action.runSteps.indices, id: \.self) { index in
+                        let step = action.runSteps[index]
                         HStack(alignment: .top, spacing: 12) {
                             Text(String(format: "%02d", index + 1))
                                 .font(.system(size: 11, weight: .semibold, design: .monospaced))
