@@ -341,6 +341,48 @@ final class HCRunHealthImporter: ObservableObject {
         }
     }
 
+    /// HealthKit observations in the two minutes following a running
+    /// session, from its own publishing app only. The user must have
+    /// granted HR read access; missing observations are never imputed.
+    private func enrichPostRunHeartRate(_ workout: HKWorkout) {
+        let id = "healthkit:\(workout.uuid.uuidString)"
+        guard let existing = runs.first(where: { $0.id == id }),
+              existing.postRunHeartRateTrace == nil,
+              let type = HKObjectType.quantityType(forIdentifier: .heartRate)
+        else { return }
+        let stop = workout.endDate
+        let end = stop.addingTimeInterval(140)
+        let predicate = HKQuery.predicateForSamples(
+            withStart: stop, end: end,
+            options: [.strictStartDate])
+        let sort = NSSortDescriptor(
+            key: HKSampleSortIdentifierStartDate, ascending: true)
+        let publisher = workout.sourceRevision.source.bundleIdentifier
+        let query = HKSampleQuery(sampleType: type, predicate: predicate,
+                                  limit: 300, sortDescriptors: [sort]) {
+            [weak self] _, results, error in
+            guard error == nil, let samples = results as? [HKQuantitySample]
+            else { return }
+            let bpm = HKUnit.count().unitDivided(by: .minute())
+            let trace: [HCRunHeartPoint] = samples.compactMap { sample in
+                guard sample.sourceRevision.source.bundleIdentifier == publisher,
+                      sample.startDate > stop,
+                      sample.startDate <= end else { return nil }
+                let value = sample.quantity.doubleValue(for: bpm)
+                guard value.isFinite && (35...240).contains(value) else {
+                    return nil
+                }
+                return HCRunHeartPoint(at: sample.startDate, bpm: value)
+            }
+            DispatchQueue.main.async {
+                self?.patchRun(id: id) {
+                    $0.postRunHeartRateTrace = trace
+                }
+            }
+        }
+        store.execute(query)
+    }
+
     private func enrichRoute(_ workout: HKWorkout) {
         let id = "healthkit:\(workout.uuid.uuidString)"
         guard runs.first(where: { $0.id == id })?.routePoints.isEmpty == true else { return }
