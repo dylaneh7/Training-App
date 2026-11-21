@@ -72,26 +72,53 @@ enum IMUNRunningIntelligence {
             if a != b { return a > b }
             return $0.date > $1.date
         }
+        func evidenceScore(_ record: HCProgressRun) -> Int {
+            let dynamics = Set((record.sensorSeries ?? []).map(\.kind)).count
+            var score = min(30, dynamics * 5)
+            if record.heartRateTrace.count >= 8 { score += 15 }
+            if record.routePoints.count >= 8 { score += 20 }
+            if record.routeMileSplits?.isEmpty == false { score += 8 }
+            if !record.splits.isEmpty { score += 5 }
+            if record.averageStrideLengthMeters != nil { score += 3 }
+            if record.averageRunningSpeedMPS != nil { score += 3 }
+            if record.averagePowerWatts != nil { score += 3 }
+            return score
+        }
         var chosen: [HCProgressRun] = []
         for run in sorted {
-            let duplicate = chosen.contains { other in
+            let duplicateIndex = chosen.firstIndex { other in
+                if other.id == run.id { return true }
                 guard other.date == run.date,
                       let a = other.distanceMeters, let b = run.distanceMeters,
                       let ta = other.durationSeconds, let tb = run.durationSeconds,
                       a > 0, b > 0, ta > 0, tb > 0 else { return false }
                 let closeDistance = abs(a - b) / max(a, b) < 0.025
                 let closeTime = abs(ta - tb) / max(ta, tb) < 0.025
-                let sameStart: Bool
+                guard closeDistance && closeTime else { return false }
                 if let left = other.startedAt, let right = run.startedAt {
-                    sameStart = abs(left.timeIntervalSince(right)) < 180
-                } else {
-                    sameStart = true
+                    return abs(left.timeIntervalSince(right)) < 180
                 }
-                return closeDistance && closeTime && sameStart
+                // With no comparable timestamps, only near-identical source
+                // summaries are grouped. Different same-day runs remain
+                // independent unless distance and time are exceptionally close.
+                return abs(a - b) / max(a,b) < 0.005 &&
+                    abs(ta - tb) / max(ta,tb) < 0.005
             }
-            if !duplicate { chosen.append(run) }
+            if let index = duplicateIndex {
+                // Keep a source's original measurement bundle intact. Do not
+                // paste Garmin and Apple readings into an artificial workout.
+                if evidenceScore(run) > evidenceScore(chosen[index]) {
+                    chosen[index] = run
+                }
+            } else {
+                chosen.append(run)
+            }
         }
-        return chosen
+        return chosen.sorted { lhs, rhs in
+            let a = lhs.startedAt ?? .distantPast
+            let b = rhs.startedAt ?? .distantPast
+            return a == b ? lhs.date > rhs.date : a > b
+        }
     }
 
     static func weeklyLoad(_ runs: [HCProgressRun],
