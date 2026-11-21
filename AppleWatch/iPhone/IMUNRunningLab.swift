@@ -308,7 +308,8 @@ struct IMUNRunningLabDetail: View {
                 IMUNRunZoneCard(zones: zones,
                                 maximumHeartRate: maximumHeartRate,
                                 showEditor: $showMaxEditor)
-                ForEach(metricKinds, id: \.key) { item in
+                ForEach(metricKinds.indices, id: \.self) { index in
+                    let item = metricKinds[index]
                     let samples = IMUNRunningIntelligence.metric(run, kind: item.key)
                     if !samples.isEmpty {
                         IMUNRunningSeriesCard(title: item.name,
