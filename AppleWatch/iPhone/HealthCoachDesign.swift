@@ -171,7 +171,7 @@ struct HCMetricGauge: View {
 struct HCSectionTitle: View {
     let title: String
     var detail: String? = nil
-    @AppStorage("hcDesignPreset") private var presetName = "techno"
+    private let presetName = "heritage"
 
     private var isEditorial: Bool {
         presetName == "heritage" || presetName == "atelier"
