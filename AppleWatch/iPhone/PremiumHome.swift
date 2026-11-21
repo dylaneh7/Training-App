@@ -7549,77 +7549,89 @@ private struct PremiumSettingsPage: View {
                 }
     }
 
-    @ViewBuilder
-    private var settingsConnections: some View {
-                HCSectionTitle(title: "Connections")
-                HCCard {
-                    VStack(alignment: .leading, spacing: 14) {
-                        HCSyncStatus(pending: coach.cloudPendingCount,
-                                     saving: coach.savingPlan, connected: coach.signedIn)
-                        Text(coach.status)
-                            .font(.caption).foregroundStyle(HCDesign.secondary)
-                        HCOutlineButton(title: "Retry all uploads", icon: "arrow.clockwise") {
-                            coach.retryPendingWorkout()
-                            coach.retryPendingCloudSets()
-                        }
-                        HCOutlineButton(title: "Refresh & send workout to Watch",
-                                        icon: "applewatch") {
-                            coach.refreshAndSendToWatch()
-                        }
-                        HCOutlineButton(title: "Check Watch connection",
-                                        icon: "antenna.radiowaves.left.and.right") {
-                            coach.checkWatchConnection()
-                        }
-                        Text(coach.watchConnectionDetails)
-                            .font(.caption2)
-                            .foregroundStyle(HCDesign.aqua)
-                            .fixedSize(horizontal: false, vertical: true)
-                        Text(coach.watchSyncStatus)
-                            .font(.caption2)
-                            .foregroundStyle(HCDesign.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                        Text(coach.cloudWorkoutStatus)
-                            .font(.caption2)
-                            .foregroundStyle(HCDesign.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                        Text("Apple Health · " + appleHealth.status)
-                            .font(.caption2)
-                            .foregroundStyle(HCDesign.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                        Text("Background Watch transfers · " + coach.lastBackgroundTransfer)
-                            .font(.caption2)
-                            .foregroundStyle(HCDesign.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                        if let confirmed = coach.watchLastAcknowledgedAt {
-                            Text("Watch confirmed receipt " +
-                                 confirmed.formatted(date: .omitted, time: .shortened))
-                                .font(.caption2)
-                                .foregroundStyle(HCDesign.good)
-                        }
-                        if !coach.signedIn {
-                            PremiumLogin()
-                        } else {
-                            HCOutlineButton(title: "Sign out", icon: "rectangle.portrait.and.arrow.right") {
-                                coach.logout()
-                            }
-                        }
-                    }
-                }
-                HStack {
-                    Image(systemName: "checkmark.seal")
-                        .foregroundStyle(HCDesign.aqua)
-                    Text("imun " +
-                         (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?") +
-                         " · build " +
-                         (Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "?"))
-                        .font(.caption2)
-                        .foregroundStyle(HCDesign.secondary)
-                    Spacer()
-                }
-                .padding(.top, 7)
-                Spacer(minLength: 30)
+    // Breaking connection diagnostics into small subviews avoids large
+    // expression-checking costs in Xcode's SwiftUI result builder.
+    private var connectionControls: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HCSyncStatus(pending: coach.cloudPendingCount,
+                         saving: coach.savingPlan, connected: coach.signedIn)
+            Text(coach.status)
+                .font(.caption)
+                .foregroundStyle(HCDesign.secondary)
+            HCOutlineButton(title: "Retry all uploads", icon: "arrow.clockwise") {
+                coach.retryPendingWorkout()
+                coach.retryPendingCloudSets()
+            }
+            HCOutlineButton(title: "Refresh & send workout to Watch", icon: "applewatch") {
+                coach.refreshAndSendToWatch()
+            }
+            HCOutlineButton(title: "Check Watch connection",
+                            icon: "antenna.radiowaves.left.and.right") {
+                coach.checkWatchConnection()
+            }
+        }
     }
 
+    private var connectionDiagnostics: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(coach.watchConnectionDetails)
+                .foregroundStyle(HCDesign.aqua)
+            Text(coach.watchSyncStatus)
+            Text(coach.cloudWorkoutStatus)
+            Text("Apple Health · " + appleHealth.status)
+            Text("Background Watch transfers · " + coach.lastBackgroundTransfer)
+            if let confirmed = coach.watchLastAcknowledgedAt {
+                Text("Watch confirmed receipt " +
+                     confirmed.formatted(date: .omitted, time: .shortened))
+                    .foregroundStyle(HCDesign.good)
+            }
+        }
+        .font(.caption2)
+        .foregroundStyle(HCDesign.secondary)
+        .fixedSize(horizontal: false, vertical: true)
+    }
+
+    @ViewBuilder
+    private var connectionAccount: some View {
+        if !coach.signedIn {
+            PremiumLogin()
+        } else {
+            HCOutlineButton(title: "Sign out",
+                            icon: "rectangle.portrait.and.arrow.right") {
+                coach.logout()
+            }
+        }
+    }
+
+    private var connectionVersion: some View {
+        HStack {
+            Image(systemName: "checkmark.seal")
+                .foregroundStyle(HCDesign.aqua)
+            Text("imun " +
+                 (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?") +
+                 " · build " +
+                 (Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "?"))
+                .font(.caption2)
+                .foregroundStyle(HCDesign.secondary)
+            Spacer()
+        }
+        .padding(.top, 7)
+    }
+
+    private var settingsConnections: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HCSectionTitle(title: "Connections")
+            HCCard {
+                VStack(alignment: .leading, spacing: 14) {
+                    connectionControls
+                    connectionDiagnostics
+                    connectionAccount
+                }
+            }
+            connectionVersion
+            Spacer(minLength: 30)
+        }
+    }
 
     var body: some View {
         ScrollView {
