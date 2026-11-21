@@ -1114,19 +1114,29 @@ final class PhoneWorkoutBridge: NSObject, ObservableObject, WCSessionDelegate {
         var unique: [HCProgressRun] = []
         for candidate in all {
             let same = unique.contains { previous in
-                guard previous.date == candidate.date else { return false }
                 if previous.id == candidate.id { return true }
-                if let first = previous.startedAt, let second = candidate.startedAt,
-                   abs(first.timeIntervalSince(second)) < 180 {
-                    return true
+                // Preserve one session's Apple Watch, Garmin and Tredict
+                // representations independently for sensor comparison.
+                // Deduping *mileage* across them happens in Running Lab.
+                guard previous.date == candidate.date,
+                      previous.source == candidate.source else {
+                    return false
                 }
-                // Legacy/connected activity logs don't always include precise
-                // start times; compare known distance AND duration together.
-                if let pMeters = previous.distanceMeters, let cMeters = candidate.distanceMeters,
-                   let pTime = previous.durationSeconds, let cTime = candidate.durationSeconds {
-                    return abs(pMeters - cMeters) < 120 && abs(pTime - cTime) < 90
+                if let first = previous.startedAt, let second = candidate.startedAt {
+                    guard abs(first.timeIntervalSince(second)) <= 90 else {
+                        return false
+                    }
                 }
-                return false
+                guard let priorDistance = previous.distanceMeters,
+                      let newDistance = candidate.distanceMeters,
+                      let priorDuration = previous.durationSeconds,
+                      let newDuration = candidate.durationSeconds,
+                      priorDistance > 0, newDistance > 0,
+                      priorDuration > 0, newDuration > 0 else {
+                    return false
+                }
+                return abs(priorDistance - newDistance) / max(priorDistance, newDistance) < 0.01 &&
+                    abs(priorDuration - newDuration) / max(priorDuration, newDuration) < 0.01
             }
             if !same { unique.append(candidate) }
         }
