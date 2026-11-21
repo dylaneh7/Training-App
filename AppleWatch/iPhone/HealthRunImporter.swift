@@ -168,6 +168,7 @@ final class HCRunHealthImporter: ObservableObject {
                             item.heartRateTrace = stored.heartRateTrace
                             item.routePoints = stored.routePoints
                             item.sensorSeries = stored.sensorSeries
+                            item.postRunHeartRateTrace = stored.postRunHeartRateTrace
                             item.averageStrideLengthMeters = stored.averageStrideLengthMeters
                             item.averageGroundContactTimeMS = stored.averageGroundContactTimeMS
                             item.averageVerticalOscillationCM = stored.averageVerticalOscillationCM
@@ -199,6 +200,7 @@ final class HCRunHealthImporter: ObservableObject {
                     }
                     for workout in workouts.prefix(8) {
                         self.enrichRunningDynamics(workout)
+                        self.enrichPostRunHeartRate(workout)
                     }
                 }
                 self.isLoading = false
